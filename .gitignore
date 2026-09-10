@@ -1,0 +1,48 @@
+# Local Python environment and caches
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Runtime state, temporary output and logs
+.wf/
+temp/
+*.log
+
+# Research inputs and generated project artifacts.
+# Papers carry patient-derived data and move at a different pace from the engine, so they are
+# never part of engine history. Version each paper in its own repo: git init inside
+# papers/<slug>/. To track one here deliberately, add e.g. !papers/my-paper/
+project/**
+!project/.gitkeep
+papers/**
+
+# The user's own research material, dropped into the workspace root. Unpublished topic work
+# and source data - not part of the engine, and not ours to publish.
+胆/
+*.xlsx
+*.docx
+*.pdf
+
+# Credentials and local configuration
+.env
+.env.*
+*.pem
+*.key
+
+# Credentials. mcp.json holds MCP server config and in practice carries API tokens
+# inline, so it is never committed. Keep a redacted mcp.example.json instead.
+.kiro/settings/mcp.json
+**/mcp.json
+!**/mcp.example.json
+
+# Local build output
+dist/
+*.zip
+
+# Windows and editor metadata
+Thumbs.db
+Desktop.ini
+.DS_Store
+.idea/
+.vscode/

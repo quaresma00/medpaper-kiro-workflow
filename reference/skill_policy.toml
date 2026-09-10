@@ -1,0 +1,440 @@
+# ==============================================================================
+# Skill arbitration policy
+# ==============================================================================
+# A general medical-research skill suite may be installed at the user level. Some of its
+# skills strengthen this pipeline; others quietly replace a stage and leave its gate
+# unsatisfiable. This file decides which is which, and tools/hooks/skill_guard.py enforces it.
+#
+# The test applied throughout:
+#   Does the skill produce an artifact that a stage DECLARES as its output?
+#     -> blocked, unless its output lands at the declared path and passes that gate.
+#   Does it produce analysis, a review, or something the pipeline does not cover?
+#     -> allow.
+#   Does it produce a declared artifact but is genuinely useful as a helper inside a stage?
+#     -> gated: ask first, so the operator confirms the output still lands correctly.
+#
+# verdict:
+#   blocked  the guard refuses activation and prints the pipeline route instead
+#   gated    the guard asks for confirmation, quoting where it may legitimately be used
+#   allow    no interference
+#
+# Anything not listed here is allowed. Edit this file, not the guard.
+# ==============================================================================
+
+[meta]
+version = "2.0.0"
+default = "allow"
+
+# ==============================================================================
+# Capability arbitration
+# ==============================================================================
+# Skills are not the only thing that can wander off the pipeline. Any capability the host
+# offers - a skill, an MCP server, a plugin, an image generator, a web browser - has to fit
+# the same contract, so the rules are stated once here rather than per skill.
+#
+# 1. The pipeline is the sole workflow orchestrator. Stage order, gate state and the handoff
+#    log live in papers/<slug>/.wf/ and are changed only through tools/wf.py. A capability may
+#    produce an artifact inside a stage; it may never decide what happens next.
+#
+# 2. Any capability that writes an artifact a stage declares must be registered in this file
+#    with a verdict before it is used. An unregistered capability that writes to a declared
+#    output path is indistinguishable from drift, and the gate will read its output as
+#    unexplained. `python tools/hooks/skill_guard.py --audit` lists what is registered.
+#
+# 3. Image generation and multimodal editing are review-only for scientific figures. Such a
+#    capability may act as a second visual critic on a rendered PNG - describing what it sees,
+#    flagging unreadable labels, poor contrast, or a misleading axis. It must not redraw,
+#    inpaint, upscale, restyle or otherwise regenerate a figure that carries data. A generated
+#    or edited plot no longer corresponds to 03_analysis/results/*.json, which makes it
+#    fabricated data wearing the shape of a chart. Fix the plotting script and re-render.
+#
+# 4. Nothing containing patient-level, private or credential data may be sent to an external
+#    capability without explicit user authorization, whatever its stated retention policy.
+#
+# 5. A capability that cannot show its work does not satisfy a gate. Retrieval must leave a
+#    cached payload; a statistic must land in a results JSON; a visual check must name what
+#    was seen. "The tool said so" is not evidence.
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# BLOCKED - replaces a stage, writes elsewhere, gate can never go green
+# ------------------------------------------------------------------------------
+
+[[skill]]
+name = "write-paper"
+verdict = "blocked"
+replaced_by = "S08 Methods, S09 Results, S14 Introduction, S16 Discussion"
+reason = """A competing 8-phase IMRAD workflow that drafts whole manuscripts with no gates.
+It writes several sections at once, which violates the one-section-per-stage rule, and its
+numbers carry no results-JSON provenance."""
+
+[[skill]]
+name = "orchestrate"
+verdict = "blocked"
+replaced_by = "python tools/wf.py status"
+reason = """A router. It decides which skill handles an ambiguous research request, which is
+exactly the decision the stage card already makes. Letting it route sends the work around the
+pipeline instead of through it - the single most likely way to drift."""
+
+[[skill]]
+name = "manage-project"
+verdict = "blocked"
+replaced_by = "wf init, wf status, wf note, project/.wf/"
+reason = """Its own init/status/sync-memory commands maintain a second project state and a
+second set of memory files. Two state machines means neither is trustworthy."""
+
+[[skill]]
+name = "intake-project"
+verdict = "blocked"
+replaced_by = "S01 intake"
+reason = "Scaffolds a competing project layout and memory files; S01 produces idea.json and notes.md."
+
+[[skill]]
+name = "make-figures"
+verdict = "blocked"
+replaced_by = "S11 + tools/figures/ (style.py, recipes.py, qc.py)"
+reason = """Renders to its own paths, produces no qc_report.json, and performs no archetype
+element detection. figures_match_plan and figures_qc_pass cannot pass on its output."""
+
+[[skill]]
+name = "search-lit"
+verdict = "blocked"
+replaced_by = "python tools/pubmed/client.py search"
+reason = """Runs its own PubMed retrieval. The raw payload never reaches
+06_refs/cache/scan_manifest.json, so pubmed_cache_fresh reports that no search was ever run.
+The cached payload IS the evidence; a search without one does not count."""
+
+[[skill]]
+name = "medsci-lit-api"
+verdict = "blocked"
+replaced_by = "python tools/pubmed/client.py, tools/pubmed/build_library.py"
+reason = "Same as search-lit: a parallel retrieval path that leaves no cached evidence."
+
+[[skill]]
+name = "fulltext-retrieval"
+verdict = "blocked"
+replaced_by = "python tools/pubmed/fulltext.py"
+reason = """Fetches PDFs outside 06_refs/fulltext/ and does not record the retrieval route in
+deepread_index.json, which deepread_complete requires."""
+
+[[skill]]
+name = "fulltext-batch"
+verdict = "blocked"
+replaced_by = "python tools/pubmed/fulltext.py --all-deepread"
+reason = "Same as fulltext-retrieval, at higher volume."
+
+[[skill]]
+name = "manage-refs"
+verdict = "blocked"
+replaced_by = "S13 + tools/pubmed/build_library.py --export"
+reason = """Rewrites references, renders citations and can inject Zotero field codes. It does
+not write 06_refs/verified.json, so every citekey reads as unverified, and hand-edited
+refs.bib breaks bib_ris_match_library."""
+
+[[skill]]
+name = "polish-language"
+verdict = "blocked"
+replaced_by = "S19 + python tools/text/polish.py"
+reason = """Edits manuscript prose without taking the pre-polish snapshot, so
+polish_preserves_facts has nothing to diff against and cannot prove a number or citation
+survived the rewrite."""
+
+[[skill]]
+name = "humanize"
+verdict = "blocked"
+replaced_by = "S19 + python tools/text/polish.py"
+reason = "Same as polish-language: rewrites prose with no fact-preservation guarantee."
+
+[[skill]]
+name = "academic-aio"
+verdict = "blocked"
+replaced_by = "S17 front matter, S19 polish"
+reason = """Rewrites titles and abstracts for search-engine optimisation. The abstract's
+numbers must trace to results JSON and match the Results section exactly; an SEO rewrite
+carries no such guarantee."""
+
+[[skill]]
+name = "find-journal"
+verdict = "blocked"
+replaced_by = "S18 journal selection"
+reason = """Ranks against a bundled profile library whose impact-factor and APC figures are
+point-in-time. S18 requires the live author instructions to be fetched and snapshotted, and
+guidelines_sourced checks for that snapshot."""
+
+[[skill]]
+name = "sync-submission"
+verdict = "blocked"
+replaced_by = "S20 bundle assembly"
+reason = "Builds a competing submission manifest; bundle_complete checks its own manifest.json."
+
+[[skill]]
+name = "write-protocol"
+verdict = "blocked"
+replaced_by = "S03 protocol v1, S06 protocol final"
+reason = """Produces a different protocol structure. The gate checks for specific headings,
+including 'Deviations from protocol v1', which is what keeps a retrofitted protocol honest."""
+
+[[skill]]
+name = "analyze-stats"
+verdict = "blocked"
+replaced_by = "S05 exploratory analysis"
+reason = """Generates analysis code with no results-JSON dump contract. Every downstream
+number then fails numbers_have_provenance, and it also produces figures, which S05 forbids."""
+
+[[skill]]
+name = "meta-analysis"
+verdict = "blocked"
+replaced_by = "S01-S20, with design = meta-analysis"
+reason = """A complete parallel pipeline (protocol, screening, extraction, risk of bias,
+synthesis, PRISMA). The pipeline supports a meta-analysis design; running both means two
+sets of artifacts and no working gate. Use its RoB and synthesis knowledge as reading, not
+as a workflow."""
+
+# ------------------------------------------------------------------------------
+# GATED - useful inside a stage, must not become the stage
+# ------------------------------------------------------------------------------
+
+[[skill]]
+name = "check-reporting"
+verdict = "gated"
+use_at = "S12 reconcile, S19 polish"
+reason = """Genuinely fills a gap: the pipeline records which reporting guideline applies but
+never checks it item by item. Run it read-only against the manuscript and fix findings
+through the normal stage edits. Do not let it rewrite sections."""
+
+[[skill]]
+name = "verify-refs"
+verdict = "gated"
+use_at = "S13, as a second opinion"
+reason = """Audit-only, so it is safe, but it writes qc/reference_audit.json which no gate
+reads. tools/pubmed/verify.py remains the authority for 06_refs/verified.json."""
+
+[[skill]]
+name = "calc-sample-size"
+verdict = "gated"
+use_at = "S03 protocol v1"
+reason = "Fine for the power calculation; the result belongs in protocol_v1.md under 'Sample size / power'."
+
+[[skill]]
+name = "design-study"
+verdict = "gated"
+use_at = "S03, S06"
+reason = """Its validity review (leakage, comparator design, analysis unit) is useful input to
+the protocol. It must not become the protocol document."""
+
+[[skill]]
+name = "define-variables"
+verdict = "gated"
+use_at = "S03 protocol v1"
+reason = "Literature-grounded variable definitions belong in protocol_v1.md under 'Variables'."
+
+[[skill]]
+name = "deidentify"
+verdict = "gated"
+use_at = "S04 data acquisition"
+reason = """Runs locally with no network or LLM call, which is the right way to handle PHI.
+Record what was removed in 02_data/provenance.md."""
+
+[[skill]]
+name = "generate-codebook"
+verdict = "gated"
+use_at = "S04 data acquisition"
+reason = "Useful, provided the output lands at 02_data/codebook.md, which S04 declares."
+
+[[skill]]
+name = "clean-data"
+verdict = "gated"
+use_at = "S04 data acquisition"
+reason = """Its cleaning code must be written into 03_analysis/code/ and write to
+02_data/derived/. Raw files stay immutable."""
+
+[[skill]]
+name = "version-dataset"
+verdict = "gated"
+use_at = "S04 data acquisition"
+reason = "Content hashing complements source_hash in dataset_summary.json rather than replacing it."
+
+[[skill]]
+name = "self-review"
+verdict = "gated"
+use_at = "after S19, before S20"
+reason = """A pre-submission reviewer pass is valuable. Keep it read-only: it must not edit
+the manuscript, and its R0 numbering scheme must not start a parallel revision workflow."""
+
+[[skill]]
+name = "lit-sync"
+verdict = "gated"
+use_at = "after S13"
+reason = """Syncing to Zotero and Obsidian is fine one-way, out of 06_refs/. It must not
+write back into refs.bib or library.json."""
+
+[[skill]]
+name = "batch-cohort"
+verdict = "gated"
+use_at = "S05 exploratory analysis"
+reason = """Generating many analysis scripts from one template is legitimate, but each script
+must dump to 03_analysis/results/*.json or its numbers have no provenance."""
+
+[[skill]]
+name = "replicate-study"
+verdict = "gated"
+use_at = "S03, S05"
+reason = "Method extraction from a source paper is useful input; the generated code still has to meet the S05 contract."
+
+[[skill]]
+name = "cross-national"
+verdict = "gated"
+use_at = "S03, S05"
+reason = "Harmonisation tables are useful; the analysis output still has to meet the S05 contract."
+
+[[skill]]
+name = "review-paper"
+verdict = "gated"
+use_at = "only for a narrative or scoping review, not an original article"
+reason = """A different article type with a different skeleton. If the project is an original
+research article, this competes with S07-S16. Confirm which you are writing."""
+
+[[skill]]
+name = "fill-protocol"
+verdict = "gated"
+use_at = "after S03, for the institutional IRB form"
+reason = "Renders protocol content into a Word template. Source content comes from protocol_v1.md."
+
+# ------------------------------------------------------------------------------
+# ALLOW - different domain, different deliverable, or a phase the pipeline omits
+# ------------------------------------------------------------------------------
+
+[[skill]]
+name = "peer-review"
+verdict = "allow"
+reason = "Reviews someone else's manuscript. Never touches this project's artifacts."
+
+[[skill]]
+name = "revise"
+verdict = "allow"
+reason = "Post-submission response to reviewers, which the pipeline ends before (S20 is submission)."
+
+[[skill]]
+name = "present-paper"
+verdict = "allow"
+reason = "Slides and speaker notes. A different deliverable entirely."
+
+[[skill]]
+name = "render-pdf-doc"
+verdict = "allow"
+reason = "Explicitly excludes manuscripts with a bibliography; used for proposals and handouts."
+
+[[skill]]
+name = "fill-icmje-coi"
+verdict = "allow"
+reason = "Generates per-author COI forms, which S20 needs and the pipeline does not produce."
+
+[[skill]]
+name = "grant-builder"
+verdict = "allow"
+reason = "Grant proposals. A different deliverable."
+
+[[skill]]
+name = "find-cohort-gap"
+verdict = "allow"
+reason = "Topic discovery, used before S01. Feeds the idea rather than competing with a stage."
+
+[[skill]]
+name = "ma-scout"
+verdict = "allow"
+reason = "Pre-protocol meta-analysis topic scouting, used before S01."
+
+[[skill]]
+name = "author-strategy"
+verdict = "allow"
+reason = "PubMed author-profile analysis. Career strategy, not manuscript production."
+
+[[skill]]
+name = "add-journal"
+verdict = "allow"
+reason = "Maintains a journal profile database. Harmless on its own; S18 still fetches live guidelines."
+
+[[skill]]
+name = "setup-medsci"
+verdict = "allow"
+reason = "Read-only environment diagnostic."
+
+[[skill]]
+name = "publish-skill"
+verdict = "allow"
+reason = "Skill packaging. Unrelated to manuscript production."
+
+[[skill]]
+name = "contribute"
+verdict = "allow"
+reason = "Upstream contribution helper. Unrelated to manuscript production."
+
+# Imaging and machine-learning skills: a different domain. If the paper IS an imaging-model
+# study, these are the right tools for its methods, and their outputs still have to land in
+# 03_analysis/ and pass the S05 contract.
+[[skill]]
+name = "architecture-zoo"
+verdict = "allow"
+reason = "Architecture selection guidance for imaging models."
+
+[[skill]]
+name = "model-scaffold"
+verdict = "allow"
+reason = "Builds a training repo. Its split table and metrics feed S05."
+
+[[skill]]
+name = "model-validation"
+verdict = "allow"
+reason = "Validation design and leakage auditing for imaging models."
+
+[[skill]]
+name = "model-evaluation"
+verdict = "allow"
+reason = "Held-out metric computation; its per-case results table feeds S05."
+
+[[skill]]
+name = "model-card"
+verdict = "allow"
+reason = "Model and dataset documentation, a supplementary artifact."
+
+[[skill]]
+name = "preprocess-imaging"
+verdict = "allow"
+reason = "Imaging data preparation and leakage auditing."
+
+[[skill]]
+name = "explainability"
+verdict = "allow"
+reason = "Grad-CAM and saliency auditing for imaging models."
+
+[[skill]]
+name = "uncertainty-imaging"
+verdict = "allow"
+reason = "Uncertainty quantification and OOD detection for imaging models."
+
+[[skill]]
+name = "radiomics-ml"
+verdict = "allow"
+reason = "Radiomics and tabular clinical ML pipelines."
+
+[[skill]]
+name = "mllm-eval"
+verdict = "allow"
+reason = "LLM and multimodal evaluation harness design."
+
+[[skill]]
+name = "design-ai-benchmarking"
+verdict = "allow"
+reason = "AI-versus-expert benchmarking study design."
+
+[[skill]]
+name = "find-skills"
+verdict = "allow"
+reason = """Skill discovery and installation. Harmless, but note that installing a new skill
+mid-project can reintroduce a stage competitor - re-run
+`python tools/hooks/skill_guard.py --audit` afterwards to see whether it needs a policy entry."""
+
+[[skill]]
+name = "medpaper-pipeline"
+verdict = "allow"
+reason = "This pipeline itself. Listed explicitly so the audit accounts for every installed skill."

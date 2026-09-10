@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "medpaper: block skills that replace a pipeline stage",
+      "trigger": "PreToolUse",
+      "matcher": "disclose_context",
+      "description": "Refuses activation of skills that would substitute for a pipeline stage and leave its gate unsatisfiable (write-paper, orchestrate, make-figures, search-lit and others), and asks for confirmation on skills that merely overlap a stage. Decisions come from reference/skill_policy.toml.",
+      "action": {
+        "type": "command",
+        "command": "python tools/hooks/skill_guard.py",
+        "timeout": 30
+      }
+    }
+  ]
+}

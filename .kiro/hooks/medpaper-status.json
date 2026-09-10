@@ -1,0 +1,15 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "medpaper: show pipeline state on session start",
+      "trigger": "SessionStart",
+      "description": "Prints the current pipeline stage, gate state and last handoff note at the start of every session, so the agent never has to guess where the work stopped.",
+      "action": {
+        "type": "command",
+        "command": "python tools/wf.py status --brief",
+        "timeout": 60
+      }
+    }
+  ]
+}
