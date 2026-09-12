@@ -41,7 +41,7 @@ with `tools/figures/qc.py`, always. Anything drawn through `medfigure/recipes/` 
 pipeline's `save()`, writes no sidecar, and leaves artist-level QC with nothing to read, so
 `figures_qc_pass` cannot go green. Where the two disagree on a number - column widths, the font
 floor, legend placement, panel titles, which QA engine - `reference/skill_policy.toml`
-`[figure_authority]` resolves all five, and every one resolves to this pipeline. In particular
+`[figure_authority]` records six, and every one resolves to this pipeline. In particular
 do not call `medfigure.qa.audit_medical_figure()` on a pipeline figure: it reports the
 pipeline's own SubFigure panel title as a critical failure.
 

@@ -303,7 +303,7 @@ cannot go green.
 Use it as reading and as styling, not as the renderer. Concretely: take the archetype
 definition, the mandatory-element list, the forbidden-construct list and the palette from the
 skill; build the figure with tools/figures/style.py and tools/figures/recipes.py; judge it with
-tools/figures/qc.py. See [figure_authority] above for the five numeric conflicts, all of which
+tools/figures/qc.py. See [figure_authority] above for the six recorded conflicts, all of which
 resolve to the pipeline. Do not call medfigure.qa.audit_medical_figure() on a pipeline figure -
 it flags the pipeline's own SubFigure panel titles as critical."""
 

@@ -1274,6 +1274,12 @@ def run_codex_integration() -> None:
     record("every figure-authority conflict is resolved in the pipeline's favour",
            len(conflicts) >= 5 and all(c.get("governs") == "pipeline" for c in conflicts),
            f"{len(conflicts)} conflict(s) recorded")
+    # Prose that counts the conflicts must not drift from the table it describes.
+    counted = {5: "five", 6: "six", 7: "seven", 8: "eight"}.get(len(conflicts), "")
+    record("prose citing the conflict count matches the table",
+           bool(counted) and counted in figskill["reason"]
+           and counted in (ROOT / "pipeline/stages/S11_figures.md").read_text(encoding="utf-8"),
+           f"{len(conflicts)} conflicts -> '{counted}'")
 
     # The table quotes pipeline numbers. If a target moves and the table does not, it lies.
     tgt = _reg.load().targets
