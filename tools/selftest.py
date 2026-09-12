@@ -679,6 +679,212 @@ cannot be established from these data.
 """
 
 
+REF_LIST_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<PubmedArticleSet><PubmedArticle>
+<MedlineCitation><PMID>40932817</PMID><Article>
+<ArticleTitle>Fully covered self-expandable metal stents in benign biliary stricture</ArticleTitle>
+<Abstract><AbstractText>Post-market outcomes were assessed.</AbstractText></Abstract>
+<AuthorList><Author><LastName>DePretis</LastName><ForeName>Nicolo</ForeName></Author></AuthorList>
+<Journal><JournalIssue><PubDate><Year>2025</Year></PubDate></JournalIssue><Title>Endoscopy International Open</Title></Journal>
+<ELocationID EIdType="doi">10.1055/a-2669-5801</ELocationID>
+<PublicationTypeList><PublicationType>Journal Article</PublicationType></PublicationTypeList>
+</Article>
+<CommentsCorrectionsList><CommentsCorrections RefType="Cites"><PMID>11111111</PMID></CommentsCorrections></CommentsCorrectionsList>
+</MedlineCitation>
+<PubmedData>
+<ArticleIdList>
+<ArticleId IdType="pubmed">40932817</ArticleId>
+<ArticleId IdType="pmc">PMC12417772</ArticleId>
+<ArticleId IdType="doi">10.1055/a-2669-5801</ArticleId>
+</ArticleIdList>
+<ReferenceList>
+<Reference><Citation>Weigt J. Anatomy-shaped design of a fully-covered biliary stent. 2016.</Citation>
+<ArticleIdList><ArticleId IdType="pubmed">26793789</ArticleId>
+<ArticleId IdType="pmc">PMC4713183</ArticleId>
+<ArticleId IdType="doi">10.1055/s-0034-1393583</ArticleId></ArticleIdList></Reference>
+<Reference><Citation>Lam R. Fully covered metal biliary stents: a review. 2021.</Citation>
+<ArticleIdList><ArticleId IdType="pubmed">34720527</ArticleId>
+<ArticleId IdType="pmc">8517778</ArticleId>
+<ArticleId IdType="doi">10.3748/wjg.v27.i38.6357</ArticleId></ArticleIdList></Reference>
+</ReferenceList>
+</PubmedData>
+</PubmedArticle></PubmedArticleSet>"""
+
+
+def run_reference_identity(proj: Path) -> None:
+    """A cited reference's identifiers must never be mistaken for the article's own.
+
+    Regression control for a real failure: `.//ArticleIdList/ArticleId` swept in every
+    <Reference>, the loop had no break, and the LAST cited reference's PMCID replaced the
+    article's. Full texts of four unrelated papers were downloaded, and every sha256 receipt
+    verified clean, because a hash certifies the bytes that arrived rather than the article that
+    was requested. Both halves are asserted here: the parser, and the identity check that
+    catches it even if a parser regresses.
+    """
+    import hashlib
+
+    sys.path.insert(0, str(ROOT / "tools"))
+    from pubmed import eutils as eu
+    from pubmed import fulltext as ft
+    from wfcore import refproof
+
+    section("reference identity: a bibliography is not the article")
+
+    recs = eu.parse_pubmed_xml(REF_LIST_XML)
+    record("parser returns exactly one article from a record with 2 references",
+           len(recs) == 1, f"{len(recs)} record(s)")
+    got = recs[0]
+    record("PMCID is the article's own, not the last cited reference's",
+           got["pmcid"] == "PMC12417772",
+           f"got {got['pmcid']!r}, reference PMCIDs were PMC4713183 / 8517778")
+    record("DOI is the article's own",
+           got["doi"] == "10.1055/a-2669-5801", f"got {got['doi']!r}")
+    record("PMID is the article's own, not a CommentsCorrections PMID",
+           got["pmid"] == "40932817", f"got {got['pmid']!r}")
+
+    # A bare accession in a reference was the source of the "malformed, no PMC prefix" entries.
+    record("a PMC accession is normalised to the PMC-prefixed form",
+           got["pmcid"].startswith("PMC"), got["pmcid"])
+
+    # refproof re-derives independently; both parsers must agree, and it must now carry pmcid.
+    src = refproof.parse_pubmed_payload(REF_LIST_XML)["40932817"]
+    record("the independent verifier reads the same PMCID",
+           src["pmcid"] == "PMC12417772", f"refproof got {src['pmcid']!r}")
+    record("PMCID stays out of the receipt hash, so existing receipts remain valid",
+           "pmcid" not in refproof.canonical_source(src),
+           "it is a download locator, not part of the citation")
+
+    base = {"citekey": "depretis2025fully", "pmid": "40932817", "pmcid": "PMC12417772",
+            "doi": "10.1055/a-2669-5801",
+            "title": "Fully covered self-expandable metal stents in benign biliary stricture"}
+    forged = dict(base, pmcid="PMC4713183")
+    issues = refproof.compare_entry_to_source(forged, src)
+    record("a reference's PMCID in the library is caught as a mismatch",
+           any("PMCID differs" in i for i in issues), "; ".join(issues) or "no issue raised")
+    record("the correct entry raises no PMCID complaint",
+           not any("PMCID" in i for i in
+                   refproof.compare_entry_to_source(dict(base, abstract="x"), src)),
+           "no false positive on a good entry")
+
+    # ---- identity of the payload itself ------------------------------------
+    def jats(pmid, pmcid, doi, title):
+        return (f'<article><front><article-meta>'
+                f'<article-id pub-id-type="pmid">{pmid}</article-id>'
+                f'<article-id pub-id-type="pmc">{pmcid}</article-id>'
+                f'<article-id pub-id-type="doi">{doi}</article-id>'
+                f'<title-group><article-title>{title}</article-title></title-group>'
+                f'</article-meta></front><body><p>text</p></body></article>').encode()
+
+    right = jats("40932817", "PMC12417772", "10.1055/a-2669-5801", base["title"])
+    wrong = jats("26793789", "PMC4713183", "10.1055/s-0034-1393583",
+                 "Anatomy-shaped design of a fully-covered biliary stent")
+
+    v = ft.check_identity(base, right, "xml")
+    record("the correct full text is confirmed as a match", v["identity"] == "match",
+           f"{v['identity']}: {v['identity_detail']}")
+    v = ft.check_identity(base, wrong, "xml")
+    record("the wrong paper's full text is caught as a mismatch", v["identity"] == "mismatch",
+           f"{v['identity']}: {v['identity_detail']}")
+    try:
+        ft._guard_identity(base, wrong, "xml", "http://example.test/x")
+        refused = False
+    except ft.WrongPaper:
+        refused = True
+    record("a mismatching payload is refused and never written to disk", refused,
+           "fetch raises WrongPaper instead of saving")
+
+    html_ok = (b'<html><head><meta name="citation_doi" content="10.1055/a-2669-5801">'
+               b'<meta name="citation_pmid" content="40932817"></head></html>')
+    html_bad = (b'<html><head><meta name="citation_doi" content="10.1093/jamia/ocv153">'
+                b'<meta name="citation_pmid" content="26644398"></head></html>')
+    record("HTML citation meta tags are read for identity",
+           ft.check_identity(base, html_ok, "html")["identity"] == "match")
+    record("HTML naming another article is a mismatch",
+           ft.check_identity(base, html_bad, "html")["identity"] == "mismatch")
+
+    # The asymmetry that matters: a PDF's cited DOIs are not evidence of anything.
+    pdf_self = b"%PDF-1.7 ... doi:10.1055/a-2669-5801 ... body"
+    pdf_cites_others = (b"%PDF-1.7 ... References: 10.1055/s-0034-1393583, "
+                        b"10.3748/wjg.v27.i38.6357 ... body")
+    record("a PDF containing our DOI counts as a match",
+           ft.check_identity(base, pdf_self, "pdf")["identity"] == "match")
+    v = ft.check_identity(base, pdf_cites_others, "pdf")
+    record("a PDF citing OTHER DOIs is indeterminate, never a mismatch",
+           v["identity"] == "indeterminate",
+           "treating a bibliography as identity is the original bug; it must not be repeated")
+    record("the indeterminate verdict says why the cited DOIs were ignored",
+           "cited DOIs are not evidence" in v["identity_detail"], v["identity_detail"])
+
+    # ---- the gate ----------------------------------------------------------
+    from wfcore import registry
+    from wfcore.checks import Ctx, get, load_all
+    from wfcore.state import State
+    load_all()
+    pipe = registry.load()
+    scoped = proj / "temp/refidentity"
+    (scoped / "06_refs/fulltext").mkdir(parents=True, exist_ok=True)
+    (scoped / "06_refs/deepread").mkdir(parents=True, exist_ok=True)
+    # The gate wants roughly `deepread_count` papers, so build enough to clear its floor and
+    # vary only the first one's identity verdict.
+    keys = ["depretis2025fully", "second2025paper", "third2025paper", "fourth2025paper"]
+    lib, sel = [], []
+    for n, ck in enumerate(keys):
+        (scoped / f"06_refs/fulltext/{ck}.pdf").write_bytes(pdf_self)
+        (scoped / f"06_refs/deepread/{ck}.md").write_text(
+            "# notes\n" + ("substantive deep-read content. " * 30), encoding="utf-8")
+        lib.append(dict(base, citekey=ck, pmid=str(40932817 + n)))
+        sel.append({"citekey": ck, "pmid": str(40932817 + n), "reason": "closest prior study",
+                    "access": "oa", "fulltext": f"06_refs/fulltext/{ck}.pdf",
+                    "notes": f"06_refs/deepread/{ck}.md"})
+    (scoped / "06_refs/library.json").write_text(json.dumps({"entries": lib}), encoding="utf-8")
+    (scoped / "06_refs/deepread/deepread_index.json").write_text(
+        json.dumps({"selected": sel}), encoding="utf-8")
+
+    def gate(identity: str):
+        """Set the first paper's identity verdict; the other two always verify."""
+        recs = []
+        for n, ck in enumerate(keys):
+            f = scoped / f"06_refs/fulltext/{ck}.pdf"
+            rec = {"citekey": ck, "access": "oa", "fulltext": f"06_refs/fulltext/{ck}.pdf",
+                   "sha256": hashlib.sha256(f.read_bytes()).hexdigest()}
+            verdict = identity if n == 0 else "match"
+            if verdict:
+                rec["identity"] = verdict
+                if verdict == "mismatch":
+                    rec["identity_detail"] = "DOI mismatch; payload is Weigt 2016"
+            recs.append(rec)
+        (scoped / "06_refs/fulltext/retrieval_manifest.json").write_text(
+            json.dumps({"retrievals": recs}), encoding="utf-8")
+        shutil.rmtree(scoped / ".wf", ignore_errors=True)
+        st = State(scoped, ".wf")
+        st.create(pipe.meta["name"], pipe.meta["version"], pipe.first().id)
+        return get("deepread_complete")(Ctx(pipeline=pipe, state=st, project=scoped,
+                                            stage=pipe.stage("S15_deepread"),
+                                            spec={"check": "deepread_complete"}))
+
+    r = gate("match")
+    record("S15 passes when the file is proven to be the requested article", r.ok, r.detail)
+    r = gate("mismatch")
+    record("S15 blocks a file that is a different article",
+           not r.ok and "DIFFERENT article" in r.detail, r.detail)
+    r = gate("")
+    record("S15 blocks a file whose identity was never checked",
+           not r.ok and "never proven" in r.detail, r.detail)
+    r = gate("indeterminate")
+    record("an indeterminate identity is unproven, not acceptable",
+           not r.ok, r.detail)
+
+    from wfcore import cli
+    record("deepread_complete cannot be bypassed with --force",
+           "deepread_complete" in cli.NON_OVERRIDABLE_GATES,
+           "a deep read of the wrong paper reaches the Discussion as a sourced claim")
+    record("the invariant states that a hash is not proof of identity",
+           any("never that they are the right paper" in inv
+               for inv in pipe.policy.get("invariants", [])),
+           "must survive context compaction")
+    shutil.rmtree(scoped, ignore_errors=True)
+
+
 def run_visual_deferral(proj: Path) -> None:
     """Deferring the visual pass must move the obligation to S23, never cancel it.
 
@@ -1502,7 +1708,13 @@ def run_fulltext_registration(proj: Path) -> None:
     registrations_ok = True
     for i, entry in enumerate(entries, 1):
         source = proj / "temp" / f"fixture{i}.pdf"
-        source.write_bytes(b"%PDF-1.4\n" + bytes([64 + i]) * 1800)
+        # Most publisher PDFs carry their own DOI in the text, which is what lets a registered
+        # file prove it is the requested paper. fixture4 deliberately does not, so the
+        # indeterminate path and its explicit confirmation step are exercised too.
+        body = bytes([64 + i]) * 1800
+        if i < 4:
+            body = f"doi:{entry['doi']}\n".encode() + body
+        source.write_bytes(b"%PDF-1.4\n" + body)
         p = subprocess.run(
             [sys.executable, str(tool), "register", "--citekey", entry["citekey"],
              "--file", str(source), "--access", "oa",
@@ -1543,6 +1755,33 @@ def run_fulltext_registration(proj: Path) -> None:
         return gate(Ctx(pipeline=pipe, state=state, project=proj,
                         stage=pipe.stage("S15_deepread"),
                         spec={"check": "deepread_complete"}))
+
+    # A registered file is not trusted just because a person handed it over. Three prove
+    # themselves from their own DOI; the fourth cannot, and must block until someone opens it.
+    ident = {r["citekey"]: r.get("identity") for r in manifest.get("retrievals", [])}
+    record("a registered PDF carrying its own DOI proves its identity",
+           all(ident.get(f"fixture{i}") == "match" for i in (1, 2, 3)), str(ident))
+    record("a registered PDF that cannot identify itself is indeterminate, not accepted",
+           ident.get("fixture4") == "indeterminate", str(ident.get("fixture4")))
+
+    outcome = check_deepread()
+    record("deep-read gate blocks while one file is unproven",
+           not outcome.ok and "fixture4" in outcome.detail, outcome.detail[:110])
+
+    p = subprocess.run(
+        [sys.executable, str(tool), "verify", "--citekey", "fixture4",
+         "--confirm-identity", "Totally unrelated paper about something else"],
+        capture_output=True, text=True, env=env, encoding="utf-8", errors="replace")
+    record("confirming with a title that does not match the entry is refused",
+           p.returncode != 0 and "does not match" in ((p.stdout or "") + (p.stderr or "")),
+           ((p.stdout or "") + (p.stderr or "")).strip()[-90:])
+
+    p = subprocess.run(
+        [sys.executable, str(tool), "verify", "--citekey", "fixture4",
+         "--confirm-identity", "Fixture paper 4"],
+        capture_output=True, text=True, env=env, encoding="utf-8", errors="replace")
+    record("reading the title off the file discharges an indeterminate identity",
+           p.returncode == 0, ((p.stdout or "") + (p.stderr or "")).strip()[-90:])
 
     outcome = check_deepread()
     record("registered local full texts satisfy deep-read gate", outcome.ok, outcome.detail)
@@ -2409,6 +2648,7 @@ def main() -> int:
         run_checks(proj)
         run_data_proof(proj)
         run_reference_proof(proj)
+        run_reference_identity(proj)
         run_qc(proj)
         run_visual_deferral(proj)
         run_archetypes(proj)

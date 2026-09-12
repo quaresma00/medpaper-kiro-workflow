@@ -39,6 +39,9 @@ NON_OVERRIDABLE_GATES = {
     "s19_review_release_explicit",
     # Deferring a visual review is permission to batch the look, not to skip it.
     "visual_debts_cleared",
+    # A deep read of the wrong paper is worse than a missing one: it puts confident, sourced
+    # claims about a study nobody read into the Discussion.
+    "deepread_complete",
 }
 
 

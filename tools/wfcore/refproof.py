@@ -70,13 +70,32 @@ def _source_record(article) -> dict:
         match = re.search(r"(?:19|20)\d{2}",
                           _text(article, ".//Journal/JournalIssue/PubDate/MedlineDate"))
         year = match.group(0) if match else ""
-    doi = ""
-    for item in article.findall(".//ELocationID"):
-        if item.get("EIdType") == "doi":
-            doi = (item.text or "").strip()
-    for item in article.findall(".//ArticleIdList/ArticleId"):
-        if item.get("IdType") == "doi" and not doi:
-            doi = (item.text or "").strip()
+    # Identifiers are read only from the article's own metadata. A descendant search would also
+    # sweep in the <ArticleIdList> of every cited reference under <ReferenceList>, which is how a
+    # cited paper's PMCID ended up in library.json and got fetched as if it were the article.
+    #
+    # This duplicates the logic in tools/pubmed/eutils.py on purpose. This module exists to
+    # re-derive the truth INDEPENDENTLY of the code that wrote library.json; sharing a parser
+    # would mean a parser bug produced the same wrong value on both sides and the comparison
+    # would agree with itself. Duplication here is the control, not an oversight.
+    doi, pmcid = "", ""
+    for path in ("./MedlineCitation/Article/ELocationID", "./BookDocument/Book/ELocationID"):
+        for item in article.findall(path):
+            if item.get("EIdType") == "doi" and not doi:
+                doi = (item.text or "").strip()
+    for path in ("./PubmedData/ArticleIdList", "./BookDocument/ArticleIdList",
+                 "./PubmedBookData/ArticleIdList"):
+        node = article.find(path)
+        if node is None:
+            continue
+        for item in node.findall("ArticleId"):
+            kind, value = item.get("IdType"), (item.text or "").strip()
+            if not value:
+                continue
+            if kind == "doi" and not doi:
+                doi = value
+            elif kind == "pmc" and not pmcid:
+                pmcid = value if value.upper().startswith("PMC") else f"PMC{value}"
     publication_types = [(item.text or "").strip()
                          for item in article.findall(".//PublicationTypeList/PublicationType")]
     corrections = [item.get("RefType", "") for item in
@@ -91,6 +110,7 @@ def _source_record(article) -> dict:
     return {
         "pmid": pmid,
         "doi": doi.casefold(),
+        "pmcid": pmcid.upper(),
         "title": re.sub(r"\s+", " ", title).strip().rstrip("."),
         "journal": _text(article, ".//Journal/Title"),
         "year": year,
@@ -115,6 +135,12 @@ def parse_pubmed_payload(blob: bytes | str) -> dict[str, dict]:
 
 
 def canonical_source(record: dict) -> dict:
+    """The bibliographic identity that the receipt hash binds.
+
+    PMCID is intentionally absent: it is where a copy can be downloaded, not who the paper is.
+    Including it would change every existing receipt digest and invalidate verifications that
+    are otherwise sound. compare_entry_to_source() checks it live instead.
+    """
     return {
         "pmid": str(record.get("pmid", "")),
         "doi": str(record.get("doi", "")).strip().casefold(),
@@ -136,6 +162,9 @@ def record_sha256(record: dict) -> str:
 
 def compare_entry_to_source(entry: dict, source: dict) -> list[str]:
     """Recompute all checks that determine whether a library entry is real."""
+    # Read before canonicalising: PMCID is deliberately not part of canonical_source(), so it
+    # has to come off the raw payload record.
+    source_pmcid = str(source.get("pmcid", "")).strip().upper()
     source = canonical_source(source)
     problems = []
     if not re.fullmatch(r"\d+", str(entry.get("pmid", ""))):
@@ -156,6 +185,16 @@ def compare_entry_to_source(entry: dict, source: dict) -> list[str]:
     entry_doi = str(entry.get("doi", "")).strip().casefold()
     if entry_doi != source["doi"]:
         problems.append("DOI differs from PubMed payload")
+    # PMCID is a retrieval locator, not part of the citation, so it is deliberately NOT in
+    # canonical_source() and does not participate in the receipt hash - adding it there would
+    # invalidate every receipt already issued. It is compared live against the cached payload
+    # instead, which is enough: a wrong PMCID sends fulltext.py to a different paper, and a
+    # deep read of the wrong paper is worse than a missing one.
+    entry_pmcid = str(entry.get("pmcid", "")).strip().upper()
+    if entry_pmcid and entry_pmcid != source_pmcid:
+        problems.append(
+            f"PMCID differs from PubMed payload (library {entry_pmcid or '-'}, "
+            f"payload {source_pmcid or 'none'}) - full text fetched with it is a different paper")
     if source["flags"]:
         problems.append("non-citable PubMed flag(s): " + ", ".join(source["flags"]))
     return problems

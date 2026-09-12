@@ -506,6 +506,17 @@ def deepread_complete(ctx: Ctx) -> Result:
                 digest = _file_sha256(local)
                 if digest != record.get("sha256"):
                     problems.append(f"{ck}: registered full text changed after acquisition")
+            # The hash above proves the bytes are unchanged. It does not prove they are this
+            # paper: a wrong PMCID fetches a different article and its hash verifies perfectly.
+            identity = str(record.get("identity", "")).strip()
+            if local and local.is_file():
+                if identity == "mismatch":
+                    problems.append(
+                        f"{ck}: the file is a DIFFERENT article - {record.get('identity_detail', '')}")
+                elif identity != "match":
+                    problems.append(
+                        f"{ck}: never proven to be the requested article "
+                        f"(identity={identity or 'unchecked'})")
         notes = item.get("notes")
         if not notes:
             problems.append(f"{ck}: no notes file")
@@ -521,9 +532,14 @@ def deepread_complete(ctx: Ctx) -> Result:
             "deepread_complete",
             "; ".join(problems[:8]),
             ["Fetch or register legal full text with: .\\.venv\\Scripts\\python.exe "
-             "tools\\pubmed\\fulltext.py fetch --citekey KEY"],
+             "tools\\pubmed\\fulltext.py fetch --citekey KEY",
+             "Prove an already-downloaded file is the right paper: .\\.venv\\Scripts\\python.exe "
+             "tools\\pubmed\\fulltext.py verify --all-retrieved",
+             "A DIFFERENT-article verdict means the library locator is wrong, not the download. "
+             "Rebuild library.json from a fresh EFetch; never hand-edit the PMCID."],
         )
-    return Result(True, "deepread_complete", f"{len(sel)} paper(s) fetched and read with notes on disk")
+    return Result(True, "deepread_complete",
+                  f"{len(sel)} paper(s) fetched, proven to be the requested articles, and read")
 
 
 @check("deepread_cited")

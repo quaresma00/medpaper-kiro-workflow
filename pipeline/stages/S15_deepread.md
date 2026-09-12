@@ -17,8 +17,30 @@ effect sizes with prior work. Fetch and read ~5 full texts properly.
 .\.venv\Scripts\python.exe tools/pubmed/fulltext.py fetch --citekey smith2023 --citekey lee2021
 ```
    It tries Europe PMC / PMC, Unpaywall and OpenAlex, saves the PDF or XML to
-   `06_refs/fulltext/`, and records the route, access basis and file hash in
-   `06_refs/fulltext/retrieval_manifest.json`.
+   `06_refs/fulltext/`, and records the route, access basis, file hash **and an identity
+   verdict** in `06_refs/fulltext/retrieval_manifest.json`.
+
+   **Read the identity line, not just the hash.** The hash proves the bytes have not changed
+   since download; it cannot tell you the bytes are the paper you asked for. A wrong PMCID in
+   `library.json` fetches a completely different article and its receipt still verifies clean -
+   that has actually happened here, and it put four wrong papers into a deep read. So each
+   payload is asked who it is:
+   - `identity=match` - a structured identifier in the JATS/HTML metadata agrees, or the
+     library DOI appears in the PDF. Good to read.
+   - `identity=mismatch` - the payload's own metadata names a different article. The file is
+     **refused and not saved**, and no other route is tried, because the locator is wrong
+     rather than the download. Fix `library.json` by rebuilding it from a fresh EFetch
+     (`tools/pubmed/build_library.py`). Never hand-edit a PMCID to make this go away.
+   - `identity=indeterminate` - typically an opaque PDF. Note that a PDF's *cited* DOIs prove
+     nothing either way, which is why they are ignored. Open the file, read the title on page
+     one, and record it:
+```
+.\.venv\Scripts\python.exe tools/pubmed/fulltext.py verify --citekey smith2023 --confirm-identity "<title on page 1>"
+```
+   To re-check everything already on disk without refetching:
+```
+.\.venv\Scripts\python.exe tools/pubmed/fulltext.py verify --all-retrieved
+```
 3. If a scholarly retrieval skill supplies an open-access file, or the user legally
    obtains one through institutional access, register the local copy before reading it:
 ```
@@ -63,6 +85,11 @@ effect sizes with prior work. Fetch and read ~5 full texts properly.
 ## Hard rules
 - Every selected citekey must already be in `library.json`.
 - Every selected file must have a matching retrieval-manifest record and unchanged hash.
+- Every selected file must carry `identity=match`. `deepread_complete` is non-overridable, so
+  `--force` will not move it: a deep read of the wrong paper is worse than a missing one,
+  because it puts confident sourced claims about a study nobody read into the Discussion.
+- Tell the deep-reader agent the citekey **and** the expected title, and treat a mismatch
+  report from it as authoritative over any manifest field.
 - Every selection needs a recorded reason. "Highly cited" is not a reason.
 - If a paper turns out not to matter, remove it from the index and record why - the gate at
   S16 requires every indexed paper to be cited in the Discussion.

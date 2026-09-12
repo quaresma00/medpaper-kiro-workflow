@@ -230,9 +230,41 @@ def _text(node, path: str, default: str = "") -> str:
     return "".join(el.itertext()).strip()
 
 
+# Where an article's OWN identifiers live, for both record shapes EFetch returns. Everything
+# else under a <PubmedArticle> - <ReferenceList>, <CommentsCorrectionsList> - describes *other*
+# papers, so a descendant search across the whole record cannot tell "this article" from "a
+# paper this article cites".
+_OWN_ID_LISTS = (
+    "./PubmedData/ArticleIdList",       # PubmedArticle
+    "./BookDocument/ArticleIdList",     # PubmedBookArticle
+    "./PubmedBookData/ArticleIdList",   # PubmedBookArticle, alternate placement
+)
+_OWN_ELOCATION = (
+    "./MedlineCitation/Article/ELocationID",
+    "./BookDocument/Book/ELocationID",
+)
+
+
+def _own_article_ids(art) -> list:
+    out = []
+    for path in _OWN_ID_LISTS:
+        node = art.find(path)
+        if node is not None:
+            out.extend(node.findall("ArticleId"))
+    return out
+
+
+def _own_elocation_ids(art) -> list:
+    out = []
+    for path in _OWN_ELOCATION:
+        out.extend(art.findall(path))
+    return out
+
+
 def _one_record(art, cache_file: str) -> dict:
-    pmid = _text(art, ".//MedlineCitation/PMID")
-    title = _text(art, ".//Article/ArticleTitle") or _text(art, ".//BookTitle")
+    # PubmedArticle keeps the PMID under MedlineCitation; PubmedBookArticle under BookDocument.
+    pmid = _text(art, "./MedlineCitation/PMID") or _text(art, "./BookDocument/PMID")
+    title = _text(art, "./MedlineCitation/Article/ArticleTitle") or _text(art, ".//BookTitle")
 
     parts = []
     for ab in art.findall(".//Article/Abstract/AbstractText"):
@@ -257,17 +289,31 @@ def _one_record(art, cache_file: str) -> dict:
         m = re.search(r"(19|20)\d{2}", _text(art, ".//Journal/JournalIssue/PubDate/MedlineDate"))
         year = m.group(0) if m else ""
 
-    doi = ""
-    for el in art.findall(".//ELocationID"):
-        if el.get("EIdType") == "doi":
+    # Identifiers come ONLY from the article's own metadata, never from a descendant search.
+    #
+    # The bug this replaces: ".//ArticleIdList/ArticleId" is a descendant search, so it also
+    # matched every <ArticleIdList> inside <ReferenceList> - one per cited reference. With no
+    # break and no guard, the LAST cited reference's PMCID overwrote the article's own. The
+    # library then carried a PMCID belonging to some paper in the bibliography, fulltext.py
+    # dutifully fetched that paper, and the sha256 receipt still verified clean: a hash
+    # certifies the bytes that arrived, not that they are the article that was asked for.
+    # It also explains the "malformed, no PMC prefix" entries - reference ArticleIds are
+    # often bare accession numbers.
+    #
+    # Same reasoning for ELocationID. Scope, take the first, and never trust document order.
+    doi, pmcid = "", ""
+    for el in _own_elocation_ids(art):
+        if el.get("EIdType") == "doi" and not doi:
             doi = (el.text or "").strip()
-    pmcid = ""
-    for el in art.findall(".//ArticleIdList/ArticleId"):
+    for el in _own_article_ids(art):
         t = el.get("IdType")
+        val = (el.text or "").strip()
+        if not val:
+            continue
         if t == "doi" and not doi:
-            doi = (el.text or "").strip()
-        elif t == "pmc":
-            pmcid = (el.text or "").strip()
+            doi = val
+        elif t == "pmc" and not pmcid:
+            pmcid = val if val.upper().startswith("PMC") else f"PMC{val}"
 
     ptypes = [(_p.text or "").strip() for _p in art.findall(".//PublicationTypeList/PublicationType")]
     corrections = [c.get("RefType", "") for c in art.findall(".//CommentsCorrectionsList/CommentsCorrections")]
