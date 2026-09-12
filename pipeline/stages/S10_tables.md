@@ -46,14 +46,28 @@ write_table(
 .\.venv\Scripts\python.exe project/04_tables/code/build_tables.py
 .\.venv\Scripts\python.exe tools/wf.py check
 ```
-5. Use the Codex spreadsheet capability to render and visually inspect every worksheet in
-   every generated workbook. Check clipping, wrapping, column widths, row heights, title
-   and header hierarchy, footnotes, units, decimal precision, missing-value symbols and
-   page usability. It is a QA helper only: fix the generating script, regenerate, and
-   inspect the affected workbook again; never hand-edit a generated value.
-6. After all workbooks pass visual review, record the gate:
+5. **Visual inspection - timing depends on `visual_review_mode`** (see the S11 card for why).
+   The structural checks above (`tables_threeline`, `tables_match_plan`,
+   `numbers_have_provenance`) are code and block here in both modes.
+
+   `inline` - render and visually inspect every worksheet in every generated workbook. Check
+   clipping, wrapping, column widths, row heights, title and header hierarchy, footnotes,
+   units, decimal precision, missing-value symbols and page usability. It is a QA helper
+   only: fix the generating script, regenerate, and inspect the affected workbook again;
+   never hand-edit a generated value.
+
+   `deferred` (default) - do not render the workbooks for inspection yet. Table layout is
+   re-decided at S23 anyway, where the chosen journal's format is applied and the workbooks
+   are rebuilt into the upload files that actually get inspected.
+6. Record the gate.
+
+   `inline`, after all workbooks pass visual review:
 ```
 .\.venv\Scripts\python.exe tools/wf.py decide tables_visually_confirmed YES --why "<workbooks/sheets inspected and defects corrected>"
+```
+   `deferred`:
+```
+.\.venv\Scripts\python.exe tools/wf.py decide tables_visually_confirmed DEFER --why "three-line structure, plan match and number provenance all pass by code; sheet-level layout inspection deferred to the S23 pass where the journal's table format is applied"
 ```
 7. Delete scratch files from `project/temp/`.
 

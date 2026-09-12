@@ -54,7 +54,101 @@ default = "allow"
 # 5. A capability that cannot show its work does not satisfy a gate. Retrieval must leave a
 #    cached payload; a statistic must land in a results JSON; a visual check must name what
 #    was seen. "The tool said so" is not evidence.
+#
+# 6. Where two figure authorities disagree, the one a gate can measure wins. See
+#    [figure_authority] below. A standards document can assert a number; only the pipeline's
+#    own style module and qc.py can make the render actually carry it.
 # ==============================================================================
+
+# ==============================================================================
+# Figure authority: medical-sci-figure-skill vs tools/figures/
+# ==============================================================================
+# `medical-sci-figure-skill` is installed at the user level and is the figure standard for
+# ad-hoc plotting outside this pipeline. Inside the pipeline the two overlap, and on several
+# numbers they disagree outright. Split by what is verifiable:
+#
+#   The SKILL is the authority on visual grammar - which archetype a chart is, what elements
+#   that archetype must carry, what is forbidden (dynamite plots, a box plot at n<=5, a KM
+#   curve with no risk table, "400x" written in a caption instead of an overlaid scale bar),
+#   journal palette choice, and the GraphPad-Prism aesthetic for wet-lab panels, which this
+#   pipeline has no equivalent of. Read references/figure_atlas.md and
+#   references/universal_laws.md at S11 for the chart type in hand.
+#
+#   THIS PIPELINE is the authority on everything a gate measures: physical widths, the font
+#   and line-width floors, effective dpi, output paths, the save mechanism, the sidecar that
+#   artist-level QC reads, and archetype element detection. tools/figures/style.py renders and
+#   tools/figures/qc.py judges - always, in both visual_review_mode settings.
+#
+# The pipeline already absorbed this skill's archetype taxonomy, its glyph-warning capture and
+# its tick-collision test; reference/figure-standards.md and reference/archetypes.toml credit
+# it. What follows is where they still conflict, resolved once so nobody rediscovers it midway
+# through a figure.
+# ==============================================================================
+
+[figure_authority]
+skill = "medical-sci-figure-skill"
+renders_with = "tools/figures/style.py"
+judged_by = "tools/figures/qc.py"
+
+# Conflicts, and which side governs. `resolution` is what the agent must actually do.
+[[figure_authority.conflict]]
+item = "single-column width"
+skill_says = "85 mm"
+pipeline_says = "90 mm (targets.column_width_mm_single)"
+governs = "pipeline"
+resolution = """Both are real journal values; the honest answer is that it is journal-specific.
+Keep 90/180 as the default and override from the S20 guideline extract when the chosen journal
+states otherwise: `wf config set column_width_mm_single 85`. Designing at 85 mm while qc.py
+measures effective dpi against 90 mm understates resolution by about 6 percent, which can flip
+a 300 dpi pass into a fail for no real reason."""
+
+[[figure_authority.conflict]]
+item = "double-column width"
+skill_says = "175 mm"
+pipeline_says = "180 mm (targets.column_width_mm_double)"
+governs = "pipeline"
+resolution = "Same as single column: override per journal at S20, do not hand-edit the script."
+
+[[figure_authority.conflict]]
+item = "minimum font size"
+skill_says = "5.0 pt floor"
+pipeline_says = "6.0 pt floor (targets.figure_font_pt_min)"
+governs = "pipeline"
+resolution = """The stricter floor wins. 5 pt is below the stated minimum of most medical
+publishers, and text that small does not survive CMYK print. Never shrink type to win space -
+change the gridspec ratios or the panel composition."""
+
+[[figure_authority.conflict]]
+item = "legend placement"
+skill_says = "outside the canvas via bbox_to_anchor=(1.02, 1.0)"
+pipeline_says = "its own axes-free SubFigure row"
+governs = "pipeline"
+resolution = """A bbox_to_anchor legend hangs outside its panel's rectangle, which is exactly
+what qc.py's panel tight-bbox overlap and interior-void checks flag - it lands in a sibling
+panel's space. Panel-first composition (figure-standards.md section 4) is not optional here."""
+
+[[figure_authority.conflict]]
+item = "figure and axes titles"
+skill_says = "ax.set_title and fig.suptitle both banned outright"
+pipeline_says = "no narrative titles; a short panel title via sf.suptitle is allowed"
+governs = "pipeline"
+resolution = """Agreement on substance - no narrative or explanatory text inside a panel, which
+is invariant 8. They differ only on a short panel identifier, which the pipeline puts on the
+SubFigure so it spans the panel instead of starting after the y-axis decorations. Consequence:
+do not run the skill's audit_medical_figure() on a pipeline figure, it reports that suptitle as
+a critical failure."""
+
+[[figure_authority.conflict]]
+item = "the QA engine"
+skill_says = "medfigure.qa.audit_medical_figure(fig) -> bool"
+pipeline_says = "tools/figures/qc.py, writing 05_figures/qc/qc_report.json"
+governs = "pipeline"
+resolution = """The skill's audit is a strict subset: glyphs, tick collisions, font floor, bar
+baseline, internal titles. qc.py does all of those plus effective dpi, content bbox and margin
+asymmetry, edge clipping, grey-text regions, panel overlap, dead bands, and per-archetype
+element detection - and it leaves a report the S11 gate reads. A boolean return satisfies no
+gate. Run qc.py; do not run both."""
+
 
 # ------------------------------------------------------------------------------
 # BLOCKED - replaces a stage, writes elsewhere, gate can never go green
@@ -193,6 +287,25 @@ as a workflow."""
 # ------------------------------------------------------------------------------
 # GATED - useful inside a stage, must not become the stage
 # ------------------------------------------------------------------------------
+
+[[skill]]
+name = "medical-sci-figure-skill"
+verdict = "gated"
+use_at = "S07 (choosing the archetype), S11 (writing the plot script)"
+reason = """The figure standard for this machine, and the right thing to read at S11 - its atlas
+covers wet-lab archetypes this pipeline handles thinly (dot-bar with SEM for n=3-8, paired
+dot-line, violin/raincloud, Western blot panels, IHC/IF scale bars) and it carries a
+GraphPad-Prism preset the pipeline has no equivalent of. Gated rather than allowed because
+medfigure/recipes/ can render a figure: if it does, the output bypasses tools/figures/style.py
+save(), so no sidecar is written, artist-level QC has nothing to read, and figures_qc_pass
+cannot go green.
+
+Use it as reading and as styling, not as the renderer. Concretely: take the archetype
+definition, the mandatory-element list, the forbidden-construct list and the palette from the
+skill; build the figure with tools/figures/style.py and tools/figures/recipes.py; judge it with
+tools/figures/qc.py. See [figure_authority] above for the five numeric conflicts, all of which
+resolve to the pipeline. Do not call medfigure.qa.audit_medical_figure() on a pipeline figure -
+it flags the pipeline's own SubFigure panel titles as critical."""
 
 [[skill]]
 name = "check-reporting"

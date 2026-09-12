@@ -333,6 +333,116 @@ def crop(fid: str, rows: int, cols: int, cell: str) -> int:
     return 0
 
 
+def contact_sheet(max_px: int = 1400) -> int:
+    """Tile every planned figure into one PNG so the visual pass costs one image, not N.
+
+    Reviewing 6 figures one at a time means 6 images in context. The sheet is a single load
+    at a resolution that still shows overlap, clipping, colour and clutter. Anything the
+    sheet makes you suspicious of gets a full-resolution --crop follow-up; that is the point
+    of the two-step, not a shortcut around it.
+    """
+    plan = load_plan()
+    entries = plan_figures(plan)
+    if not entries:
+        raise SystemExit("the artifact plan declares no figures")
+
+    tiles: list[tuple[str, np.ndarray]] = []
+    missing: list[str] = []
+    for e in entries:
+        png = project_root() / str(e.get("file", ""))
+        if not png.exists():
+            missing.append(str(e.get("id")))
+            continue
+        tiles.append((str(e.get("id")), read_png(png)))
+    if not tiles:
+        raise SystemExit("no rendered PNGs found - render the figures first")
+
+    cols = 1 if len(tiles) == 1 else 2
+    rows = (len(tiles) + cols - 1) // cols
+    # Downscale each tile by an integer stride: cheap, and it keeps text edges honest
+    # rather than smoothing away the aliasing we are looking for.
+    cell_w = max(1, max_px // cols)
+    scaled: list[np.ndarray] = []
+    for _, rgb in tiles:
+        stride = max(1, int(np.ceil(rgb.shape[1] / cell_w)))
+        scaled.append(rgb[::stride, ::stride])
+
+    pad, label_h = 12, 34
+    cw = max(t.shape[1] for t in scaled)
+    ch = max(t.shape[0] for t in scaled)
+    sheet = np.full((rows * (ch + label_h + pad) + pad, cols * (cw + pad) + pad, 3), 255, np.uint8)
+    placed: list[tuple[str, int, int]] = []
+    for i, (tile, (fid, _)) in enumerate(zip(scaled, tiles)):
+        r, c = divmod(i, cols)
+        y = pad + r * (ch + label_h + pad) + label_h
+        x = pad + c * (cw + pad)
+        sheet[y:y + tile.shape[0], x:x + tile.shape[1]] = tile
+        placed.append((fid, r, c))
+
+    out = project_root() / "05_figures" / "qc" / "contact_sheet.png"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    # Draw the id labels with matplotlib so the sheet is self-describing without a font blit.
+    import matplotlib.pyplot as plt
+    dpi = 100
+    fig = plt.figure(figsize=(sheet.shape[1] / dpi, sheet.shape[0] / dpi), dpi=dpi)
+    ax = fig.add_axes([0, 0, 1, 1]); ax.imshow(sheet); ax.axis("off")
+    for fid, r, c in placed:
+        ax.text(pad + c * (cw + pad), pad + r * (ch + label_h + pad) + label_h - 10,
+                fid, fontsize=13, fontweight="bold", color="#000000", va="bottom")
+    fig.savefig(str(out), dpi=dpi, facecolor="white")
+    plt.close(fig)
+
+    rel = out.relative_to(project_root()).as_posix()
+    print(f"contact sheet: {len(tiles)} figure(s) in a {rows}x{cols} grid -> project/{rel}")
+    if missing:
+        print(f"  NOT RENDERED (absent from the sheet): {', '.join(missing)}")
+    print(f"\nlook at it in one load:  read_file {out}")
+    print("then, per figure you inspected:")
+    print('  tools/figures/qc.py --confirm "Figure 1" --note "<what you saw / what you changed>"')
+    print("crop in at full resolution on anything the sheet makes you doubt:")
+    print('  tools/figures/qc.py --crop "Figure 1" --cols 2 --cell B')
+    return 0
+
+
+def confirm(fid: str, note: str) -> int:
+    """Record that a rendered figure was actually looked at.
+
+    The flag is bound to the PNG's mtime, so a re-render silently invalidates it - the same
+    binding the QC pass already uses. This exists so the report is never hand-edited, which
+    is exactly the failure mode the rest of the pipeline refuses to trust.
+    """
+    if len(note.strip()) < 20:
+        raise SystemExit("--note must say what you saw, in at least 20 characters")
+    qc_path = project_root() / "05_figures" / "qc" / "qc_report.json"
+    if not qc_path.exists():
+        raise SystemExit("no qc_report.json - run deterministic QC first: tools/figures/qc.py --all")
+    report = json.loads(qc_path.read_text(encoding="utf-8"))
+    figs = report.get("figures", [])
+    entry = next((f for f in figs if str(f.get("id")) == fid), None)
+    if entry is None:
+        have = ", ".join(str(f.get("id")) for f in figs) or "(none)"
+        raise SystemExit(f"{fid} has no QC entry. Present: {have}")
+
+    live = _mtime(entry.get("png", "") or "")
+    if live is not None and entry.get("png_mtime") is not None and live != entry["png_mtime"]:
+        raise SystemExit(
+            f"{fid} was re-rendered after its last QC run - the QC report is stale.\n"
+            "Re-run: tools/figures/qc.py --all, look at the new render, then confirm."
+        )
+    entry["visual_reviewed"] = True
+    entry["review_rounds"] = int(entry.get("review_rounds", 0)) + 1
+    entry.setdefault("review_log", []).append({"at": _now(), "note": note.strip()})
+    qc_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    pending = [str(f.get("id")) for f in figs if not f.get("visual_reviewed")]
+    print(f"{fid}: visual review recorded (round {entry['review_rounds']})")
+    print(f"  still unlooked-at: {', '.join(pending) if pending else 'none'}")
+    if not pending:
+        print('\nall figures reviewed. Now record the stage decision:')
+        print('  tools/wf.py decide figures_visually_confirmed YES --why "<per figure: what you saw>"')
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="deterministic figure QC")
     ap.add_argument("--all", action="store_true")
@@ -341,12 +451,21 @@ def main() -> int:
     ap.add_argument("--rows", type=int, default=1)
     ap.add_argument("--cols", type=int, default=2)
     ap.add_argument("--cell", default="A")
+    ap.add_argument("--contact-sheet", action="store_true",
+                    help="tile every rendered figure into one PNG for a single-load visual pass")
+    ap.add_argument("--confirm", metavar="FIGURE_ID",
+                    help="record that this figure's render was visually inspected")
+    ap.add_argument("--note", default="", help="what you saw (required with --confirm)")
     args = ap.parse_args()
 
+    if args.contact_sheet:
+        return contact_sheet()
+    if args.confirm:
+        return confirm(args.confirm, args.note)
     if args.crop:
         return crop(args.crop, args.rows, args.cols, args.cell)
     if not (args.all or args.figure):
-        ap.error("pass --all, --figure ID, or --crop ID")
+        ap.error("pass --all, --figure ID, --crop ID, --contact-sheet, or --confirm ID")
 
     plan = load_plan()
     tgt = targets()
@@ -395,8 +514,15 @@ def main() -> int:
             fails += 1
     print(f"\n{len(results) - fails}/{len(results)} figure(s) pass deterministic QC")
     print(f"report: project/05_figures/qc/qc_report.json")
-    print("\nQC is not verification. Now open each PNG and look at it, then set")
-    print('  "visual_reviewed": true  in qc_report.json for the figures you inspected.')
+    print("\nQC is not verification - it cannot judge colour semantics, legibility or clutter.")
+    if str(tgt.get("visual_review_mode", "inline")).strip().lower() == "deferred":
+        print("visual_review_mode = deferred: do not look yet. Get this green, then park the look:")
+        print('  tools/wf.py decide figures_visually_confirmed DEFER --why "QC green: <summary>"')
+        print("The whole backlog is discharged in one contact-sheet pass at S23, which")
+        print("visual_debts_cleared (non-overridable) refuses to let you skip.")
+    else:
+        print("visual_review_mode = inline: open each PNG now, then record what you saw:")
+        print('  tools/figures/qc.py --confirm "Figure 1" --note "<what you saw>"')
     return 0 if fails == 0 else 2
 
 

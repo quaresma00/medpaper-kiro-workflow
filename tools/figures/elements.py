@@ -409,18 +409,47 @@ def interior_voids(fig, renderer, max_frac: float = 0.10) -> list[dict]:
     wider than `max_frac` of the corresponding figure dimension.
     """
     out = []
-    boxes = []
+    boxes = []       # panels eligible for pairing
+    occupants = []   # anything that can legitimately fill a gap, colorbars included
     for i, ax in enumerate(_axes(fig)):
-        if ax.get_subplotspec() is None:
-            continue
         try:
             bb = ax.get_tightbbox(renderer)
         except Exception:  # noqa: BLE001
             continue
-        if bb is not None:
-            boxes.append((i, bb))
+        if bb is None:
+            continue
+        occupants.append((i, bb))
+        # A colorbar has no subplotspec, so it is not a panel and must not be paired against
+        # one. It does occupy space, though, and a colorbar between two panels is the layout
+        # working rather than a dead band, so it stays in the occupant list.
+        if ax.get_subplotspec() is None:
+            continue
+        boxes.append((i, bb))
 
     W, H = float(fig.bbox.width), float(fig.bbox.height)
+    def occupied_vertically(ba, bb2, lo, hi, skip) -> bool:
+        """Is a third panel or a colorbar sitting in the band between these two?"""
+        for j, bj in occupants:
+            if j in skip:
+                continue
+            if min(ba.x1, bb2.x1) - max(ba.x0, bb2.x0) <= 1:
+                continue
+            if min(bj.x1, max(ba.x1, bb2.x1)) - max(bj.x0, min(ba.x0, bb2.x0)) <= 1:
+                continue
+            if bj.y1 > lo and bj.y0 < hi:
+                return True
+        return False
+
+    def occupied_horizontally(ba, bb2, lo, hi, skip) -> bool:
+        for j, bj in occupants:
+            if j in skip:
+                continue
+            if min(bj.y1, max(ba.y1, bb2.y1)) - max(bj.y0, min(ba.y0, bb2.y0)) <= 1:
+                continue
+            if bj.x1 > lo and bj.x0 < hi:
+                return True
+        return False
+
     for a in range(len(boxes)):
         for b in range(a + 1, len(boxes)):
             ia, ba = boxes[a]
@@ -428,13 +457,18 @@ def interior_voids(fig, renderer, max_frac: float = 0.10) -> list[dict]:
             # vertical gap only counts when the two panels overlap horizontally
             if min(ba.x1, bb2.x1) - max(ba.x0, bb2.x0) > 1:
                 gap = max(ba.y0 - bb2.y1, bb2.y0 - ba.y1)
-                if gap > max_frac * H:
+                lo, hi = min(ba.y1, bb2.y1), max(ba.y0, bb2.y0)
+                # A gap that another panel occupies is the layout working, not a dead band.
+                # Without this, any figure of three or more stacked panels reports the middle
+                # panel as wasted space between the outer two.
+                if gap > max_frac * H and not occupied_vertically(ba, bb2, lo, hi, {ia, ib}):
                     out.append({"axes": [ia, ib], "direction": "vertical",
                                 "gap_px": round(gap, 1),
                                 "gap_pct": round(100 * gap / H, 1)})
             if min(ba.y1, bb2.y1) - max(ba.y0, bb2.y0) > 1:
                 gap = max(ba.x0 - bb2.x1, bb2.x0 - ba.x1)
-                if gap > max_frac * W:
+                lo, hi = min(ba.x1, bb2.x1), max(ba.x0, bb2.x0)
+                if gap > max_frac * W and not occupied_horizontally(ba, bb2, lo, hi, {ia, ib}):
                     out.append({"axes": [ia, ib], "direction": "horizontal",
                                 "gap_px": round(gap, 1),
                                 "gap_pct": round(100 * gap / W, 1)})

@@ -63,8 +63,17 @@ Hard rules, several mechanically enforced by the gates:
   executed code.
 - Draft scientific sections only at their active stages; S17 assembles the canonical full text.
 - Only create the outputs the stage declares; scratch lives in `temp/`.
-- Figures: `python tools/figures/qc.py --all`, then load the PNG and look at it. Reading the
+- Figures: `python tools/figures/qc.py --all` every round - that half is code and never waits.
+  *When* you look is set by `visual_review_mode`. The default `deferred` records `DEFER` at
+  S10/S11 and discharges every look in one `qc.py --contact-sheet` pass at S23, once S20 has
+  fixed the journal's column width and palette. `DEFER` means "not looked at yet" and must
+  never be reported as verified; `visual_debts_cleared` at S23 is non-overridable. Reading the
   plotting code is not verification. Figure legends must not restate the Results.
+- Figure standards, archetypes and palettes: activate the `medical-sci-figure-skill` global
+  skill and read its atlas entry for the chart type in hand. Reading and styling only -
+  `tools/figures/style.py` renders, `tools/figures/qc.py` judges, and its own
+  `audit_medical_figure()` must not be run on a pipeline figure. Width, font-floor, legend and
+  QA-engine conflicts are settled in `reference/skill_policy.toml` `[figure_authority]`.
 - No explanatory prose inside figure panels.
 - Language polishing changes wording only, never a number, a citation or a figure/table
   reference. Snapshot before the pass: `python tools/text/polish.py snapshot`.

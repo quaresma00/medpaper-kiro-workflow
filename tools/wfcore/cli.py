@@ -37,6 +37,8 @@ NON_OVERRIDABLE_GATES = {
     "citekeys_resolve",
     "revision_rounds_closed",
     "s19_review_release_explicit",
+    # Deferring a visual review is permission to batch the look, not to skip it.
+    "visual_debts_cleared",
 }
 
 
@@ -128,6 +130,25 @@ def _print_invariants(pipe) -> None:
     print("NON-NEGOTIABLE INVARIANTS")
     for i, line in enumerate(inv, 1):
         print(f"  {i}. {line}")
+    print()
+
+
+def _print_visual_debts(pipe, st) -> None:
+    """Surface parked visual reviews on every status call.
+
+    A deferred look is a promise made many stages before it comes due. Printing it here is
+    what keeps it from being lost to a context reset between S11 and S23.
+    """
+    parked = sorted(name for name, rec in (st.data.get("decisions") or {}).items()
+                    if str(rec.get("value", "")).strip() == "DEFER")
+    if not parked:
+        return
+    mode = str(pipe.targets.get("visual_review_mode", "inline")).strip().lower()
+    print(f"DEFERRED VISUAL REVIEWS  (visual_review_mode = {mode})")
+    for name in parked:
+        print(f"  !! {name} is parked - due at S23_package, before the submission bundle")
+    print("  discharge in one pass:  tools/figures/qc.py --contact-sheet")
+    print("  the S23 gate visual_debts_cleared is non-overridable; this cannot be dropped")
     print()
 
 
@@ -305,6 +326,8 @@ def cmd_status(args) -> int:
     else:
         _gate_lines([r for r in results if not r.ok])
     print()
+
+    _print_visual_debts(pipe, st)
 
     notes = st.data.get("handoff", [])
     print("LAST HANDOFF")

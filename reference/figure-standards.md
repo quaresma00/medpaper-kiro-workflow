@@ -227,3 +227,45 @@ to Discussion; do not move every removed panel sentence into the legend.
 All panel text is black or near-black (`#000000`-`#1a1a1a`) at or above the size floor.
 Greying text down is not a way to keep explanation in the figure. Every removal is logged
 to `05_figures/moved_to_legend.md` with its actual destination and reconciled in the same edit.
+
+## 7. Inspecting a render on this machine - measured facts, not guesses
+
+Migrated from a global steering rule that was retired in favour of `visual_review_mode` plus
+the `medical-sci-figure-skill` global skill. Kept because re-discovering these costs a round
+of trial and error every time.
+
+**Loading an image into context.** `read_file` accepts a PNG directly and it enters the visual
+context; there is no need to ask the user to paste anything. Supported: png, jpg, jpeg, gif,
+webp, up to about 10 MB each. Fallback order if that ever fails (different client, size limit,
+or a format like TIFF/EPS/PDF): transcode to PNG and downsample to under 10 MB with the long
+edge under about 2000 px, then `read_file`; then a vision MCP tool if one is configured; only
+then ask the user to paste. Never claim a visual check without having actually loaded the image.
+
+**Pixel measurement toolchain.** Pillow is *not* installed in this environment - `from PIL
+import Image` raises ModuleNotFoundError. `qc.py` therefore reads PNGs through
+`matplotlib.image`, which is why it has no Pillow dependency. If you need pixel work outside
+Python: inline-compiling System.Drawing in pwsh 7 fails with CS0012 (missing
+`System.Private.Windows.GdiPlus`), so write the script to a temp file and run it under
+`powershell.exe -NoProfile -ExecutionPolicy Bypass -File <script>` (Windows PowerShell 5.1 /
+.NET Framework), use `Add-Type -AssemblyName System.Drawing`, and pull pixels with
+`LockBits` + `Marshal.Copy` in one pass. Never loop `GetPixel` - it is unusably slow in
+PowerShell. Reading only width/height/resolution via `[System.Drawing.Image]::FromFile()`
+does work in pwsh 7; remember to `Dispose()`.
+
+**A PNG's stored dpi tag is not its resolution.** PNGs written by matplotlib frequently carry
+the default 96, so reading the tag and concluding "resolution too low" is wrong. Effective dpi
+is pixel width divided by the target physical width (single column 90 mm = 3.54 in, double
+180 mm = 7.09 in). A 1672 px image placed double-column is 236 dpi, which genuinely fails.
+This is what `qc.py`'s `effective_dpi` check computes.
+
+**The mid-grey text detector has a known false positive.** Blot, IHC, photomicrograph and
+heatmap panels put large areas of legitimate background in the 100-200 grey band - a measured
+example produced 222 229 mid-grey pixels entirely from membrane background, no text involved.
+A raw mid-grey pixel count therefore proves nothing. `no_grey_footnote_text` is meaningful only
+for vector-style statistical plots; on a figure containing a bitmap panel, exclude the bitmap
+rectangle first and filter by connected component and aspect ratio, or accept that leftover
+grey annotation in that panel can only be confirmed by eye - and say which it was.
+
+**Crop before squinting.** For a suspect panel of a multi-panel plate, crop it and look at the
+crop rather than zooming a whole plate: `python tools/figures/qc.py --crop "Figure 1" --cols 2
+--cell B`.

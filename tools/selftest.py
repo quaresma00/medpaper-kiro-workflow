@@ -679,6 +679,176 @@ cannot be established from these data.
 """
 
 
+def run_visual_deferral(proj: Path) -> None:
+    """Deferring the visual pass must move the obligation to S23, never cancel it.
+
+    The risk this section exists to disprove: that `visual_review_mode = "deferred"` is just a
+    quality gate with the teeth pulled out. So every assertion here is about the *debt*
+    surviving - through the S11 gate, through a re-render, and through `--force`.
+    """
+    from wfcore import cli, registry
+    from wfcore.checks import Ctx, get, load_all
+    from wfcore.state import State
+
+    load_all()
+    section("visual review: deferral moves the look, never drops it")
+
+    pipe = registry.load()
+    st = State(proj, ".wf")
+    st.load()
+    qc_rel = "05_figures/qc/qc_report.json"
+    qc_path = proj / qc_rel
+
+    def run(check_name: str, stage_id: str, mode: str, **spec):
+        pipe.targets["visual_review_mode"] = mode
+        ctx = Ctx(pipeline=pipe, state=st, project=proj,
+                  stage=pipe.stage(stage_id), spec={"check": check_name, **spec})
+        return get(check_name)(ctx)
+
+    def set_reviewed(flag: bool) -> None:
+        data = json.loads(qc_path.read_text(encoding="utf-8"))
+        for f in data.get("figures", []):
+            f["visual_reviewed"] = flag
+        qc_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    record("engine default is deferred",
+           str(registry.load().targets.get("visual_review_mode")) == "deferred",
+           "the user asked for the look to wait until submission is in sight")
+
+    # ---- the S11 decision gate ----------------------------------------------
+    # An earlier section may already have recorded this decision; drop it so the
+    # never-recorded path is what actually gets exercised here.
+    st.data.get("decisions", {}).pop("figures_visually_confirmed", None)
+    st.save()
+    r = run("visual_confirmation", "S11_figures", "deferred", name="figures_visually_confirmed")
+    record("unrecorded visual decision still blocks S11",
+           not r.ok and "has not been recorded" in r.detail, r.detail)
+    record("the block explains that DEFER is available in deferred mode",
+           any("DEFER" in h for h in r.hints), "; ".join(r.hints)[:110])
+
+    why = ("deterministic QC green for 1 figure: dpi, margins, fonts, overlap, glyphs and "
+           "archetype elements all pass; judgement of colour and clutter deferred to S23")
+    st.record_decision("figures_visually_confirmed", "DEFER", why)
+
+    r = run("visual_confirmation", "S11_figures", "deferred", name="figures_visually_confirmed")
+    record("DEFER passes S11 when mode is deferred", r.ok, r.detail)
+    record("DEFER is reported as outstanding, not as verified",
+           "outstanding" in r.detail.lower() and "parked" in r.detail.lower(), r.detail)
+
+    r = run("visual_confirmation", "S11_figures", "inline", name="figures_visually_confirmed")
+    record("DEFER is rejected when mode is inline", not r.ok, r.detail)
+
+    st.record_decision("figures_visually_confirmed", "DEFER", "too short")
+    r = run("visual_confirmation", "S11_figures", "deferred", name="figures_visually_confirmed")
+    record("DEFER with a stub rationale is rejected", not r.ok, r.detail)
+    st.record_decision("figures_visually_confirmed", "MAYBE", why)
+    r = run("visual_confirmation", "S11_figures", "deferred", name="figures_visually_confirmed")
+    record("a value that is neither YES nor DEFER is rejected", not r.ok, r.detail)
+    st.record_decision("figures_visually_confirmed", "DEFER", why)
+
+    # ---- S11's QC gate must not be softened beyond the visual flag ----------
+    set_reviewed(False)
+    r = run("figures_qc_pass", "S11_figures", "inline")
+    record("inline mode: an unlooked-at figure blocks S11", not r.ok, r.detail)
+    r = run("figures_qc_pass", "S11_figures", "deferred")
+    record("deferred mode: an unlooked-at figure does not block S11", r.ok, r.detail)
+    record("deferred pass message says the look is outstanding",
+           "defer" in r.detail.lower(), r.detail)
+
+    broken = json.loads(qc_path.read_text(encoding="utf-8"))
+    broken["figures"][0]["checks"].append(
+        {"name": "effective_dpi", "ok": False, "severity": "fail", "detail": "injected"})
+    qc_path.write_text(json.dumps(broken, indent=2, ensure_ascii=False), encoding="utf-8")
+    r = run("figures_qc_pass", "S11_figures", "deferred")
+    record("deferring does NOT excuse a deterministic QC failure", not r.ok, r.detail)
+    broken["figures"][0]["checks"] = [c for c in broken["figures"][0]["checks"]
+                                      if c.get("detail") != "injected"]
+    qc_path.write_text(json.dumps(broken, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    # ---- the S23 debt gate ---------------------------------------------------
+    r = run("visual_debts_cleared", "S23_package", "deferred")
+    record("S23 is blocked while the DEFER decision stands", not r.ok, r.detail)
+    record("S23 failure names the parked decision",
+           "figures_visually_confirmed" in r.detail, r.detail)
+    record("S23 failure hands over the one-load contact sheet",
+           any("contact-sheet" in h for h in r.hints), "; ".join(r.hints)[:120])
+
+    st.record_decision("figures_visually_confirmed", "YES",
+                       "loaded the contact sheet and Figure 1 at full size; axis units, legend "
+                       "placement and greyscale contrast all acceptable; no changes needed")
+    r = run("visual_debts_cleared", "S23_package", "deferred")
+    record("clearing the decision alone is not enough - the QC flag is a second ledger",
+           not r.ok, r.detail)
+
+    set_reviewed(True)
+    r = run("visual_debts_cleared", "S23_package", "deferred")
+    record("S23 clears once both ledgers agree the figures were seen", r.ok, r.detail)
+
+    record("visual_debts_cleared cannot be bypassed with --force",
+           "visual_debts_cleared" in cli.NON_OVERRIDABLE_GATES,
+           "a deferred look must not be droppable by an override")
+
+    # ---- the debt is visible after a context reset --------------------------
+    st.record_decision("tables_visually_confirmed", "DEFER", why)
+    import io
+    from contextlib import redirect_stdout
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        cli._print_visual_debts(pipe, st)
+    shown = buf.getvalue()
+    record("wf status reprints parked reviews so a compaction cannot lose them",
+           "tables_visually_confirmed" in shown and "S23_package" in shown, shown.strip()[:90])
+
+    # ---- the contact sheet and the confirm receipt --------------------------
+    env = {**os.environ, "MEDPAPER_PROJECT": str(proj), "MEDPAPER_ROOT": str(ROOT),
+           "PYTHONIOENCODING": "utf-8"}
+    qc = str(ROOT / "tools/figures/qc.py")
+    p = subprocess.run([sys.executable, qc, "--contact-sheet"],
+                       capture_output=True, text=True, env=env, encoding="utf-8", errors="replace")
+    sheet = proj / "05_figures/qc/contact_sheet.png"
+    record("contact sheet renders every planned figure into one image",
+           p.returncode == 0 and sheet.exists(),
+           ((p.stdout or "") + (p.stderr or "")).strip()[-160:])
+    if sheet.exists():
+        import matplotlib.image as mpimg
+        arr = mpimg.imread(str(sheet))
+        record("contact sheet is a real raster, not an empty canvas",
+               arr.ndim == 3 and arr.shape[0] > 100 and arr.shape[1] > 100,
+               f"{arr.shape}")
+
+    set_reviewed(False)
+    p = subprocess.run([sys.executable, qc, "--confirm", "Figure 1", "--note", "too short"],
+                       capture_output=True, text=True, env=env, encoding="utf-8", errors="replace")
+    record("--confirm refuses a note that says nothing", p.returncode != 0,
+           ((p.stdout or "") + (p.stderr or "")).strip()[-90:])
+
+    p = subprocess.run([sys.executable, qc, "--confirm", "Figure 1", "--note",
+                        "axis units, legend placement and greyscale contrast all fine"],
+                       capture_output=True, text=True, env=env, encoding="utf-8", errors="replace")
+    data = json.loads(qc_path.read_text(encoding="utf-8"))
+    record("--confirm records the look without hand-editing the report",
+           p.returncode == 0 and data["figures"][0].get("visual_reviewed") is True,
+           ((p.stdout or "") + (p.stderr or "")).strip()[-90:])
+    record("--confirm keeps a dated note of what was seen",
+           bool(data["figures"][0].get("review_log")),
+           str(data["figures"][0].get("review_log"))[:90])
+
+    # A re-render must invalidate the confirmation, or a stale look could ship.
+    png = proj / data["figures"][0]["png"]
+    if png.exists():
+        os.utime(png, (png.stat().st_atime, png.stat().st_mtime + 60))
+        p = subprocess.run([sys.executable, qc, "--confirm", "Figure 1", "--note",
+                            "trying to confirm against a stale QC report on purpose"],
+                           capture_output=True, text=True, env=env, encoding="utf-8",
+                           errors="replace")
+        record("--confirm refuses a report made stale by a re-render", p.returncode != 0,
+               ((p.stdout or "") + (p.stderr or "")).strip()[-100:])
+
+    # Leave the fixture as later sections expect it.
+    set_reviewed(True)
+    pipe.targets["visual_review_mode"] = "deferred"
+
+
 def run_archetypes(proj: Path) -> None:
     """The archetype gate must detect mandatory elements, not take the plan's word for it."""
     import tomllib
@@ -1083,6 +1253,55 @@ def run_codex_integration() -> None:
            "second visual critic" in policy_text and
            "must not redraw" in policy_text,
            "S11 preserves data geometry and requires a fresh render")
+
+    # ---- the external figure skill, and the conflict table that keeps it honest -------
+    import tomllib as _toml
+    from wfcore import registry as _reg
+    policy = _toml.loads((ROOT / "reference/skill_policy.toml").read_text(encoding="utf-8"))
+    entries = {s["name"]: s for s in policy.get("skill", [])}
+    figskill = entries.get("medical-sci-figure-skill")
+    record("the external figure skill is registered, not left to default-allow",
+           figskill is not None and figskill.get("verdict") == "gated",
+           str(figskill.get("verdict") if figskill else "missing"))
+    record("its entry says the pipeline still renders and judges",
+           bool(figskill) and "tools/figures/style.py" in figskill["reason"]
+           and "tools/figures/qc.py" in figskill["reason"]
+           and "not as the renderer" in figskill["reason"],
+           "reading and styling only; qc.py remains the judge")
+
+    auth = policy.get("figure_authority", {})
+    conflicts = auth.get("conflict", [])
+    record("every figure-authority conflict is resolved in the pipeline's favour",
+           len(conflicts) >= 5 and all(c.get("governs") == "pipeline" for c in conflicts),
+           f"{len(conflicts)} conflict(s) recorded")
+
+    # The table quotes pipeline numbers. If a target moves and the table does not, it lies.
+    tgt = _reg.load().targets
+    quoted = {c["item"]: c["pipeline_says"] for c in conflicts}
+    record("the conflict table still matches the live targets",
+           str(int(tgt["column_width_mm_single"])) in quoted.get("single-column width", "")
+           and str(int(tgt["column_width_mm_double"])) in quoted.get("double-column width", "")
+           and str(tgt["figure_font_pt_min"]) in quoted.get("minimum font size", ""),
+           f"single={tgt['column_width_mm_single']} double={tgt['column_width_mm_double']} "
+           f"font_min={tgt['figure_font_pt_min']}")
+    record("the table warns against running the skill's own audit on a pipeline figure",
+           any("audit_medical_figure" in c.get("resolution", "") for c in conflicts),
+           "it flags the pipeline's SubFigure panel titles as critical")
+
+    fig_card = (ROOT / "pipeline/stages/S11_figures.md").read_text(encoding="utf-8")
+    record("S11 tells the agent to activate the figure skill",
+           "medical-sci-figure-skill" in fig_card and "figure_atlas.md" in fig_card,
+           "card must name the skill and the atlas file to read")
+    record("S11 forbids the skill from becoming the renderer",
+           "never the renderer" in fig_card and "medfigure/recipes/" in fig_card,
+           "a figure drawn outside style.py save() leaves no sidecar for QC")
+
+    fig_std = (ROOT / "reference/figure-standards.md").read_text(encoding="utf-8")
+    record("the retired global rule's machine facts survived in the engine",
+           "Pillow is *not* installed" in fig_std
+           and "stored dpi tag is not its resolution" in fig_std
+           and "known false positive" in fig_std,
+           "toolchain, effective-dpi and grey-detector facts kept out of trial-and-error")
 
     from rework import resolve_route
     from wfcore import registry
@@ -2185,6 +2404,7 @@ def main() -> int:
         run_data_proof(proj)
         run_reference_proof(proj)
         run_qc(proj)
+        run_visual_deferral(proj)
         run_archetypes(proj)
         run_codex_integration()
         run_fulltext_registration(proj)

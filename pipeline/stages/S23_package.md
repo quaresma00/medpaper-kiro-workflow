@@ -6,6 +6,12 @@ as Word, with deterministic typography and no residual Pandoc/Word theme defects
 builds the package; S24 is the user's final content/format review and S25 is the independent
 journal-guideline audit.
 
+This is also **the visual checkpoint for the whole run**. Under the default
+`visual_review_mode = "deferred"`, the figure and table looks parked at S10/S11 are discharged
+here in one pass (step 8) - on final renders, with the journal's column width, font floor and
+palette already fixed by S20. `visual_debts_cleared` is non-overridable, so nothing ships
+unlooked-at.
+
 ## Procedure
 1. Freeze the journal-required item list from `guidelines_extract.md`; do not add generic
    extras. Write the journal-specific cover letter source outside the bundle at
@@ -53,10 +59,36 @@ journal-guideline audit.
 ```
 .\.venv\Scripts\python.exe tools/manuscript/build_docx.py audit --manifest project/08_submission/bundle/manifest.json --style-config project/08_submission/docx_style.json
 ```
-8. Render every final DOCX with Microsoft Word or the Codex document workflow and inspect
+8. **The consolidated visual pass. This is where every deferred look comes due.**
+   `wf status` lists what is parked; the `visual_debts_cleared` gate is non-overridable.
+
+   a. Figures, in one image load rather than one per figure:
+```
+.\.venv\Scripts\python.exe tools/figures/qc.py --contact-sheet
+```
+   Then `read_file project/05_figures/qc/contact_sheet.png`. Judge what code cannot: colour
+   semantics and colour-blind safety, greyscale legibility, legend placement over data,
+   clutter and visual hierarchy, significance-bracket placement, leftover explanatory text,
+   overall aliasing. Crop in at full resolution only where the sheet raises a doubt:
+```
+.\.venv\Scripts\python.exe tools/figures/qc.py --crop "Figure 1" --cols 2 --cell B
+```
+   Fix the plotting **script**, re-render, re-run `qc.py --all`, look again. Record each
+   figure you actually loaded, then lift the parked decision:
+```
+.\.venv\Scripts\python.exe tools/figures/qc.py --confirm "Figure 1" --note "<what you saw / changed>"
+.\.venv\Scripts\python.exe tools/wf.py decide figures_visually_confirmed YES --why "<per figure: what you saw>"
+```
+   b. Tables: inspect the rendered worksheets and the built table upload files, then
+   `.\.venv\Scripts\python.exe tools/wf.py decide tables_visually_confirmed YES --why "..."`.
+
+   c. Render every final DOCX with Microsoft Word or the document workflow and inspect
    the title/abstract, heading transitions, first/last pages, references, figure legends,
    tables, symbols, page breaks and missing glyphs. Fix the source or builder and rebuild
    only affected files.
+
+   A re-render invalidates its own confirmation: `--confirm` is bound to the PNG mtime and
+   refuses a stale report. Never confirm a figure you did not load.
 9. After visual corrections are complete and the manifest and all DOCX files are final, bind
    their visible text to this legitimate S23 build:
 ```

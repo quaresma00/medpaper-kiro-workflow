@@ -70,6 +70,11 @@ def single_section_written(ctx: Ctx) -> Result:
     for st in manuscript_stages:
         if st.index <= ctx.stage.index or ctx.state.is_done(st.id):
             continue
+        # A stage that was completed and then rewound past by `wf loop` is not running ahead.
+        # `loop` leaves downstream artifacts in place on purpose, so flagging them here would
+        # make the gate satisfiable only by deleting finished work.
+        if ctx.state.was_completed(st.id):
+            continue
         for rel in st.outputs:
             if rel.startswith("07_manuscript/") and ctx.p(rel).exists():
                 unexpected.append(f"{rel} (stage {st.id})")

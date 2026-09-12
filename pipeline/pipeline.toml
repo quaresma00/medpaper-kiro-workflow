@@ -46,7 +46,7 @@ invariants = [
   "Draft scientific sections only at their active stages; the optional supplementary Methods file belongs only to S08. S17 then assembles the canonical full_manuscript.md from the completed, gated sections.",
   "Language polishing may change wording only. Never a number, never a citation, never a figure/table reference. A snapshot is taken before the pass and the gate diffs against it.",
   "Do not create files outside the stage's declared `outputs`. Scratch work goes in project/temp/ and is deleted before `wf advance`.",
-  "Figures are verified by looking at the rendered PNG, not by reading the plotting code. Deterministic QC first, then visual.",
+  "Figures are verified by looking at the rendered PNG, not by reading the plotting code. Deterministic QC (tools/figures/qc.py) runs every round in both modes and blocks at S11. The visual pass obeys visual_review_mode: inline = look at S10/S11; deferred = record DEFER there and discharge the entire backlog in ONE consolidated pass at S23 via the contact sheet, on final renders with the journal known. Deferring batches the look, it never cancels it - visual_debts_cleared is non-overridable, so no package ships unlooked-at. Never claim a visual check you did not perform.",
   "No explanatory prose inside figure panels. Explanation belongs in the figure legend.",
   "Do not draft or insert an AI-use disclosure unless the user explicitly requests that exact content; record journal requirements only as a user-controlled compliance item.",
   "Never upload patient-level, private or credential data to an external skill, plugin or service without explicit authorization.",
@@ -91,6 +91,17 @@ figure_dpi_min = 300
 figure_font_pt_min = 6.0
 figure_line_pt_min = 0.5
 figure_legend_words_max = 180
+# When the rendered-artifact look happens. Loading an image costs context, and the loop is
+# what multiplies the cost: every re-render at S10/S11 re-loads the picture, and any later
+# change upstream (S12 reconcile, S18/S19 review, S20 journal choice -> column width, palette)
+# invalidates the look anyway.
+#   "inline"    look at each artifact at the stage that renders it.
+#   "deferred"  record DEFER at S10/S11 and discharge the whole backlog in ONE consolidated
+#               pass at S23, on final renders, with the journal already known.
+# Deferring moves the obligation, it never removes it: `visual_debts_cleared` is a
+# non-overridable S23 gate. Deterministic QC (tools/figures/qc.py) is unaffected and still
+# blocks at S11 in both modes - it is code, not eyes, so it is free to run every round.
+visual_review_mode = "deferred"
 abbreviation_centralize_threshold = 8
 abbreviation_local_words_max = 50
 journal_source_age_days_max = 90
@@ -329,9 +340,9 @@ source = "tables"
 [[stage.gate]]
 check = "temp_clean"
 [[stage.gate]]
-check = "decision_recorded"
+check = "visual_confirmation"
 name = "tables_visually_confirmed"
-allowed = ["YES"]
+artifact = "rendered tables"
 
 [[stage]]
 id = "S11_figures"
@@ -347,9 +358,9 @@ check = "figures_qc_pass"
 [[stage.gate]]
 check = "legend_no_results_restatement"
 [[stage.gate]]
-check = "decision_recorded"
+check = "visual_confirmation"
 name = "figures_visually_confirmed"
-allowed = ["YES"]
+artifact = "rendered figures"
 [[stage.gate]]
 check = "temp_clean"
 
@@ -704,6 +715,10 @@ check = "temp_clean"
 check = "md_sections"
 path = "08_submission/submission_qc.md"
 headings = ["Rendered files inspected", "Citation and cross-reference checks", "Typography and hyperlinks", "Tables and figures", "Defects resolved"]
+# Discharges every look parked by visual_review_mode = "deferred". Non-overridable: a DEFER
+# left outstanding, or a figure whose visual_reviewed flag is still false, blocks the package.
+[[stage.gate]]
+check = "visual_debts_cleared"
 [[stage.gate]]
 check = "decision_recorded"
 name = "submission_files_visually_confirmed"
@@ -794,6 +809,7 @@ globs = [
   "02_data/derived/*",
   "03_analysis/code/*",
   "03_analysis/results/*.json",
+  "03_analysis/results/number_allowlist.tsv",
   "04_tables/main/*.xlsx",
   "04_tables/supplementary/*.xlsx",
   "05_figures/code/*",

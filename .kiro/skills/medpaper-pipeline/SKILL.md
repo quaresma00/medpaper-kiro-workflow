@@ -81,6 +81,11 @@ Quality first - but most token spend here is waste, not quality.
   `reference/archetypes.toml` whole - it is 11 KB and a figure needs one entry.
 - **Read result JSONs, not raw data.** `03_analysis/results/*.json` exists so numbers are
   cheap to look up. Do not re-read `02_data/` to answer a question a results file answers.
+- **Look once, at the end, on one sheet.** With the default `visual_review_mode = "deferred"`
+  no PNG is loaded at S10/S11 at all; at S23 `python tools/figures/qc.py --contact-sheet`
+  tiles every figure into a single image, so the whole run costs one load instead of one per
+  figure per re-render. This is the largest single context saving in the pipeline, and it
+  removes no check: the obligation is tracked and the S23 gate is non-overridable.
 - **Crop before you look.** For a suspect panel of a multi-panel plate,
   `python tools/figures/qc.py --crop "Figure 1" --cols 2 --cell B`, then read the crop.
 - **Let the gate find the problem.** `wf check` names the failing file and reason. Reading
@@ -88,7 +93,8 @@ Quality first - but most token spend here is waste, not quality.
 - **Do not re-read a stage card you are already working from**, and do not read other stages'
   cards speculatively. `wf card SNN` exists for when you genuinely need one.
 
-What is never a saving: skipping the visual figure check, truncating a data pull, sampling
+What is never a saving: skipping the visual figure check (deferring it to S23 is scheduling,
+dropping it is not), truncating a data pull, sampling
 instead of full retrieval, or reviewing your own manuscript to avoid a subagent call. If
 context is genuinely running out, say so and let the user decide - do not quietly downgrade
 the work.
@@ -128,8 +134,13 @@ the work.
 4. **Draft scientific sections only at their active stages.** S17 assembles the canonical full
    manuscript; do not pre-assemble it.
 5. **Figures are verified by looking at them.** Deterministic QC first
-   (`tools/figures/qc.py`), then load the rendered PNG as an image. Reading the plotting code
-   is not verification, and claiming a visual check you did not perform is a fabrication.
+   (`tools/figures/qc.py`, every round, both modes), then load the rendered PNG as an image.
+   Reading the plotting code is not verification, and claiming a visual check you did not
+   perform is a fabrication. *When* you look is set by `visual_review_mode`: the default
+   `deferred` records `DEFER` at S10/S11 and discharges every look in one contact-sheet pass at
+   S23, once S20 has fixed the journal's column width and palette. `DEFER` means "not looked at
+   yet" and must never be reported as verified; `visual_debts_cleared` at S23 is
+   non-overridable, so nothing ships unlooked-at.
 6. **No explanatory prose inside figure panels**, and a figure legend must not restate the
    Results.
 7. **Language polishing changes wording only** - never a number, a citation or a figure/table

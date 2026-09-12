@@ -131,6 +131,16 @@ class State:
     def is_done(self, sid: str) -> bool:
         return self.status_of(sid) == "done"
 
+    def was_completed(self, sid: str) -> bool:
+        """True if the stage has ever been completed, including before a loop rewound past it.
+
+        `wf loop` deliberately leaves downstream artifacts in place, so a checker that asks
+        "does a future stage's output exist?" must distinguish an artifact produced by a stage
+        that ran ahead of itself from one produced by a stage that genuinely finished and was
+        then rewound past. Only the first is a workflow violation.
+        """
+        return bool(self.stage_info(sid).get("completed_at"))
+
     def decision(self, name: str) -> dict | None:
         return self.data.get("decisions", {}).get(name)
 

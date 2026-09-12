@@ -502,6 +502,16 @@ def _audit_sheet(wb: xlsxlite.Workbook, sh: xlsxlite.Sheet) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+def _visual_deferred(ctx: Ctx) -> bool:
+    """True when the per-render visual pass is batched to S23 instead of done here.
+
+    Single source of truth for the mode lives in checks.statecheck; imported lazily so the
+    two check modules stay independently importable.
+    """
+    from .statecheck import _visual_mode
+    return _visual_mode(ctx) == "deferred"
+
+
 @check("figures_match_plan")
 def figures_match_plan(ctx: Ctx) -> Result:
     plan = _plan(ctx)
@@ -537,18 +547,36 @@ def figures_qc_pass(ctx: Ctx) -> Result:
         return Result(False, "figures_qc_pass", f"{QC} invalid JSON: {exc}")
     figs = {str(f.get("id")): f for f in rep.get("figures", [])}
     plan = _plan(ctx)
-    problems = []
+    problems: list[str] = []
+    warnings: list[str] = []
     for e in _entries(plan, ("main_figures", "supp_figures")):
         eid = str(e.get("id"))
         f = figs.get(eid)
         if f is None:
             problems.append(f"{eid}: no QC entry")
             continue
-        failed = [c.get("name") for c in f.get("checks", []) if not c.get("ok")]
+        # Blocking failures only. A warn-severity check is a prompt for the eye, not a defect:
+        # `archetype_advisory` reports the archetype elements that have no detector and can
+        # therefore never return ok, so treating warns as blocking makes this gate unsatisfiable
+        # for every figure. Warns are surfaced in the pass message instead, and the visual-review
+        # flag below is what records that a human looked at them.
+        failed = [c.get("name") for c in f.get("checks", [])
+                  if not c.get("ok") and c.get("severity") != "warn"]
+        warned = [c.get("name") for c in f.get("checks", [])
+                  if not c.get("ok") and c.get("severity") == "warn"]
         if failed:
             problems.append(f"{eid}: failing {', '.join(failed)}")
+        if warned:
+            warnings.append(f"{eid}: {', '.join(warned)}")
         if not f.get("visual_reviewed"):
-            problems.append(f"{eid}: never visually reviewed (deterministic QC alone is not enough)")
+            # In deferred mode the look is parked for the S23 consolidated pass, so it is not a
+            # defect *here*. It stays on two ledgers (this flag and the DEFER decision) and the
+            # non-overridable visual_debts_cleared gate at S23 refuses the package until both are
+            # clean. Deterministic QC above is unaffected and still blocks.
+            if _visual_deferred(ctx):
+                warnings.append(f"{eid}: look deferred to S23")
+            else:
+                problems.append(f"{eid}: never visually reviewed (deterministic QC alone is not enough)")
     if problems:
         return Result(
             False,
@@ -559,7 +587,15 @@ def figures_qc_pass(ctx: Ctx) -> Result:
                 "Set visual_reviewed only after the rendered PNG was actually inspected.",
             ],
         )
-    return Result(True, "figures_qc_pass", f"{len(figs)} figure(s) pass QC and were visually reviewed")
+    deferred = _visual_deferred(ctx)
+    if deferred:
+        msg = f"{len(figs)} figure(s) pass deterministic QC; visual pass deferred to S23"
+    else:
+        msg = f"{len(figs)} figure(s) pass QC and were visually reviewed"
+    if warnings:
+        label = "item(s) outstanding" if deferred else "warn-severity item(s) confirmed by eye"
+        msg += f"; {len(warnings)} {label}: " + "; ".join(warnings[:4])
+    return Result(True, "figures_qc_pass", msg)
 
 
 @check("bundle_complete")
