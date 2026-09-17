@@ -3,8 +3,30 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import checks
+from . import checks, scifreeze
 from .checks import Ctx, Result
+
+# Gate specs are written against 07_manuscript/. Once the scientific record is frozen at S19 and
+# a journal variant is opened, the files a journal legitimately alters live under
+# 08_submission/manuscript/, and a gate asking "does the submitted manuscript meet the word cap"
+# must read that copy. Rewriting the spec here keeps that in one place instead of duplicating
+# every path in pipeline.toml, and it is the identity transform until a variant exists - so
+# projects that predate the freeze are unaffected.
+_PATH_KEYS = ("path", "paths")
+
+
+def _resolve_manuscript_paths(spec: dict, project: Path) -> dict:
+    if not scifreeze.variant_exists(project):
+        return spec
+    if not any(k in spec for k in _PATH_KEYS):
+        return spec
+    out = dict(spec)
+    if isinstance(out.get("path"), str):
+        out["path"] = scifreeze.resolve(project, out["path"])
+    if isinstance(out.get("paths"), list):
+        out["paths"] = [scifreeze.resolve(project, p) if isinstance(p, str) else p
+                        for p in out["paths"]]
+    return out
 
 
 def run_stage(pipeline, state, project: Path, stage) -> list[Result]:
@@ -14,6 +36,7 @@ def run_stage(pipeline, state, project: Path, stage) -> list[Result]:
         results.append(Result(True, "-", "stage declares no gate"))
         return results
     for spec in stage.gate:
+        spec = _resolve_manuscript_paths(spec, project)
         name = spec.get("check")
         fn = checks.get(name)
         if fn is None:

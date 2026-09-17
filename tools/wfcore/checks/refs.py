@@ -109,8 +109,8 @@ def _docx_text(path) -> str:
 @check("title_page_reference_count")
 def title_page_reference_count(ctx: Ctx) -> Result:
     """If a title page declares a count, bind it to citations actually used in the paper."""
-    manuscript_rel = ctx.spec.get("manuscript", "07_manuscript/full_manuscript.md")
-    title_rel = ctx.spec.get("title_page", "07_manuscript/title_page.md")
+    manuscript_rel = ctx.src(ctx.spec.get("manuscript", "07_manuscript/full_manuscript.md"))
+    title_rel = ctx.src(ctx.spec.get("title_page", "07_manuscript/title_page.md"))
     if not ctx.p(manuscript_rel).is_file():
         return Result(False, "title_page_reference_count", f"{manuscript_rel} missing")
     if not ctx.p(title_rel).is_file():

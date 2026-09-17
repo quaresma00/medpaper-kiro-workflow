@@ -885,6 +885,201 @@ def run_reference_identity(proj: Path) -> None:
     shutil.rmtree(scoped, ignore_errors=True)
 
 
+def run_scientific_freeze(proj: Path) -> None:
+    """A journal requirement must never re-edit the manuscript review already settled.
+
+    Before the freeze, S21 and S22 applied journal requirements by editing 07_manuscript/ in
+    place, so choosing a second journal churned the reviewed text and nothing recorded what had
+    drifted. These assertions cover the whole contract: the freeze is taken, it holds, the
+    variant derives from it, path resolution follows the variant, switching journals discards
+    only the variant, and content cannot be dropped to fit a word cap without authorisation.
+    """
+    from wfcore import gates, registry, scifreeze
+    from wfcore.checks import Ctx, get, load_all
+    from wfcore.state import State
+
+    load_all()
+    section("scientific freeze: journals adapt a copy, never the reviewed text")
+    scoped = proj / "temp/scifreeze"
+    for sub in ("07_manuscript", "06_refs", "05_figures", "08_submission"):
+        (scoped / sub).mkdir(parents=True, exist_ok=True)
+    body = ("# Introduction\n\nPrior work reported a hazard ratio of 1.87 [@smith2020cohort].\n\n"
+            "# Methods\n\nWe analysed 412 patients.\n\n"
+            "# Results\n\nMortality was 23.4% (Figure 1). Discrimination reached 0.781 (Table 2).\n\n"
+            "# Discussion\n\nThe estimate agrees with earlier data [@lee2021trial].\n")
+    (scoped / "07_manuscript/full_manuscript.md").write_text(body, encoding="utf-8")
+    (scoped / "07_manuscript/supplementary_methods.md").write_text(
+        "# Supplementary Methods\n\nModel fitting used penalised likelihood.\n", encoding="utf-8")
+    (scoped / "07_manuscript/statements.md").write_text(
+        "# Declarations and Statements\n\nFunding: none.\n", encoding="utf-8")
+    (scoped / "06_refs/refs.bib").write_text("@article{smith2020cohort, title={x}}\n",
+                                             encoding="utf-8")
+    (scoped / "06_refs/library.json").write_text('{"entries": []}', encoding="utf-8")
+
+    pipe = registry.load()
+
+    def run(check_name: str, stage_id: str, **spec):
+        st = State(scoped, ".wf")
+        if not st.exists():
+            st.create(pipe.meta["name"], pipe.meta["version"], pipe.first().id)
+        else:
+            st.load()
+        return get(check_name)(Ctx(pipeline=pipe, state=st, project=scoped,
+                                   stage=pipe.stage(stage_id),
+                                   spec={"check": check_name, **spec}))
+
+    # ---- before the freeze, everything behaves as it always did ------------
+    r = run("scientific_freeze_captured", "S19_human_review")
+    record("S19 refuses to close without freezing the settled science", not r.ok, r.detail)
+    r = run("scientific_freeze_intact", "S20_journal")
+    record("an unfrozen project is not reported as verified",
+           r.ok and "no scientific freeze" in r.detail, r.detail)
+    record("path resolution is the identity function before a variant exists",
+           scifreeze.resolve(scoped, "07_manuscript/full_manuscript.md")
+           == "07_manuscript/full_manuscript.md",
+           "projects that predate the freeze must keep working unchanged")
+
+    # ---- capture ------------------------------------------------------------
+    scifreeze.write_freeze(scoped)
+    r = run("scientific_freeze_captured", "S19_human_review")
+    record("the freeze covers the scientific record", r.ok, r.detail)
+    freeze = scifreeze.load_freeze(scoped)
+    record("the freeze hashes the manuscript, refs and library",
+           all(k in freeze["files"] for k in scifreeze.REQUIRED_SCIENTIFIC),
+           f"{len(freeze['files'])} file(s)")
+    record("re-freezing without --force is refused",
+           _raises(lambda: scifreeze.write_freeze(scoped)),
+           "it would discard the record of what review closed on")
+
+    r = run("scientific_freeze_intact", "S20_journal")
+    record("the freeze holds immediately after capture", r.ok, r.detail)
+
+    # ---- the thing the user actually complained about ----------------------
+    (scoped / "07_manuscript/full_manuscript.md").write_text(
+        body.replace("412 patients", "412 patients enrolled consecutively"), encoding="utf-8")
+    r = run("scientific_freeze_intact", "S22_polish")
+    record("editing the reviewed manuscript for a journal is blocked",
+           not r.ok and "full_manuscript.md" in r.detail, r.detail)
+    record("the block points at the variant instead of just refusing",
+           any("08_submission/manuscript" in h for h in r.hints), "; ".join(r.hints)[:100])
+    (scoped / "07_manuscript/full_manuscript.md").write_text(body, encoding="utf-8")
+    record("restoring the frozen text clears the block",
+           run("scientific_freeze_intact", "S22_polish").ok)
+
+    from wfcore import cli
+    record("scientific_freeze_intact cannot be bypassed with --force",
+           "scientific_freeze_intact" in cli.NON_OVERRIDABLE_GATES,
+           "otherwise the churn the freeze prevents is one flag away")
+
+    # ---- the variant --------------------------------------------------------
+    r = run("journal_variant_ready", "S20_journal")
+    record("S20 requires a journal variant once the science is frozen", not r.ok, r.detail)
+    scifreeze.open_variant(scoped, "Endoscopy International Open")
+    r = run("journal_variant_ready", "S20_journal")
+    record("opening the variant satisfies S20", r.ok, r.detail)
+    record("the variant records which journal it is for",
+           scifreeze.variant_meta(scoped).get("journal") == "Endoscopy International Open")
+    record("the variant starts as a byte-identical copy of the frozen manuscript",
+           (scoped / "08_submission/manuscript/full_manuscript.md").read_bytes()
+           == (scoped / "07_manuscript/full_manuscript.md").read_bytes())
+    record("opening a second variant over the first needs --force",
+           _raises(lambda: scifreeze.open_variant(scoped, "Gut")),
+           "switching journals discards the previous adaptation deliberately")
+
+    record("path resolution follows the variant once it exists",
+           scifreeze.resolve(scoped, "07_manuscript/full_manuscript.md")
+           == "08_submission/manuscript/full_manuscript.md",
+           "so word caps and structure are checked on what is actually submitted")
+    record("scientific-only files still resolve to the frozen copy",
+           scifreeze.resolve(scoped, "07_manuscript/results.md") == "07_manuscript/results.md",
+           "only the journal-variable files move")
+
+    # Gate specs are written against 07_manuscript; the runner must repoint them.
+    rewritten = gates._resolve_manuscript_paths(
+        {"check": "forbidden_symbols_absent",
+         "paths": ["07_manuscript/full_manuscript.md", "04_tables/table_captions.md"]}, scoped)
+    record("the gate runner repoints manuscript paths without editing pipeline.toml",
+           rewritten["paths"] == ["08_submission/manuscript/full_manuscript.md",
+                                  "04_tables/table_captions.md"],
+           str(rewritten["paths"]))
+
+    # ---- adaptation is allowed; losing content is not ----------------------
+    var = scoped / "08_submission/manuscript/full_manuscript.md"
+    var.write_text(body.replace("We analysed 412 patients.",
+                                "We analysed 412 patients consecutively."), encoding="utf-8")
+    r = run("variant_preserves_science", "S22_polish")
+    record("tightening prose in the variant is allowed", r.ok, r.detail)
+
+    var.write_text(body.replace("Discrimination reached 0.781 (Table 2).", ""), encoding="utf-8")
+    r = run("variant_preserves_science", "S22_polish")
+    record("dropping a result to fit a word cap is blocked",
+           not r.ok and "0.781" in r.detail, r.detail)
+    ok, problems, summary = scifreeze.variant_delta(scoped)
+    record("the delta report names the lost number and the word change",
+           not ok and any("0.781" in p for p in problems)
+           and summary["full_manuscript.md"]["words_delta"] < 0,
+           f"{summary['full_manuscript.md']}")
+
+    st = State(scoped, ".wf").load()
+    st.record_decision("journal_trim_authorised", "YES",
+                       "user agreed to drop the secondary discrimination statistic to meet the "
+                       "3000-word cap; it now appears in supplementary Methods")
+    r = run("variant_preserves_science", "S22_polish")
+    record("an authorised cut is accepted and says so", r.ok and "authorised" in r.detail, r.detail)
+
+    # ---- switching journals must not touch the science ---------------------
+    before = (scoped / "07_manuscript/full_manuscript.md").read_bytes()
+    scifreeze.open_variant(scoped, "Gut", force=True)
+    record("switching journals leaves the frozen manuscript byte-identical",
+           (scoped / "07_manuscript/full_manuscript.md").read_bytes() == before,
+           "this is the whole point of the split")
+    record("the fresh variant is taken from the frozen text, not the previous adaptation",
+           (scoped / "08_submission/manuscript/full_manuscript.md").read_bytes() == before,
+           "a second journal does not inherit the first journal's trims")
+    record("the new variant records the new journal",
+           scifreeze.variant_meta(scoped).get("journal") == "Gut")
+    record("the frozen record still verifies after two journal cycles",
+           run("scientific_freeze_intact", "S25_submission_audit").ok)
+
+    # ---- a variant taken from stale science is refused ---------------------
+    (scoped / "07_manuscript/full_manuscript.md").write_text(body + "\n# Extra\n\nx\n",
+                                                             encoding="utf-8")
+    record("a variant cannot be opened from drifted science",
+           _raises(lambda: scifreeze.open_variant(scoped, "Gut", force=True)),
+           "otherwise the submitted text stops tracing to what was reviewed")
+    (scoped / "07_manuscript/full_manuscript.md").write_bytes(before)
+
+    # ---- declared outputs follow the variant too ---------------------------
+    # S21 declares 07_manuscript/title_page.md but must write it into the variant, so
+    # outputs_exist has to look where the file actually belongs.
+    for name in ("full_manuscript.md", "supplementary_methods.md", "statements.md"):
+        src = scoped / "07_manuscript" / name
+        if src.is_file():
+            shutil.copy2(src, scoped / "08_submission/manuscript" / name)
+    (scoped / "00_input").mkdir(parents=True, exist_ok=True)
+    (scoped / "00_input/author_info.json").write_text('{"authors": []}', encoding="utf-8")
+    r = run("outputs_exist", "S21_authors")
+    record("a title page written only in 07_manuscript no longer satisfies S21",
+           not r.ok and "title_page.md" in r.detail, r.detail)
+    (scoped / "08_submission/manuscript/title_page.md").write_text(
+        "# Title page\n\nAuthors: A B.\n", encoding="utf-8")
+    r = run("outputs_exist", "S21_authors")
+    record("writing it into the journal variant does satisfy S21", r.ok, r.detail)
+
+    record("the invariant explains the freeze so it survives compaction",
+           any("frozen when the user releases S19" in inv
+               for inv in pipe.policy.get("invariants", [])))
+    shutil.rmtree(scoped, ignore_errors=True)
+
+
+def _raises(fn) -> bool:
+    try:
+        fn()
+        return False
+    except SystemExit:
+        return True
+
+
 def run_visual_deferral(proj: Path) -> None:
     """Deferring the visual pass must move the obligation to S23, never cancel it.
 
@@ -2649,6 +2844,7 @@ def main() -> int:
         run_data_proof(proj)
         run_reference_proof(proj)
         run_reference_identity(proj)
+        run_scientific_freeze(proj)
         run_qc(proj)
         run_visual_deferral(proj)
         run_archetypes(proj)

@@ -194,7 +194,24 @@ def allowlist() -> dict[str, str]:
     return out
 
 
+def _resolve(rel: str) -> str:
+    """Map a 07_manuscript path to the journal variant once one is open."""
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from wfcore import scifreeze
+        return scifreeze.resolve(project_root(), rel)
+    except Exception:  # noqa: BLE001 - never let path resolution break the polish tool
+        return rel
+
+
 def sections(only: str | None = None) -> list[tuple[str, str]]:
+    """The files a polish pass may rewrite.
+
+    Once a journal variant is open these resolve to 08_submission/manuscript/, because polish is
+    journal-specific work: de-AI and English tightening to fit that journal's caps and house
+    style. The frozen 07_manuscript/ copy is what the pass is measured against, so it must not
+    be in the editable set.
+    """
     proj = project_root()
     if only:
         rels = [only]
@@ -204,9 +221,9 @@ def sections(only: str | None = None) -> list[tuple[str, str]]:
         rels = LEGACY_SECTION_ORDER
     out = []
     for rel in rels:
-        p = proj / rel
+        p = proj / _resolve(rel)
         if p.exists() and p.stat().st_size > 0:
-            out.append((rel, p.read_text(encoding="utf-8", errors="replace")))
+            out.append((_resolve(rel), p.read_text(encoding="utf-8", errors="replace")))
     return out
 
 

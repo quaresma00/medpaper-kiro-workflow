@@ -53,6 +53,7 @@ invariants = [
   "Never upload patient-level, private or credential data to an external skill, plugin or service without explicit authorization.",
   "The S23 package is not final until S24 records the user's explicit request for final review and freezes the exact files, then S25 obtains one independent PASS from reader, editor and journal-compliance perspectives. Any post-confirmation change returns to S24.",
   "A user-requested revision never leaves the workflow. Route it with tools/rework.py to the earliest owning stage, update the source of truth, rebuild only true dependants, and invalidate downstream approvals. Word-only layout edits are allowed at S24 only when the S23 visible-text baseline is unchanged.",
+  "The scientific record is frozen when the user releases S19 review, and 07_manuscript/ is read-only from then on. Journal requirements - word caps, abstract shape, reference style, title page, required statements - are presentation, and are applied to the copy in 08_submission/manuscript/ that S20 opens for the chosen journal. Choosing a different journal discards that copy and takes a fresh one from the same frozen text; it never re-edits the manuscript review already settled. scientific_freeze_intact enforces this and is non-overridable. Prose may be tightened to fit a cap, but a number, citation or artifact reference that disappears is dropped content, which is a scientific decision needing the user's recorded authorisation.",
   "Repeated feedback is handled as a persisted revision round at S19 (scientific manuscript) or S24 (journal package). Interpret the feedback once into atomic items, route the batch to its earliest owner, read and rebuild only affected sources/dependants, preserve unaffected approved evidence, and still run every applicable quality gate. Token or context pressure is never permission to omit an item, shorten the scientific work or skip validation; resume from tools/rework.py status after compaction.",
   "Every initial or revised S19 scientific version must have a current, versioned third-party review ZIP and be presented with clickable locations for the manuscript, optional supplementary Methods, tables, figures and independent verdict. Remain at S19 until the user explicitly states that no further review is needed; silence, file delivery, thanks, or a generic continue instruction is not approval.",
   "If you are unsure where you are, run `.\\.venv\\Scripts\\python.exe tools\\wf.py status`. Never guess the current stage.",
@@ -542,7 +543,7 @@ id = "S19_human_review"
 title = "User review of the full manuscript, supplementary Methods and tables"
 card = "stages/S19_human_review.md"
 needs_user = true
-outputs = ["07_manuscript/human_review.md", "07_manuscript/review_packages/latest_review_package.json"]
+outputs = ["07_manuscript/human_review.md", "07_manuscript/review_packages/latest_review_package.json", "07_manuscript/scientific_freeze.json"]
 [[stage.gate]]
 check = "outputs_exist"
 [[stage.gate]]
@@ -575,6 +576,11 @@ check = "revision_rounds_closed"
 check = "manuscript_review_package_current"
 [[stage.gate]]
 check = "s19_review_release_explicit"
+# The user has said the science needs no further change, so hash it here. From S20 on, a journal
+# requirement is satisfied by adapting a copy in 08_submission/manuscript/, never by editing
+# these files - which is what stopped a second journal choice from churning settled text.
+[[stage.gate]]
+check = "scientific_freeze_captured"
 
 [[stage]]
 id = "S20_journal"
@@ -599,6 +605,10 @@ name = "journal_chosen"
 check = "guidelines_sourced"
 [[stage.gate]]
 check = "docx_style_config"
+[[stage.gate]]
+check = "scientific_freeze_intact"
+[[stage.gate]]
+check = "journal_variant_ready"
 
 [[stage]]
 id = "S21_authors"
@@ -626,6 +636,10 @@ check = "abbreviations_centralized"
 [[stage.gate]]
 check = "forbidden_symbols_absent"
 paths = ["07_manuscript/full_manuscript.md", "07_manuscript/statements.md", "05_figures/legends.md", "04_tables/table_captions.md"]
+[[stage.gate]]
+check = "scientific_freeze_intact"
+[[stage.gate]]
+check = "journal_variant_ready"
 
 [[stage]]
 id = "S22_polish"
@@ -674,6 +688,14 @@ require_rendered = true
 check = "decision_recorded"
 name = "polish_reviewed"
 allowed = ["YES"]
+[[stage.gate]]
+check = "scientific_freeze_intact"
+[[stage.gate]]
+check = "journal_variant_ready"
+# Polish may tighten prose to fit a word cap. Dropping a number, citation or artifact reference
+# to get under it is a scientific decision and needs the user's recorded authorisation.
+[[stage.gate]]
+check = "variant_preserves_science"
 
 [[stage]]
 id = "S23_package"
@@ -721,6 +743,12 @@ headings = ["Rendered files inspected", "Citation and cross-reference checks", "
 [[stage.gate]]
 check = "visual_debts_cleared"
 [[stage.gate]]
+check = "scientific_freeze_intact"
+[[stage.gate]]
+check = "journal_variant_ready"
+[[stage.gate]]
+check = "variant_preserves_science"
+[[stage.gate]]
 check = "decision_recorded"
 name = "submission_files_visually_confirmed"
 allowed = ["YES"]
@@ -754,6 +782,10 @@ check = "guidelines_sourced"
 check = "bundle_matches_freeze"
 [[stage.gate]]
 check = "revision_rounds_closed"
+[[stage.gate]]
+check = "scientific_freeze_intact"
+[[stage.gate]]
+check = "variant_preserves_science"
 [[stage.gate]]
 check = "decision_recorded"
 name = "submission_package_user_confirmed"
@@ -793,6 +825,10 @@ path = "08_submission/independent_submission_audit.md"
 [[stage.gate]]
 check = "revision_rounds_closed"
 [[stage.gate]]
+check = "scientific_freeze_intact"
+[[stage.gate]]
+check = "variant_preserves_science"
+[[stage.gate]]
 check = "decision_recorded"
 name = "submission_package_independent_audit"
 allowed = ["PASS"]
@@ -821,6 +857,9 @@ globs = [
   "06_refs/deepread/*.md",
   "07_manuscript/prepolish/*",
   "07_manuscript/polish_allowlist.tsv",
+  # The journal-adaptation copy. Its contents are derived from the frozen scientific source, so
+  # they are not stage outputs in their own right.
+  "08_submission/manuscript/*",
   "07_manuscript/review_packages/*.zip",
   "08_submission/cache/**",
   "08_submission/*.csl",

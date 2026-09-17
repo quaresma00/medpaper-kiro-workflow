@@ -1,8 +1,20 @@
 # S22 - Journal-specific, fact-preserving polish
 
 ## Purpose
-Give the canonical full manuscript one journal-specific language pass without changing a
-number, citekey, figure/table reference or scientific claim.
+Give the journal's copy of the manuscript one language pass without changing a number, citekey,
+figure/table reference or scientific claim.
+
+**You are editing `08_submission/manuscript/`, not `07_manuscript/`.** The science was frozen
+when the user released S19; this stage is journal-specific work, so it happens on the variant
+S20 opened. `polish.py` and every gate here resolve there automatically - you do not pass
+different paths. The frozen copy is what the fact-preservation check measures against, which is
+why it must stay untouched.
+
+`variant_preserves_science` compares the variant to the frozen source directly. Prose may be
+tightened as much as the journal's cap requires. A number, citation or artifact reference that
+disappears means content was dropped rather than tightened, which is a scientific decision:
+restore it and tighten prose instead, or get the user's explicit authorisation and record
+`journal_trim_authorised YES` with what was dropped and where it now lives.
 
 ## Procedure
 1. Snapshot before editing:
@@ -22,7 +34,12 @@ number, citekey, figure/table reference or scientific claim.
    any wording edit that loses or adds a number, citation or artifact reference.
 5. Write `polish_log.md` with `AI patterns removed`, `Language changes by section`, `House
    style decisions`, `Cut to meet journal limits`, `Read by eye`, `Tier-B phrases kept`.
-6. Reread the complete manuscript and optional supplementary Methods, then record
+6. Check what the journal adaptation actually cost, and put the numbers in `polish_log.md`
+   under `Cut to meet journal limits`:
+```
+.\.venv\Scripts\python.exe tools/manuscript/scientific_freeze.py delta
+```
+7. Reread the complete manuscript and optional supplementary Methods, then record
    `polish_reviewed YES` with a concrete reason.
 
 ## Outputs

@@ -19,6 +19,9 @@ BASELINE_REL = "08_submission/package_content_baseline.json"
 MANIFEST_REL = "08_submission/bundle/manifest.json"
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 NS = {"w": W}
+# A DOCX is rendered from whichever copy is authoritative. Once a journal variant is open that is
+# 08_submission/manuscript/, so the baseline binds the DOCX to the text that was actually
+# submitted rather than to the frozen scientific source it was adapted from.
 DEFAULT_SOURCES = {
     "manuscript": "07_manuscript/full_manuscript.md",
     "title_page": "07_manuscript/title_page.md",
@@ -28,6 +31,12 @@ DEFAULT_SOURCES = {
     "declarations": "07_manuscript/statements.md",
     "figure_legends": "05_figures/legends.md",
 }
+
+
+def default_source(project: Path, role: str) -> str:
+    from . import scifreeze
+    rel = DEFAULT_SOURCES.get(role, "")
+    return scifreeze.resolve(project, rel) if rel else ""
 
 
 def _safe_path(project: Path, raw: str) -> tuple[str, Path]:
@@ -95,7 +104,7 @@ def build_baseline(project: Path) -> dict:
         if not path.is_file():
             raise ValueError(f"manifest DOCX missing: {rel}")
         role = str(item.get("role", "")).strip().casefold()
-        source_raw = str(item.get("source") or DEFAULT_SOURCES.get(role, "")).strip()
+        source_raw = str(item.get("source") or default_source(project, role)).strip()
         record = {
             "path": rel,
             "role": role,

@@ -87,10 +87,30 @@ further review is needed.
 ```
 .\.venv\Scripts\python.exe tools/wf.py decide manuscript_human_reviewed NO_FURTHER_REVIEW --why "<quote or closely preserve the explicit confirmation; include the exact ZIP revision and at least the first 12 characters of its package_id>"
 ```
+8. **Freeze the scientific record.** This is the boundary the whole rest of the pipeline depends
+   on: the science is settled here, and from S20 on a journal may only influence a copy.
+```
+.\.venv\Scripts\python.exe tools/manuscript/scientific_freeze.py capture
+```
+   This hashes `full_manuscript.md`, the section drafts, supplementary Methods, legends, captions
+   and the reference library. `07_manuscript/` is read-only afterwards, enforced by
+   `scientific_freeze_intact`, which is non-overridable.
+
+   Why it exists: journal requirements are presentation - word caps, abstract shape, reference
+   style, title-page layout, which statements are mandatory. Applying them in place meant that
+   choosing a second journal re-edited text you had already signed off, twice over, with nothing
+   recording what drifted. Now S20 opens `08_submission/manuscript/` for the chosen journal and
+   every journal-driven edit lands there. Switching journals throws that copy away and takes a
+   fresh one from this frozen text.
+
+   Only re-freeze (`capture --force`) when a rework round genuinely reopened a scientific stage
+   and the manuscript was rebuilt. Re-freezing to make a journal edit pass is the exact failure
+   this gate exists to prevent.
 
 ## Outputs
 - `07_manuscript/human_review.md`
 - `07_manuscript/review_packages/latest_review_package.json`
+- `07_manuscript/scientific_freeze.json`
 - versioned `07_manuscript/review_packages/S19-review-vNNN-<package-id>.zip`
 
 ## Hard rules
@@ -108,6 +128,8 @@ further review is needed.
 - Do not ask the user to repeat earlier feedback after compaction; the active round is durable.
 - Efficiency comes from scoped reading and dependency-based rebuilding, never from reducing
   analyses, references, checks, independent review or visual QA.
+- Capture the freeze only after the user's explicit no-further-review confirmation. Freezing
+  early locks text that is still moving; freezing late lets a journal edit slip in unrecorded.
 
 ## Close
 ```

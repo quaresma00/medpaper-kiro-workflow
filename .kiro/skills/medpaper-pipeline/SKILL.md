@@ -145,12 +145,19 @@ the work.
    Results.
 7. **Language polishing changes wording only** - never a number, a citation or a figure/table
    reference. A snapshot is taken first and the gate diffs against it.
-8. **Route every revision through `tools/rework.py`.** A user's change request goes to the
+8. **The scientific record freezes at S19; journals adapt a copy.** When the user says the
+   science needs no further change, `tools/manuscript/scientific_freeze.py capture` hashes it.
+   `07_manuscript/` is read-only from then on. Word caps, abstract shape, reference style, title
+   page and required statements are presentation, and are applied to the variant S20 opens at
+   `08_submission/manuscript/`. Choosing a different journal discards that copy and takes a fresh
+   one from the same frozen text, so a second journal never re-edits the reviewed manuscript.
+   Gates resolve to the variant automatically. `scientific_freeze_intact` is non-overridable.
+9. **Route every revision through `tools/rework.py`.** A user's change request goes to the
    earliest owning stage, updates the source of truth, and rebuilds downstream. Never patch a
    rendered artifact directly.
-9. **The package is not final until the user says so.** S24 records explicit confirmation and
-   freezes the exact files; S25 then audits the frozen set.
-10. **A red gate means stop and fix, not `--force`.**
+10. **The package is not final until the user says so.** S24 records explicit confirmation and
+    freezes the exact files; S25 then audits the frozen set.
+11. **A red gate means stop and fix, not `--force`.**
 
 ## Do not let another skill replace a stage
 

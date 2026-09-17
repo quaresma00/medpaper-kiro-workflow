@@ -15,7 +15,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from . import checks, gates, paths, registry
+from . import checks, gates, paths, registry, scifreeze
 from .state import State
 
 BAR = "=" * 78
@@ -42,6 +42,9 @@ NON_OVERRIDABLE_GATES = {
     # A deep read of the wrong paper is worse than a missing one: it puts confident, sourced
     # claims about a study nobody read into the Discussion.
     "deepread_complete",
+    # Editing the reviewed manuscript to satisfy a journal is the churn the freeze exists to
+    # stop; --force must not reopen that door.
+    "scientific_freeze_intact",
 }
 
 
@@ -349,8 +352,12 @@ def cmd_status(args) -> int:
 
     print("DECLARED OUTPUTS FOR THIS STAGE (create these, nothing else)")
     for o in stage.outputs:
-        flag = "ok " if (proj / o).exists() else "-- "
-        print(f"  {flag} project/{o}")
+        # Show where the file actually goes: a journal-variable output moves into the variant
+        # once the scientific record is frozen and a journal is chosen.
+        actual = scifreeze.resolve(proj, o)
+        flag = "ok " if (proj / actual).exists() else "-- "
+        suffix = "" if actual == o else f"   (journal variant; declared {o})"
+        print(f"  {flag} project/{actual}{suffix}")
     print()
 
     if not args.brief:

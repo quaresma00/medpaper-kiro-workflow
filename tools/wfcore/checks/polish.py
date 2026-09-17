@@ -25,8 +25,8 @@ def _wanted_sections(ctx: Ctx) -> set[str]:
     if ctx.p("07_manuscript/full_manuscript.md").exists():
         return {name for name in ("full_manuscript.md", "supplementary_methods.md",
                                   "title_page.md", "statements.md")
-                if ctx.p(f"07_manuscript/{name}").exists()}
-    return {name for name in LEGACY_SECTIONS if ctx.p(f"07_manuscript/{name}").exists()}
+                if ctx.psrc(f"07_manuscript/{name}").exists()}
+    return {name for name in LEGACY_SECTIONS if ctx.psrc(f"07_manuscript/{name}").exists()}
 
 
 def _polish_tool(ctx: Ctx) -> Path:
@@ -174,8 +174,9 @@ def journal_limits_met(ctx: Ctx) -> Result:
              "If the journal states no limit, write 'no stated limit' explicitly."],
         )
 
-    if ctx.p("07_manuscript/full_manuscript.md").exists():
-        sections = _canonical_section_counts(ctx.read("07_manuscript/full_manuscript.md"))
+    # The word cap applies to what is actually submitted, so measure the journal variant.
+    if ctx.psrc("07_manuscript/full_manuscript.md").exists():
+        sections = _canonical_section_counts(ctx.read(ctx.src("07_manuscript/full_manuscript.md")))
         abstract_words = sections.get("abstract", 0)
         body_words = sum(sections.get(k, 0) for k in
                          ("introduction", "methods", "results", "discussion"))
@@ -251,7 +252,7 @@ def _ref_count(ctx: Ctx) -> int:
     names = (("full_manuscript.md",) if ctx.p("07_manuscript/full_manuscript.md").exists()
              else ("introduction.md", "methods.md", "results.md", "discussion.md"))
     for name in names:
-        p = ctx.p(f"07_manuscript/{name}")
+        p = ctx.psrc(f"07_manuscript/{name}")
         if p.exists():
             text = p.read_text(encoding="utf-8", errors="replace")
             for grp in re.findall(r"\[([^\]]*@[^\]]*)\]", text):

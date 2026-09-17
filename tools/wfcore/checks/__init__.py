@@ -58,6 +58,24 @@ class Ctx:
     def read(self, rel: str) -> str:
         return self.p(rel).read_text(encoding="utf-8", errors="replace")
 
+    # ---- frozen science vs journal variant -----------------------------
+    def src(self, rel: str) -> str:
+        """Whichever copy of a manuscript artifact is authoritative right now.
+
+        Once the scientific record is frozen at S19 and a journal variant is opened, the files
+        a journal legitimately alters live under 08_submission/manuscript/. Before that - and
+        for any project that predates the freeze - this returns `rel` unchanged, so existing
+        gate specs keep working without edits.
+        """
+        from .. import scifreeze
+        return scifreeze.resolve(self.project, rel)
+
+    def src_all(self, rels) -> list[str]:
+        return [self.src(r) for r in rels]
+
+    def psrc(self, rel: str) -> Path:
+        return self.project / self.src(rel)
+
     def read_json(self, rel: str):
         return json.loads(self.read(rel))
 
@@ -92,7 +110,8 @@ def get(name: str):
 
 def load_all() -> None:
     """Import every check module so the registry is populated."""
-    from . import artifacts, data, fsx, manuscript, numbers, polish, refs, revisions, statecheck, text  # noqa: F401
+    from . import (artifacts, data, frozen, fsx, manuscript, numbers, polish,  # noqa: F401
+                   refs, revisions, statecheck, text)
 
 
 def known() -> list[str]:

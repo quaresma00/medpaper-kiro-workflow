@@ -24,6 +24,14 @@ OPTIONAL_EVIDENCE = (
     "08_submission/cover_letter.md",
     "05_figures/legends.md",
     "04_tables/table_captions.md",
+    # The scientific freeze and the journal variant it produced. Freezing these at S24 means the
+    # final audit can prove both what the science was and what the journal adaptation changed.
+    "07_manuscript/scientific_freeze.json",
+    "08_submission/manuscript/full_manuscript.md",
+    "08_submission/manuscript/supplementary_methods.md",
+    "08_submission/manuscript/title_page.md",
+    "08_submission/manuscript/statements.md",
+    "08_submission/manuscript/variant.json",
 )
 
 

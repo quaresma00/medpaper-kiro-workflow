@@ -52,6 +52,12 @@ Hard rules, several mechanically enforced by the gates:
   reference. Snapshot before the pass: `python tools/text/polish.py snapshot`.
 - Route every user revision through `tools/rework.py` to the earliest owning stage, then
   rebuild downstream. Never patch a rendered artifact directly.
+- The science freezes when the user releases S19 (`scientific_freeze.py capture`). From S20 on
+  `07_manuscript/` is read-only: journal requirements are applied to the copy S20 opens at
+  `08_submission/manuscript/`, and switching journals takes a fresh copy from the same frozen
+  text. `scientific_freeze_intact` is non-overridable. Gates resolve to the variant on their
+  own - do not pass different paths. Prose may be tightened for a word cap; a number or citation
+  that disappears is dropped content and needs `journal_trim_authorised YES`.
 - The submission package is not final until S24 records explicit user confirmation and freezes
   the files; S25 then audits the frozen set.
 - A red gate means fix it, not `--force`.

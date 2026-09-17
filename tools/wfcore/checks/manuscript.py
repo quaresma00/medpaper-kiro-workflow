@@ -93,7 +93,7 @@ def _markdown_legend_problems(text: str, expected: list[str], cap: int) -> list[
 @check("supplementary_methods_clean")
 def supplementary_methods_clean(ctx: Ctx) -> Result:
     """Supplementary Methods is prose; display tables live in the table workbook."""
-    rel = ctx.spec.get("path", "07_manuscript/supplementary_methods.md")
+    rel = ctx.src(ctx.spec.get("path", "07_manuscript/supplementary_methods.md"))
     if not ctx.p(rel).is_file():
         return Result(True, "supplementary_methods_clean", "no supplementary Methods file")
     text = ctx.read(rel)
@@ -121,7 +121,9 @@ def supplementary_methods_clean(ctx: Ctx) -> Result:
 
 @check("manuscript_structure")
 def manuscript_structure(ctx: Ctx) -> Result:
-    rel = "07_manuscript/full_manuscript.md"
+    # Structure is checked on whichever copy is being submitted: the frozen source before a
+    # journal variant is opened, the variant afterwards.
+    rel = ctx.src("07_manuscript/full_manuscript.md")
     if not ctx.p(rel).is_file():
         return Result(False, "manuscript_structure", f"{rel} missing")
     text = ctx.read(rel)
@@ -154,6 +156,8 @@ def manuscript_structure(ctx: Ctx) -> Result:
     title = heads[0][0]
     if title.casefold() in expected or len(re.findall(r"[A-Za-z][A-Za-z'-]*", title)) < 5:
         problems.append("the first level-1 heading is not a substantive selected title")
+    # title.md is scientific and stays frozen; a journal may reformat the title page but not
+    # rename the study, so the variant is still compared against the settled title.
     title_file = ctx.p("07_manuscript/title.md")
     if title_file.exists():
         chosen = re.sub(r"(?m)^#\s+", "", title_file.read_text(encoding="utf-8").strip(), count=1).strip()
@@ -483,7 +487,7 @@ def docx_bundle_ready(ctx: Ctx) -> Result:
     for role in ("manuscript", "title_page", "cover_letter"):
         if not any(p.suffix.casefold() == ".docx" for p in roles.get(role, [])):
             problems.append(f"no DOCX for required role '{role}'")
-    if ctx.p("07_manuscript/supplementary_methods.md").exists():
+    if ctx.psrc("07_manuscript/supplementary_methods.md").exists():
         if not any(p.suffix.casefold() == ".docx" for p in roles.get("supplementary", [])):
             problems.append("supplementary Methods exists but no supplementary DOCX is packaged")
     if problems:

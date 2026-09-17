@@ -308,9 +308,10 @@ def abbreviations_centralized(ctx: Ctx) -> Result:
         return Result(False, "abbreviations_centralized",
                       "abbreviation_placement must be central or local_required")
 
-    statements_rel = "07_manuscript/statements.md"
+    statements_rel = ctx.src("07_manuscript/statements.md")
     statements = ctx.read(statements_rel) if ctx.p(statements_rel).is_file() else ""
-    full = ctx.read("07_manuscript/full_manuscript.md") if ctx.p("07_manuscript/full_manuscript.md").is_file() else ""
+    full_rel = ctx.src("07_manuscript/full_manuscript.md")
+    full = ctx.read(full_rel) if ctx.p(full_rel).is_file() else ""
     central_defs = central_abbreviations(full or statements)
     central_present = bool(central_defs)
     problems: list[str] = []

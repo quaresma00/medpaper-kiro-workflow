@@ -24,8 +24,16 @@ def project_root() -> Path:
 
 
 def paths(project: Path) -> tuple[Path, Path]:
-    return (project / "07_manuscript/full_manuscript.md",
-            project / "07_manuscript/title_page.md")
+    # The count belongs to the title page being submitted, so follow the journal variant once
+    # one is open. The frozen scientific copy is never rewritten to satisfy a journal.
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from wfcore import scifreeze
+        return (project / scifreeze.resolve(project, "07_manuscript/full_manuscript.md"),
+                project / scifreeze.resolve(project, "07_manuscript/title_page.md"))
+    except Exception:  # noqa: BLE001
+        return (project / "07_manuscript/full_manuscript.md",
+                project / "07_manuscript/title_page.md")
 
 
 def load(project: Path) -> tuple[Path, Path, str, str, int]:

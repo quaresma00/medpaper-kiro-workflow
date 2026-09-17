@@ -11,14 +11,18 @@ from . import Ctx, Result, check
 def outputs_exist(ctx: Ctx) -> Result:
     optional = set(ctx.spec.get("optional", []))
     missing, empty, optional_present = [], [], 0
-    for rel in ctx.stage.outputs:
+    for declared in ctx.stage.outputs:
+        # A journal-variable output (title page, statements) is written into the journal variant
+        # once one is open, so look for it where it actually belongs. Identity transform before
+        # the scientific freeze exists.
+        rel = ctx.src(declared)
         p = ctx.p(rel)
         if not p.exists():
-            if rel not in optional:
-                missing.append(rel)
+            if declared not in optional:
+                missing.append(rel if rel == declared else f"{rel} (declared {declared})")
         elif p.is_file() and p.stat().st_size == 0:
             empty.append(rel)
-        elif rel in optional:
+        elif declared in optional:
             optional_present += 1
     if missing or empty:
         bits = []
@@ -66,6 +70,16 @@ def single_section_written(ctx: Ctx) -> Result:
         s for s in ctx.pipeline.stages
         if any(o.startswith("07_manuscript/") and o.endswith(".md") for o in s.outputs)
     ]
+    # An output declared by a stage that genuinely finished is owned by that stage, even when a
+    # later stage declares the same path. `07_manuscript/statements.md` is the live case: S17
+    # writes the optional abbreviation list and S21 fills in the administrative statements, so
+    # after a rewind past S17 the file is finished work, not S21 running ahead.
+    already_owned = {
+        rel
+        for st in ctx.pipeline.stages
+        if ctx.state.was_completed(st.id) or ctx.state.is_done(st.id)
+        for rel in st.outputs
+    }
     unexpected = []
     for st in manuscript_stages:
         if st.index <= ctx.stage.index or ctx.state.is_done(st.id):
@@ -76,7 +90,7 @@ def single_section_written(ctx: Ctx) -> Result:
         if ctx.state.was_completed(st.id):
             continue
         for rel in st.outputs:
-            if rel.startswith("07_manuscript/") and ctx.p(rel).exists():
+            if rel.startswith("07_manuscript/") and rel not in already_owned and ctx.p(rel).exists():
                 unexpected.append(f"{rel} (stage {st.id})")
     if unexpected:
         return Result(

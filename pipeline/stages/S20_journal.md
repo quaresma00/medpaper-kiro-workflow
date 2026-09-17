@@ -55,14 +55,30 @@ then freeze its actual author instructions and Word-format rules.
 }
 ```
 
+Then **open the journal variant.** The science was frozen when the user released S19, so every
+requirement you just extracted is applied to a copy, never to `07_manuscript/`:
+```
+.\.venv\Scripts\python.exe tools/manuscript/scientific_freeze.py open-variant --journal "<chosen journal>"
+```
+This copies the frozen manuscript, supplementary Methods and statements into
+`08_submission/manuscript/`. From here on that copy is what S21 completes, S22 polishes and
+S23 renders to DOCX; every gate that reads "the manuscript" resolves there automatically.
+
+If the user later picks a different journal, re-run with `--force`. That discards this
+adaptation and takes a fresh copy from the same frozen text, so the second journal never
+inherits the first journal's trims and the reviewed manuscript is never edited twice.
+
 ## Outputs
 - `08_submission/journal_shortlist.md`
 - `08_submission/target_journal.json`
 - `08_submission/guidelines_extract.md`
 - `08_submission/docx_style.json`
+- `08_submission/manuscript/` (the journal adaptation copy, opened from the frozen source)
 
 ## Hard rules
 - Never state indexing, quartile, fees, turnaround or format rules from memory.
+- Never satisfy a journal requirement by editing `07_manuscript/`. That is what the variant is
+  for, and `scientific_freeze_intact` is non-overridable.
 - Current SCIE status and a current JCR quartile are eligibility requirements; impact
   factor is not the ranking objective.
 - The user chooses the journal.

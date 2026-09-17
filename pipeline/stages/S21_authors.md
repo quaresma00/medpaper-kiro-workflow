@@ -45,12 +45,17 @@ requires local definitions, retain them only when `target_journal.json` records
 
 ## Outputs
 - `00_input/author_info.json`
-- `07_manuscript/title_page.md`
-- `07_manuscript/statements.md`
+- `07_manuscript/title_page.md` -> written to `08_submission/manuscript/title_page.md`
+- `07_manuscript/statements.md` -> written to `08_submission/manuscript/statements.md`
+
+Both are journal facts: a title page's layout and which statements are mandatory come from the
+chosen journal's guide, not from the science. Write them into the variant that S20 opened. The
+gates resolve there on their own, so the paths above are the logical names, not the disk paths.
 
 ## Hard rules
 - Never invent an author, affiliation, ORCID, email, ethics number, funding source or
   contribution.
+- Do not write into `07_manuscript/`. It was frozen when the user released S19.
 - Do not alter the selected scientific title merely to accommodate the title page.
 - Do not draft or insert an AI-use disclosure unless the user explicitly requested that
   exact content.
