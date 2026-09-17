@@ -1,8 +1,10 @@
 """Filesystem / structural checks: existence, placement, discipline."""
 from __future__ import annotations
 
+import ast
 import fnmatch
 import json
+import re
 
 from . import Ctx, Result, check
 
@@ -183,3 +185,95 @@ def json_keys(ctx: Ctx) -> Result:
             bits.append("empty: " + ", ".join(blank))
         return Result(False, "json_keys", f"{rel} -> " + "; ".join(bits))
     return Result(True, "json_keys", f"{rel}: {len(required)} required key(s) populated")
+
+
+def _python_script_scope(text: str) -> tuple[bool, list[str]]:
+    try:
+        tree = ast.parse(text)
+    except SyntaxError as exc:
+        return False, [f"cannot parse Python: {exc}"]
+    calls_project_dir = any(
+        isinstance(node, ast.Call)
+        and ((isinstance(node.func, ast.Name) and node.func.id == "project_dir")
+             or (isinstance(node.func, ast.Attribute) and node.func.attr == "project_dir"))
+        for node in ast.walk(tree))
+    reads_env = any(
+        isinstance(node, ast.Constant) and node.value == "MEDPAPER_PROJECT"
+        for node in ast.walk(tree))
+    bad_literals = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+            continue
+        value = node.value.strip().replace("\\", "/")
+        if value == "project" or value.startswith("project/"):
+            bad_literals.append(node.value)
+    return bool(calls_project_dir or reads_env), bad_literals
+
+
+def _r_script_scope(text: str) -> tuple[bool, list[str]]:
+    code = re.sub(r"(?m)#.*$", "", text)
+    scoped = bool(re.search(r"Sys\.getenv\s*\(\s*['\"]MEDPAPER_PROJECT['\"]", code))
+    bad = re.findall(r"['\"]project(?:[/\\][^'\"]*)?['\"]", code, re.I)
+    return scoped, bad
+
+
+@check("paper_scripts_scoped")
+def paper_scripts_scoped(ctx: Ctx) -> Result:
+    """Paper-authored code must resolve its own paper root, never write `engine/project/`.
+
+    `wf run-script` exports MEDPAPER_PROJECT and puts tools/ on PYTHONPATH. Requiring the script
+    to consume that root makes direct invocation fail closed rather than quietly writing into
+    whichever directory happens to be current.
+    """
+    patterns = ctx.spec.get("patterns") or [
+        "02_data/acquisition/**/*.py", "02_data/acquisition/**/*.R", "02_data/acquisition/**/*.r",
+        "03_analysis/code/**/*.py", "03_analysis/code/**/*.R", "03_analysis/code/**/*.r",
+        "04_tables/code/**/*.py", "04_tables/code/**/*.R", "04_tables/code/**/*.r",
+        "05_figures/code/**/*.py", "05_figures/code/**/*.R", "05_figures/code/**/*.r",
+    ]
+    files = sorted({p for pattern in patterns for p in ctx.project.glob(pattern) if p.is_file()})
+    problems = []
+    for path in files:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if path.suffix.casefold() == ".py":
+            consumes_root, bad_literals = _python_script_scope(text)
+        elif path.suffix.casefold() == ".r":
+            consumes_root, bad_literals = _r_script_scope(text)
+        else:
+            problems.append(f"{path.relative_to(ctx.project).as_posix()}: unsupported script type")
+            continue
+        rel = path.relative_to(ctx.project).as_posix()
+        if not consumes_root:
+            problems.append(
+                f"{rel}: never resolves the active paper (use MEDPAPER_PROJECT or "
+                "wfcore.paths.project_dir())")
+        if bad_literals:
+            problems.append(
+                f"{rel}: literal project/ path(s) are forbidden: "
+                + ", ".join(repr(x) for x in bad_literals[:3]))
+    if problems:
+        origin = str(ctx.state.data.get("pipeline_origin_version", ""))
+        migrated_from_legacy = origin.startswith(("0.", "1.0", "1.1", "1.2", "1.3"))
+        if not origin:
+            migrated_from_legacy = any(
+                event.get("kind") == "pipeline_migration"
+                and re.search(r"\b1\.[0-3](?:\.|\b)", str(event.get("detail", "")))
+                for event in ctx.state.data.get("events", []))
+        hints = ["Run paper code with: .venv/Scripts/python.exe tools/wf.py run-script "
+                 "<paper-relative-script.py|.R>",
+                 "Python: `from wfcore.paths import project_dir; PROJECT = project_dir()`",
+                 "R: `PROJECT <- Sys.getenv(\"MEDPAPER_PROJECT\")` and stop if it is empty.",
+                 "Never use a literal project/ path or assume the current working directory is the paper."]
+        if migrated_from_legacy:
+            hints.insert(0, "Legacy paper migration: update these existing scripts when this stage "
+                            "is next edited. `wf run-script` already runs with the paper as cwd, "
+                            "so the warning cannot write into the mother engine meanwhile.")
+        return Result(
+            False,
+            "paper_scripts_scoped",
+            "; ".join(problems[:8]),
+            hints,
+            severity="warn" if migrated_from_legacy else "fail",
+        )
+    return Result(True, "paper_scripts_scoped",
+                  f"{len(files)} paper-owned Python script(s) resolve the active paper root")

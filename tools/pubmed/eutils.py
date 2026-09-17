@@ -21,6 +21,11 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 
+_TOOLS = Path(__file__).resolve().parents[1]
+if str(_TOOLS) not in sys.path:
+    sys.path.insert(0, str(_TOOLS))
+from wfcore import paths as wfpaths  # noqa: E402
+
 EUTILS = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 CROSSREF = "https://api.crossref.org/works"
 TOOL = "medpaper-codex-pipeline"
@@ -79,13 +84,11 @@ def http_get(url: str, params: dict | None = None, retries: int = 4, timeout: in
 # project paths / cache
 # ---------------------------------------------------------------------------
 def repo_root() -> Path:
-    env = os.environ.get("MEDPAPER_ROOT")
-    return Path(env).resolve() if env else Path(__file__).resolve().parents[2]
+    return wfpaths.repo_root()
 
 
 def project_root() -> Path:
-    env = os.environ.get("MEDPAPER_PROJECT")
-    return Path(env).resolve() if env else repo_root() / "project"
+    return wfpaths.project_dir()
 
 
 def cache_dir() -> Path:

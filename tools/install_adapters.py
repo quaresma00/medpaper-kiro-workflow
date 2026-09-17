@@ -49,6 +49,14 @@ Loop: `wf status` -> do the work -> `wf check` -> `wf advance --note "..."`.
 25 stages. One engine, many papers: `wf new <slug>` starts one under `papers/`, `wf papers`
 lists them, `wf use <slug>` switches. `wf status` prints which paper it resolved and why.
 
+Never edit `pipeline/`, `tools/`, `reference/` or `.kiro/` for one study - they are the shared
+mother workflow. Values go in this paper's `.wf/config.toml` via `wf config set`; a genuine
+shape difference goes in `.wf/overrides.toml` via `wf override init`. `wf override validate`
+refuses protected integrity gates, review/audit-stage skips, path escapes and retrospective
+changes to an override that already governed a finished stage. Status reprints every effective
+override on every call. Run paper Python/R code only through `wf run-script <relative.py|.R>`;
+it uses the paper as cwd and trips if shared-engine files change.
+
 Hard rules, several mechanically enforced by the gates:
 
 - **A `verified: true` boolean is not evidence.** Reference gates re-parse the cached PubMed
@@ -81,9 +89,10 @@ Hard rules, several mechanically enforced by the gates:
   rebuild downstream. Never patch a rendered artifact directly.
 - The science freezes when the user releases S19 (`scientific_freeze.py capture`). From S20 on
   `07_manuscript/` is read-only: journal requirements are applied to the copy S20 opens at
-  `08_submission/manuscript/`, and switching journals takes a fresh copy from the same frozen
-  text. `scientific_freeze_intact` is non-overridable. Gates resolve to the variant on their
-  own - do not pass different paths. Prose may be tightened for a word cap; a number or citation
+  `08_submission/manuscript/`. To switch journals, first loop to S20 and run
+  `scientific_freeze.py reset-journal --confirm-journal "<old>"`; it clears the whole old
+  submission tree before S20 opens a fresh copy. `scientific_freeze_intact` is non-overridable.
+  Gates resolve to the variant on their own - do not pass different paths. Prose may be tightened for a word cap; a number or citation
   that disappears is dropped content and needs `journal_trim_authorised YES`.
 - The submission package is not final until S24 records explicit user confirmation and freezes
   the files; S25 then audits the frozen set.

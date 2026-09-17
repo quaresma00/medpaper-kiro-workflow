@@ -81,7 +81,8 @@ def expected_files(project: Path) -> dict[str, Path]:
             raise ValueError(f"manifest item missing: {normalized}")
         files[normalized] = path
 
-    for folder_rel in ("08_submission/bundle", "08_submission/cache"):
+    for folder_rel in ("08_submission/bundle", "08_submission/cache",
+                       "08_submission/manuscript", "08_submission/build_receipts"):
         _, folder = _safe_path(project, folder_rel)
         if folder.is_dir():
             for path in sorted(p for p in folder.rglob("*") if p.is_file()):

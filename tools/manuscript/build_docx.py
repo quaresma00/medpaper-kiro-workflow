@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -13,6 +14,7 @@ import tempfile
 import tomllib
 import zipfile
 from copy import deepcopy
+from datetime import datetime, timezone
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -29,6 +31,10 @@ except ImportError as exc:  # pragma: no cover - clear deployment failure
 
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools"))
+from wfcore import paths as wfpaths, scifreeze  # noqa: E402
+from wfcore.packagecontent import build_receipt_path  # noqa: E402
+
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 PKG_REL = "http://schemas.openxmlformats.org/package/2006/relationships"
@@ -46,9 +52,53 @@ PIPE_TABLE_DIVIDER_RE = re.compile(
 )
 
 
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest().upper()
+
+
+def _receipt_file_record(path: Path, project: Path) -> dict:
+    resolved = path.resolve()
+    try:
+        shown = resolved.relative_to(project.resolve()).as_posix()
+    except ValueError:
+        shown = str(resolved)
+    return {"path": shown, "sha256": _file_sha256(resolved),
+            "bytes": resolved.stat().st_size}
+
+
+def _write_build_receipt(args, project: Path) -> Path:
+    output = args.output.resolve()
+    receipt = build_receipt_path(project, output)
+    sources = [_receipt_file_record(path, project) for path in args.input]
+    auxiliaries = []
+    for path in (getattr(args, "bibliography", None), getattr(args, "csl", None),
+                 getattr(args, "style_config", None)):
+        if path is not None and path.is_file():
+            auxiliaries.append(_receipt_file_record(path, project))
+    payload = {
+        "schema_version": 1,
+        "built_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "kind": args.kind,
+        "output": output.relative_to(project.resolve()).as_posix(),
+        "output_sha256": _file_sha256(output),
+        "sources": sources,
+        "auxiliaries": auxiliaries,
+        "scientific_freeze_sha256": (
+            _file_sha256(scifreeze.freeze_path(project))
+            if scifreeze.is_frozen(project) else ""),
+    }
+    receipt.parent.mkdir(parents=True, exist_ok=True)
+    receipt.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+                       encoding="utf-8")
+    return receipt
+
+
 def project_root() -> Path:
-    raw = os.environ.get("MEDPAPER_PROJECT")
-    return Path(raw).resolve() if raw else ROOT / "project"
+    return wfpaths.project_dir()
 
 
 def planned_figure_ids(project: Path | None = None) -> list[str] | None:
@@ -543,11 +593,31 @@ def run_pandoc(inputs: list[Path], output: Path, bibliography: Path | None,
 
 
 def build(args) -> int:
+    project = project_root()
+    if scifreeze.is_frozen(project) and args.kind in {
+            "manuscript", "title_page", "supplementary", "statements"}:
+        frozen = []
+        for source in args.input:
+            try:
+                rel = source.resolve().relative_to(project.resolve()).as_posix()
+            except ValueError:
+                continue
+            if rel.startswith("07_manuscript/"):
+                frozen.append(rel)
+        if frozen:
+            print(
+                "DOCX build refused: the scientific source is frozen after S19. Build this "
+                "journal upload from 08_submission/manuscript/ instead: " + ", ".join(frozen),
+                file=sys.stderr)
+            return 2
+
     style = load_style(args.style_config)
     if style.get("all_text_black") is not True or style.get("external_hyperlinks") is not False:
         print("style config must require black text and prohibit external hyperlinks", file=sys.stderr)
         return 2
     args.output.parent.mkdir(parents=True, exist_ok=True)
+    receipt_path = build_receipt_path(project, args.output)
+    receipt_path.unlink(missing_ok=True)
     try:
         source_problems = _source_problems(args.kind, args.input)
         if source_problems:
@@ -559,13 +629,23 @@ def build(args) -> int:
                               figure_legend_cap())
     except Exception as exc:  # noqa: BLE001
         args.output.unlink(missing_ok=True)
+        receipt_path.unlink(missing_ok=True)
         print(f"DOCX build failed: {exc}", file=sys.stderr)
         return 2
     if problems:
         args.output.unlink(missing_ok=True)
+        receipt_path.unlink(missing_ok=True)
         print("DOCX audit failed:\n  " + "\n  ".join(problems), file=sys.stderr)
         return 2
+    try:
+        receipt = _write_build_receipt(args, project)
+    except Exception as exc:  # noqa: BLE001
+        args.output.unlink(missing_ok=True)
+        receipt_path.unlink(missing_ok=True)
+        print(f"DOCX build receipt failed: {exc}", file=sys.stderr)
+        return 2
     print(f"built and audited {args.kind} -> {args.output}")
+    print(f"build receipt -> {receipt}")
     return 0
 
 
@@ -623,6 +703,16 @@ def main() -> int:
     p.add_argument("--style-config", type=Path, required=True)
     p.set_defaults(fn=audit_manifest)
     args = ap.parse_args()
+    # `project/...` in stage cards is a logical alias for the selected paper, not the physical
+    # <engine>/project directory. Map every CLI path before build/audit touches the filesystem.
+    for attr in ("style_config", "bibliography", "csl", "manifest"):
+        value = getattr(args, attr, None)
+        if value is not None:
+            setattr(args, attr, wfpaths.resolve_paper_path(value))
+    if getattr(args, "output", None) is not None:
+        args.output = wfpaths.paper_output_path(args.output)
+    if getattr(args, "input", None):
+        args.input = [wfpaths.resolve_paper_path(value) for value in args.input]
     return args.fn(args)
 
 

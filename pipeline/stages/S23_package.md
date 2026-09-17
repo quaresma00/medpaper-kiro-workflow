@@ -23,12 +23,19 @@ unlooked-at.
 ```
    Use `sync --add` only when the official title-page instructions require that field. Do not
    derive it from the candidate literature-library size.
-3. Build every prose upload with `tools/manuscript/build_docx.py`. At minimum:
+3. Build every prose upload with `tools/manuscript/build_docx.py` **from the journal
+   variant**, never from the frozen `07_manuscript/` source. At minimum:
 ```
-.\.venv\Scripts\python.exe tools/manuscript/build_docx.py build --kind manuscript --input project/07_manuscript/full_manuscript.md --output project/08_submission/bundle/manuscript.docx --style-config project/08_submission/docx_style.json --bibliography project/06_refs/refs.bib --csl <journal.csl>
-.\.venv\Scripts\python.exe tools/manuscript/build_docx.py build --kind title_page --input project/07_manuscript/title_page.md --output project/08_submission/bundle/title_page.docx --style-config project/08_submission/docx_style.json
+.\.venv\Scripts\python.exe tools/manuscript/build_docx.py build --kind manuscript --input project/08_submission/manuscript/full_manuscript.md --output project/08_submission/bundle/manuscript.docx --style-config project/08_submission/docx_style.json --bibliography project/06_refs/refs.bib --csl <journal.csl>
+.\.venv\Scripts\python.exe tools/manuscript/build_docx.py build --kind title_page --input project/08_submission/manuscript/title_page.md --output project/08_submission/bundle/title_page.docx --style-config project/08_submission/docx_style.json
 .\.venv\Scripts\python.exe tools/manuscript/build_docx.py build --kind cover_letter --input project/08_submission/cover_letter.md --output project/08_submission/bundle/cover_letter.docx --style-config project/08_submission/docx_style.json
 ```
+   These `project/...` arguments are logical paths and the builder maps them to the paper shown
+   by `wf status`. A manifest item's `source` must likewise name the matching
+   `08_submission/manuscript/...` file, so the visible-text baseline binds the DOCX to the
+   journal copy that was actually submitted. Every successful build also writes a deterministic
+   source/output receipt under `08_submission/build_receipts/`; S23 refuses to capture a
+   baseline without it. The receipt is evidence, not an upload item, and is frozen with S24.
    If supplementary Methods exists, build it (or the journal-mandated combined supplement)
    as `.docx`. Convert every other narrative upload to `.docx`; do not leave cover letters,
    methods supplements or declarations as Markdown in the bundle. A journal-supplied fixed

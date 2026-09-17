@@ -8,6 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from wfcore import paths as wfpaths  # noqa: E402
 from wfcore.packagefreeze import FREEZE_REL, verify_freeze, write_freeze  # noqa: E402
 
 
@@ -16,11 +17,12 @@ def main() -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("freeze", "verify"):
         command = sub.add_parser(name)
-        command.add_argument("--project", type=Path, default=Path("project"))
+        command.add_argument("--project", type=Path, default=None)
         command.add_argument("--freeze", type=Path)
     args = parser.parse_args()
-    project = args.project.resolve()
-    freeze = args.freeze.resolve() if args.freeze else project / Path(FREEZE_REL)
+    project = wfpaths.resolve_paper_path(args.project or "project").resolve()
+    freeze = (wfpaths.resolve_paper_path(args.freeze).resolve() if args.freeze
+              else project / Path(FREEZE_REL))
     try:
         if args.command == "freeze":
             output = write_freeze(project, freeze)

@@ -44,6 +44,7 @@ class State:
             "schema": SCHEMA,
             "pipeline": pipeline_name,
             "pipeline_version": pipeline_version,
+            "pipeline_origin_version": pipeline_version,
             "created_at": _now(),
             "current": first_stage,
             "stages": {first_stage: {"status": "active", "started_at": _now(), "loops": 0}},
@@ -86,6 +87,11 @@ class State:
             self.data["current"] = replacement
             changed = True
         if changed:
+            self.data.setdefault("pipeline_origin_version", old_version)
+            self.data.setdefault("pipeline_migrations", []).append({
+                "at": _now(), "from": old_version, "to": pipeline_version,
+                "current_before": current, "current_after": self.data["current"],
+            })
             self.data["pipeline_version"] = pipeline_version
             self.event("pipeline_migration",
                        f"{old_version} -> {pipeline_version}; current {current} -> {self.data['current']}")
@@ -129,17 +135,20 @@ class State:
         return self.stage_info(sid).get("status", "pending")
 
     def is_done(self, sid: str) -> bool:
-        return self.status_of(sid) == "done"
+        # A paper-local skip is a completed transition for dependency purposes: the stage is
+        # inapplicable to this paper and the state records why. It is displayed as "-", not "x".
+        return self.status_of(sid) in {"done", "skipped"}
 
     def was_completed(self, sid: str) -> bool:
-        """True if the stage has ever been completed, including before a loop rewound past it.
+        """True if the stage was completed or explicitly skipped for this paper.
 
         `wf loop` deliberately leaves downstream artifacts in place, so a checker that asks
         "does a future stage's output exist?" must distinguish an artifact produced by a stage
         that ran ahead of itself from one produced by a stage that genuinely finished and was
-        then rewound past. Only the first is a workflow violation.
+        then rewound past. A recorded paper-local skip is also terminal for dependency order.
         """
-        return bool(self.stage_info(sid).get("completed_at"))
+        info = self.stage_info(sid)
+        return bool(info.get("completed_at") or info.get("skipped_at"))
 
     def decision(self, name: str) -> dict | None:
         return self.data.get("decisions", {}).get(name)
@@ -169,16 +178,56 @@ class State:
     def notes_for(self, stage: str) -> list[dict]:
         return [h for h in self.data.get("handoff", []) if h.get("stage") == stage]
 
-    def complete(self, sid: str, next_sid: str | None) -> None:
+    def complete(self, sid: str, next_sid: str | None,
+                 skipped: list[tuple[str, str, str]] | None = None,
+                 override_fingerprint: str = "") -> None:
+        """Complete `sid`, record any overridden stages crossed, then activate `next_sid`."""
         info = self.stage_info(sid)
         info["status"] = "done"
         info["completed_at"] = _now()
+        if override_fingerprint:
+            info["paper_override_fingerprint"] = override_fingerprint
+        else:
+            info.pop("paper_override_fingerprint", None)
+        skipped = skipped or []
+        for skipped_sid, reason, fingerprint in skipped:
+            rec = self.stage_info(skipped_sid)
+            rec["status"] = "skipped"
+            rec["skipped_at"] = _now()
+            rec["skip_reason"] = reason
+            rec["paper_override_fingerprint"] = fingerprint
+            self.event("paper_override_skip", f"{skipped_sid}: {reason}")
         if next_sid:
             nxt = self.stage_info(next_sid)
             nxt["status"] = "active"
             nxt.setdefault("started_at", _now())
             self.data["current"] = next_sid
-        self.event("advance", f"{sid} -> {next_sid or 'END'}")
+        self.event("advance", f"{sid} -> {next_sid or 'END'}"
+                   + (f" (skipped {', '.join(s for s, _, _ in skipped)})" if skipped else ""))
+        self.save()
+
+    def skip_current(self, sid: str, reason: str, next_sid: str | None,
+                     skipped_after: list[tuple[str, str, str]] | None = None,
+                     override_fingerprint: str = "") -> None:
+        """Apply a paper-local skip to the active stage and any consecutive skipped stages."""
+        chain = [(sid, reason, override_fingerprint), *(skipped_after or [])]
+        for skipped_sid, why, fingerprint in chain:
+            rec = self.stage_info(skipped_sid)
+            rec["status"] = "skipped"
+            rec["skipped_at"] = _now()
+            rec["skip_reason"] = why
+            rec["paper_override_fingerprint"] = fingerprint
+            self.event("paper_override_skip", f"{skipped_sid}: {why}")
+        if next_sid:
+            nxt = self.stage_info(next_sid)
+            nxt["status"] = "active"
+            nxt.setdefault("started_at", _now())
+            self.data["current"] = next_sid
+        else:
+            self.data["current"] = sid
+        self.event("advance", f"{sid} skipped -> {next_sid or 'END'}"
+                   + (f" (also skipped {', '.join(s for s, _, _ in chain[1:])})"
+                      if len(chain) > 1 else ""))
         self.save()
 
     def rewind(self, sid: str, why: str) -> None:

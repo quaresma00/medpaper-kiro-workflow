@@ -35,12 +35,13 @@ def _polish_tool(ctx: Ctx) -> Path:
 
 @check("polish_snapshot_exists")
 def polish_snapshot_exists(ctx: Ctx) -> Result:
-    facts = ctx.p(f"{SNAPSHOT}/facts.json")
+    snapshot_rel = ctx.src(SNAPSHOT)
+    facts = ctx.p(f"{snapshot_rel}/facts.json")
     if not facts.exists():
         return Result(
             False,
             "polish_snapshot_exists",
-            f"no pre-polish snapshot at project/{SNAPSHOT}/facts.json",
+            f"no pre-polish snapshot at project/{snapshot_rel}/facts.json",
             ["Take it BEFORE editing: .venv/Scripts/python.exe tools/text/polish.py snapshot",
              "Without it there is no way to prove the polish pass did not alter the data."],
         )
@@ -93,7 +94,7 @@ def polish_preserves_facts(ctx: Ctx) -> Result:
         False,
         "polish_preserves_facts",
         "; ".join(fails[:6]) or out.strip()[:300],
-        [f"Restore the affected text from project/{SNAPSHOT}/ and redo those sentences.",
+        [f"Restore the affected text from project/{ctx.src(SNAPSHOT)}/ and redo those sentences.",
          "Polishing changes wording only. Never a value, never a citation."],
     )
 
@@ -207,16 +208,17 @@ def journal_limits_met(ctx: Ctx) -> Result:
 
 # ---------------------------------------------------------------------------
 def _report(ctx: Ctx):
-    p = ctx.p(REPORT)
+    rel = ctx.src(REPORT)
+    p = ctx.p(rel)
     if not p.exists():
         return Result(
-            False, "polish_report", f"project/{REPORT} missing",
+            False, "polish_report", f"project/{rel} missing",
             ["Run: .venv/Scripts/python.exe tools/text/polish.py lint"],
         )
     try:
         return json.loads(p.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        return Result(False, "polish_report", f"{REPORT} invalid JSON: {exc}")
+        return Result(False, "polish_report", f"{rel} invalid JSON: {exc}")
 
 
 def _env(ctx: Ctx) -> dict:

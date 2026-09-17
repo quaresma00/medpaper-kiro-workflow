@@ -9,6 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from wfcore import paths as wfpaths  # noqa: E402
 from wfcore.packagecontent import BASELINE_REL, verify_baseline, write_baseline  # noqa: E402
 
 
@@ -24,11 +25,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="bind submission DOCX visible text to the legitimate S23 build")
     parser.add_argument("command", choices=["capture", "verify"])
-    parser.add_argument("--project", type=Path, default=Path("project"))
+    parser.add_argument("--project", type=Path, default=None)
     parser.add_argument("--replace", action="store_true",
                         help="replace a prior baseline after a legitimate S23 rebuild")
     args = parser.parse_args()
-    project = args.project.resolve()
+    project = wfpaths.resolve_paper_path(args.project or "project").resolve()
     if args.command == "capture":
         stage = _current_stage(project)
         if stage and stage != "S23_package":

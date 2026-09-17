@@ -10,11 +10,12 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools"))
+from wfcore import paths as wfpaths  # noqa: E402
 
 
 def project_root() -> Path:
-    raw = os.environ.get("MEDPAPER_PROJECT")
-    return Path(raw).resolve() if raw else ROOT / "project"
+    return wfpaths.project_dir()
 
 
 def read_required(project: Path, rel: str) -> str:

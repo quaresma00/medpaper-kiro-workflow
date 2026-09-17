@@ -11,6 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
 
+from wfcore import paths as wfpaths  # noqa: E402
 from wfcore.checks.refs import (  # noqa: E402
     actual_reference_count,
     declared_reference_counts,
@@ -19,8 +20,7 @@ from wfcore.checks.refs import (  # noqa: E402
 
 
 def project_root() -> Path:
-    raw = os.environ.get("MEDPAPER_PROJECT")
-    return Path(raw).resolve() if raw else ROOT / "project"
+    return wfpaths.project_dir()
 
 
 def paths(project: Path) -> tuple[Path, Path]:

@@ -25,16 +25,21 @@ matplotlib.use("Agg")
 import matplotlib.image as mpimg  # noqa: E402
 import numpy as np  # noqa: E402
 
+_TOOLS = Path(__file__).resolve().parents[1]
+if str(_TOOLS) not in sys.path:
+    sys.path.insert(0, str(_TOOLS))
+from wfcore import paths as wfpaths  # noqa: E402
+
 MM_PER_IN = 25.4
 WIDTHS_MM = {"single": 90.0, "1.5": 140.0, "double": 180.0}
 
 
 def repo_root() -> Path:
-    return Path(os.environ.get("MEDPAPER_ROOT") or Path(__file__).resolve().parents[2])
+    return wfpaths.repo_root()
 
 
 def project_root() -> Path:
-    return Path(os.environ.get("MEDPAPER_PROJECT") or repo_root() / "project")
+    return wfpaths.project_dir()
 
 
 def targets() -> dict:

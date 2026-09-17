@@ -30,6 +30,11 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
+_TOOLS = Path(__file__).resolve().parents[1]
+if str(_TOOLS) not in sys.path:
+    sys.path.insert(0, str(_TOOLS))
+from wfcore import paths as wfpaths  # noqa: E402
+
 # Fallback order for legacy workspaces. Once full_manuscript.md exists it is the canonical
 # main source and the component drafts are deliberately not polished in parallel.
 LEGACY_SECTION_ORDER = [
@@ -161,11 +166,7 @@ def now() -> str:
 
 
 def project_root() -> Path:
-    env = os.environ.get("MEDPAPER_PROJECT")
-    if env:
-        return Path(env).resolve()
-    root = Path(os.environ.get("MEDPAPER_ROOT") or Path(__file__).resolve().parents[2])
-    return root / "project"
+    return wfpaths.project_dir()
 
 
 def body(text: str) -> str:
@@ -183,7 +184,7 @@ def flow(text: str) -> str:
 
 
 def allowlist() -> dict[str, str]:
-    p = project_root() / ALLOWLIST
+    p = project_root() / _resolve(ALLOWLIST)
     out: dict[str, str] = {}
     if p.exists():
         for line in p.read_text(encoding="utf-8").splitlines():
@@ -516,13 +517,14 @@ def readability(rel: str, text: str) -> dict:
 # ===========================================================================
 def cmd_snapshot(args) -> int:
     proj = project_root()
-    dest = proj / SNAPSHOT_DIR
+    snapshot_rel = _resolve(SNAPSHOT_DIR)
+    dest = proj / snapshot_rel
     docs = sections()
     if not docs:
         print("nothing to snapshot: no manuscript section files exist yet")
         return 1
     if dest.exists() and not args.force:
-        print(f"snapshot already exists at project/{SNAPSHOT_DIR}/")
+        print(f"snapshot already exists at project/{snapshot_rel}/")
         print("that is the pre-polish reference; do not overwrite it unless you are "
               "restarting the polish pass (--force)")
         return 1
@@ -535,7 +537,7 @@ def cmd_snapshot(args) -> int:
     (dest / "facts.json").write_text(
         json.dumps({"snapshot_at": now(), "files": facts_index}, indent=2, ensure_ascii=False),
         encoding="utf-8")
-    print(f"snapshotted {len(docs)} section(s) -> project/{SNAPSHOT_DIR}/")
+    print(f"snapshotted {len(docs)} section(s) -> project/{snapshot_rel}/")
     for rel, f in facts_index.items():
         print(f"  {Path(rel).name:<20} {len(f['numbers']):>4} numbers  "
               f"{len(f['citekeys']):>3} citekeys  {len(f['artifacts']):>2} artifact refs")
@@ -581,8 +583,10 @@ def cmd_lint(args) -> int:
         "allowlisted": sorted(allow),
     }
     if not args.file:
-        (proj / REPORT).parent.mkdir(parents=True, exist_ok=True)
-        (proj / REPORT).write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+        report_rel = _resolve(REPORT)
+        (proj / report_rel).parent.mkdir(parents=True, exist_ok=True)
+        (proj / report_rel).write_text(
+            json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
 
     if args.json:
         print(json.dumps(report, indent=2, ensure_ascii=False))
@@ -596,7 +600,7 @@ def cmd_lint(args) -> int:
         for x in items[:40]:
             print("  " + fmt(x))
         if len(items) > 40:
-            print(f"  ... {len(items) - 40} more (see project/{REPORT})")
+            print(f"  ... {len(items) - 40} more (see project/{_resolve(REPORT)})")
 
     block("AI TELLS - tier A (blocking)", tier_a,
           lambda x: f"{Path(x['file']).name}:{x['line']}  {x['label']}  -> {x['match']!r}")
@@ -625,15 +629,16 @@ def cmd_lint(args) -> int:
               f"{len(blocking_struct)} structural, {len(blocking_style)} style.")
         print("Rewrite them. Do not change a number, a citation, or a figure/table reference")
         print("while doing it - `polish.py diff` will catch it if you do.")
-        print(f"A genuine exception goes in project/{ALLOWLIST} as 'pattern<TAB>reason'.")
+        print(f"A genuine exception goes in project/{_resolve(ALLOWLIST)} as 'pattern<TAB>reason'.")
     return 0 if n == 0 else 2
 
 
 def cmd_diff(args) -> int:
     proj = project_root()
-    snap = proj / SNAPSHOT_DIR
+    snapshot_rel = _resolve(SNAPSHOT_DIR)
+    snap = proj / snapshot_rel
     if not (snap / "facts.json").exists():
-        print(f"no snapshot at project/{SNAPSHOT_DIR}/facts.json")
+        print(f"no snapshot at project/{snapshot_rel}/facts.json")
         print("run `.venv/Scripts/python.exe tools/text/polish.py snapshot` BEFORE polishing")
         return 1
     before = json.loads((snap / "facts.json").read_text(encoding="utf-8"))["files"]
@@ -670,7 +675,7 @@ def cmd_diff(args) -> int:
         for p_ in problems:
             print(f"  {p_}")
         print("\nPolishing may change wording only. Restore the lost content from")
-        print(f"project/{SNAPSHOT_DIR}/ and redo the affected sentences.")
+        print(f"project/{snapshot_rel}/ and redo the affected sentences.")
         return 2
     print("every number, citekey and figure/table reference survived the polish pass.")
     return 0

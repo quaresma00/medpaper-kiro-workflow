@@ -320,7 +320,7 @@ def run_checks(proj: Path) -> None:
          "S19_polish": "S17_assemble", "S20_package": "S17_assemble"})
     record("legacy tail state migrates without resetting project artifacts",
            changed and legacy.current == "S17_assemble" and
-           legacy.data["pipeline_version"] == "1.3.9",
+           legacy.data["pipeline_version"] == "1.4.0",
            f"current={legacy.current}; version={legacy.data['pipeline_version']}")
     shutil.rmtree(migration_root, ignore_errors=True)
 
@@ -894,7 +894,7 @@ def run_scientific_freeze(proj: Path) -> None:
     variant derives from it, path resolution follows the variant, switching journals discards
     only the variant, and content cannot be dropped to fit a word cap without authorisation.
     """
-    from wfcore import gates, registry, scifreeze
+    from wfcore import gates, packagecontent, registry, scifreeze
     from wfcore.checks import Ctx, get, load_all
     from wfcore.state import State
 
@@ -967,11 +967,28 @@ def run_scientific_freeze(proj: Path) -> None:
            run("scientific_freeze_intact", "S22_polish").ok)
 
     from wfcore import cli
-    record("scientific_freeze_intact cannot be bypassed with --force",
-           "scientific_freeze_intact" in cli.NON_OVERRIDABLE_GATES,
-           "otherwise the churn the freeze prevents is one flag away")
+    record("freeze and journal-variant boundaries cannot be bypassed with --force",
+           {"scientific_freeze_captured", "scientific_freeze_intact",
+            "journal_variant_ready", "variant_preserves_science"}
+           <= cli.NON_OVERRIDABLE_GATES,
+           "capture, immutable source, required variant and content-preservation all hold")
 
     # ---- the variant --------------------------------------------------------
+    freeze_env = {**os.environ, "MEDPAPER_PROJECT": str(scoped), "MEDPAPER_ROOT": str(ROOT),
+                  "PYTHONIOENCODING": "utf-8"}
+    docx_tool = ROOT / "tools/manuscript/build_docx.py"
+    p = subprocess.run([
+        sys.executable, str(docx_tool), "build", "--kind", "manuscript",
+        "--input", "project/07_manuscript/full_manuscript.md",
+        "--output", "project/08_submission/bundle/prevariant.docx",
+        "--style-config", "project/08_submission/missing_style.json"],
+        capture_output=True, text=True, env=freeze_env, encoding="utf-8", errors="replace")
+    record("a frozen-source DOCX is refused even before the S20 variant exists",
+           p.returncode != 0 and "scientific source is frozen" in
+           ((p.stdout or "") + (p.stderr or ""))
+           and not (scoped / "08_submission/bundle/prevariant.docx").exists(),
+           ((p.stdout or "") + (p.stderr or "")).strip()[-160:])
+
     r = run("journal_variant_ready", "S20_journal")
     record("S20 requires a journal variant once the science is frozen", not r.ok, r.detail)
     scifreeze.open_variant(scoped, "Endoscopy International Open")
@@ -993,6 +1010,56 @@ def run_scientific_freeze(proj: Path) -> None:
     record("scientific-only files still resolve to the frozen copy",
            scifreeze.resolve(scoped, "07_manuscript/results.md") == "07_manuscript/results.md",
            "only the journal-variable files move")
+    record("polish evidence resolves beside the journal variant, not under frozen science",
+           scifreeze.resolve(scoped, "07_manuscript/polish_report.json")
+           == "08_submission/manuscript/polish_report.json"
+           and scifreeze.resolve(scoped, "07_manuscript/prepolish/facts.json")
+           == "08_submission/manuscript/prepolish/facts.json")
+
+    polish_tool = ROOT / "tools/text/polish.py"
+    p = subprocess.run([sys.executable, str(polish_tool), "snapshot"], capture_output=True,
+                       text=True, env=freeze_env, encoding="utf-8", errors="replace")
+    record("the S22 snapshot is written into the journal variant",
+           p.returncode == 0
+           and (scoped / "08_submission/manuscript/prepolish/facts.json").is_file()
+           and not (scoped / "07_manuscript/prepolish").exists(),
+           ((p.stdout or "") + (p.stderr or "")).strip()[-120:])
+    subprocess.run([sys.executable, str(polish_tool), "lint"], capture_output=True,
+                   text=True, env=freeze_env, encoding="utf-8", errors="replace")
+    record("the S22 polish report is written into the journal variant",
+           (scoped / "08_submission/manuscript/polish_report.json").is_file()
+           and not (scoped / "07_manuscript/polish_report.json").exists())
+
+    # Once a variant exists, the DOCX builder must refuse the frozen source even if somebody
+    # copies an old command from a previous run.
+    docx_tool = ROOT / "tools/manuscript/build_docx.py"
+    p = subprocess.run([
+        sys.executable, str(docx_tool), "build", "--kind", "manuscript",
+        "--input", "project/07_manuscript/full_manuscript.md",
+        "--output", "project/08_submission/bundle/should_not_exist.docx",
+        "--style-config", "project/08_submission/missing_style.json"],
+        capture_output=True, text=True, env=freeze_env, encoding="utf-8", errors="replace")
+    record("S23 cannot build a journal DOCX directly from the frozen manuscript",
+           p.returncode != 0 and "scientific source is frozen" in
+           ((p.stdout or "") + (p.stderr or ""))
+           and not (scoped / "08_submission/bundle/should_not_exist.docx").exists(),
+           ((p.stdout or "") + (p.stderr or "")).strip()[-160:])
+    bundle = scoped / "08_submission/bundle"
+    bundle.mkdir(parents=True, exist_ok=True)
+    (bundle / "dummy.docx").write_bytes(b"not parsed because source binding fails first")
+    (bundle / "manifest.json").write_text(json.dumps({"items": [{
+        "role": "manuscript", "file": "08_submission/bundle/dummy.docx",
+        "source": "07_manuscript/full_manuscript.md"}]}), encoding="utf-8")
+    try:
+        packagecontent.build_baseline(scoped)
+        rejected_source = False
+    except ValueError as exc:
+        rejected_source = "must bind to the journal variant" in str(exc)
+    record("the S23 content baseline rejects a manifest bound to frozen source",
+           rejected_source,
+           "a package must hash the exact 08_submission/manuscript source it rendered")
+    (bundle / "dummy.docx").unlink()
+    (bundle / "manifest.json").unlink()
 
     # Gate specs are written against 07_manuscript; the runner must repoint them.
     rewritten = gates._resolve_manuscript_paths(
@@ -1027,17 +1094,52 @@ def run_scientific_freeze(proj: Path) -> None:
     r = run("variant_preserves_science", "S22_polish")
     record("an authorised cut is accepted and says so", r.ok and "authorised" in r.detail, r.detail)
 
-    # ---- switching journals must not touch the science ---------------------
+    # ---- switching journals must not touch the science or inherit journal A -----------
     before = (scoped / "07_manuscript/full_manuscript.md").read_bytes()
-    scifreeze.open_variant(scoped, "Gut", force=True)
-    record("switching journals leaves the frozen manuscript byte-identical",
+    variant_dir = scoped / "08_submission/manuscript"
+    (variant_dir / "title_page.md").write_text("Journal A title-page format", encoding="utf-8")
+    (variant_dir / "polish_log.md").write_text("Journal A house-style pass", encoding="utf-8")
+    submission = scoped / "08_submission"
+    (submission / "target_journal.json").write_text(
+        '{"journal":"Endoscopy International Open"}', encoding="utf-8")
+    (submission / "cover_letter.md").write_text("old cover letter", encoding="utf-8")
+    (submission / "bundle").mkdir(parents=True, exist_ok=True)
+    (submission / "bundle/old.docx").write_bytes(b"old journal bundle")
+    (submission / "build_receipts").mkdir(parents=True, exist_ok=True)
+    (submission / "build_receipts/old.json").write_text("{}", encoding="utf-8")
+    (submission / "package_content_baseline.json").write_text("{}", encoding="utf-8")
+    (submission / "package_human_review.md").write_text("old approval", encoding="utf-8")
+    # polish_report.json and prepolish/ were created above; all of these are journal-A residue.
+    record("open-variant refuses to switch journal names without a full reset",
+           _raises(lambda: scifreeze.open_variant(scoped, "Gut", force=True)),
+           "a different journal must clear S20 metadata/cache as well as manuscript/")
+    scifreeze.open_variant(scoped, "Endoscopy International Open", force=True)
+    record("rebuilding the current journal leaves the frozen manuscript byte-identical",
            (scoped / "07_manuscript/full_manuscript.md").read_bytes() == before,
            "this is the whole point of the split")
-    record("the fresh variant is taken from the frozen text, not the previous adaptation",
-           (scoped / "08_submission/manuscript/full_manuscript.md").read_bytes() == before,
-           "a second journal does not inherit the first journal's trims")
-    record("the new variant records the new journal",
-           scifreeze.variant_meta(scoped).get("journal") == "Gut")
+    record("a rebuilt variant is taken from frozen text, not the previous adaptation",
+           (variant_dir / "full_manuscript.md").read_bytes() == before)
+    record("rebuilding deletes every old variant file before copying",
+           all(not (variant_dir / rel).exists() for rel in
+               ("title_page.md", "polish_log.md", "polish_report.json", "prepolish")),
+           "--force is replace-from-freeze, never an in-place overwrite")
+    record("rebuilding a variant clears every S21+ downstream package artifact",
+           all(not (submission / rel).exists() for rel in (
+               "cover_letter.md", "bundle", "build_receipts",
+               "package_content_baseline.json", "package_human_review.md")),
+           "no cover letter, bundle, baseline, receipt or approval can cross variants")
+    record("same-journal rebuild preserves the current S20 metadata",
+           (submission / "target_journal.json").is_file())
+
+    removed = scifreeze.reset_journal(scoped)
+    record("a full journal switch clears S20 metadata/cache and every downstream file",
+           "08_submission/target_journal.json" in removed
+           and not any(submission.iterdir()), f"removed {len(removed)} file(s)")
+    (submission / "target_journal.json").write_text('{"journal":"Gut"}', encoding="utf-8")
+    scifreeze.open_variant(scoped, "Gut")
+    record("the new journal starts from the same frozen text",
+           (variant_dir / "full_manuscript.md").read_bytes() == before
+           and scifreeze.variant_meta(scoped).get("journal") == "Gut")
     record("the frozen record still verifies after two journal cycles",
            run("scientific_freeze_intact", "S25_submission_audit").ok)
 
@@ -1066,6 +1168,24 @@ def run_scientific_freeze(proj: Path) -> None:
     r = run("outputs_exist", "S21_authors")
     record("writing it into the journal variant does satisfy S21", r.ok, r.detail)
 
+    (scoped / "08_submission/manuscript/polish_report.json").write_text("{}", encoding="utf-8")
+    (scoped / "08_submission/manuscript/polish_log.md").write_text(
+        "# Polish log\n\nJournal-specific wording changes.\n", encoding="utf-8")
+    r = run("outputs_exist", "S22_polish")
+    record("S22 declared outputs are satisfied only by variant-side polish evidence",
+           r.ok and not (scoped / "07_manuscript/polish_log.md").exists(), r.detail)
+
+    (scoped / "08_submission/cache").mkdir(parents=True, exist_ok=True)
+    (scoped / "08_submission/cache/old-journal.html").write_text("old", encoding="utf-8")
+    removed = scifreeze.reset_journal(scoped)
+    record("reset-journal clears the entire old submission tree before a new S20 run",
+           "08_submission/cache/old-journal.html" in removed
+           and not any((scoped / "08_submission").iterdir()),
+           f"removed {len(removed)} file(s)")
+    record("reset-journal leaves the scientific freeze and manuscript unchanged",
+           scifreeze.verify_freeze(scoped)[0]
+           and (scoped / "07_manuscript/full_manuscript.md").read_bytes() == before)
+
     record("the invariant explains the freeze so it survives compaction",
            any("frozen when the user releases S19" in inv
                for inv in pipe.policy.get("invariants", [])))
@@ -1078,6 +1198,432 @@ def _raises(fn) -> bool:
         return False
     except SystemExit:
         return True
+
+
+def run_paper_overrides(proj: Path) -> None:
+    """Paper-specific workflow shape lives with the paper and cannot weaken integrity gates."""
+    import hashlib
+    from unittest.mock import patch
+
+    from wfcore import cli, gates, overrides, paths, registry
+    from wfcore.checks import Ctx, get, load_all
+    from wfcore.state import State
+
+    section("paper-local overrides: customise one paper without mutating the master")
+    scoped = proj / "temp/paper_overrides"
+    scoped.mkdir(parents=True, exist_ok=True)
+    master = registry.load()
+    st = State(scoped, ".wf")
+    st.create(master.meta["name"], master.meta["version"], master.first().id)
+
+    def engine_snapshot() -> dict[str, str]:
+        result = {}
+        for dirname in ("pipeline", "tools", "reference", ".kiro"):
+            root = ROOT / dirname
+            if not root.exists():
+                continue
+            for path in root.rglob("*"):
+                if (not path.is_file() or "__pycache__" in path.parts
+                        or path.suffix in {".pyc", ".pyo"}):
+                    continue
+                result[path.relative_to(ROOT).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+        return result
+
+    before = engine_snapshot()
+    env = {**os.environ, "MEDPAPER_PROJECT": str(scoped), "MEDPAPER_ROOT": str(ROOT),
+           "PYTHONIOENCODING": "utf-8"}
+    wf_tool = ROOT / "tools/wf.py"
+
+    p = subprocess.run([sys.executable, str(wf_tool), "override", "init"],
+                       capture_output=True, text=True, env=env, encoding="utf-8", errors="replace")
+    local_file = scoped / ".wf/overrides.toml"
+    record("wf override init writes inside the paper, not the engine",
+           p.returncode == 0 and local_file.is_file()
+           and not (ROOT / ".wf/overrides.toml").exists(),
+           ((p.stdout or "") + (p.stderr or "")).strip()[-120:])
+    record("the generated file is a no-op commented template",
+           overrides.load(st.dir).get("schema") == 1
+           and not overrides.load(st.dir).get("stage_override"),
+           "uncomment only what this paper needs")
+    p = subprocess.run([sys.executable, str(wf_tool), "override", "validate"],
+                       capture_output=True, text=True, env=env, encoding="utf-8", errors="replace")
+    record("the blank template validates without changing the workflow",
+           p.returncode == 0 and "(none" in (p.stdout or ""), (p.stdout or "").strip()[-100:])
+
+    stages = master.stages
+    reason = ("This paper's design makes this stage structurally inapplicable while every "
+              "protected integrity and review gate remains in force.")
+
+    def invalid(name: str, data: dict, phrase: str) -> None:
+        problems = overrides.validate(data, stages)
+        record(name, any(phrase.casefold() in p.casefold() for p in problems), "; ".join(problems)[:180])
+
+    invalid("a protected review stage cannot be skipped",
+            {"schema": 1, "stage_override": [{"stage": "S18_independent_review",
+                                               "skip": True, "reason": reason}]},
+            "cannot be skipped")
+    invalid("a protected review stage cannot have its gates relaxed",
+            {"schema": 1, "stage_override": [{"stage": "S18_independent_review",
+                                               "relax_gate": ["outputs_exist"],
+                                               "reason": reason}]},
+            "gates cannot be relaxed")
+    invalid("a stage owning an integrity gate cannot be skipped",
+            {"schema": 1, "stage_override": [{"stage": "S15_deepread",
+                                               "skip": True, "reason": reason}]},
+            "protected gate")
+    invalid("a protected gate cannot be relaxed",
+            {"schema": 1, "stage_override": [{"stage": "S19_human_review",
+                                               "relax_gate": ["scientific_freeze_captured"],
+                                               "reason": reason}]},
+            "cannot be relaxed")
+    invalid("a misspelled gate is refused instead of silently relaxing zero",
+            {"schema": 1, "stage_override": [{"stage": "S07_artifacts",
+                                               "relax_gate": ["md_section_typo"],
+                                               "reason": reason}]},
+            "not on this stage")
+    invalid("weakening with a stub reason is refused",
+            {"schema": 1, "stage_override": [{"stage": "S01_intake",
+                                               "skip": True, "reason": "not needed"}]},
+            "at least 40")
+    invalid("an output cannot escape the paper directory",
+            {"schema": 1, "stage_override": [{"stage": "S07_artifacts",
+                                               "extra_outputs": ["../engine.txt"]}]},
+            "inside the paper")
+    invalid("an added gate cannot read outside the paper",
+            {"schema": 1, "stage_override": [{"stage": "S07_artifacts",
+                                               "add_gate": [{"check": "md_sections",
+                                                             "path": "../../secret.md"}]}]},
+            "inside the paper")
+    invalid("freeform widening needs a substantive reason",
+            {"schema": 1, "freeform": {"reason": "misc", "globs": ["extras/*.pdf"]}},
+            "reason of at least")
+    invalid("targets are kept in config.toml, not duplicated in overrides.toml",
+            {"schema": 1, "targets": {"intro_words_max": 600}},
+            "targets belong")
+    invalid("skip cannot pretend to produce extra outputs",
+            {"schema": 1, "stage_override": [{"stage": "S01_intake", "skip": True,
+                                               "reason": reason,
+                                               "extra_outputs": ["00_input/x.md"]}]},
+            "cannot be combined")
+
+    # A real overlay: two paper-specific skips plus one strengthened/relaxed future stage.
+    valid_text = f'''schema = 1
+
+[[stage_override]]
+stage = "S01_intake"
+skip = true
+reason = "{reason}"
+
+[[stage_override]]
+stage = "S03_protocol"
+skip = true
+reason = "{reason}"
+
+[[stage_override]]
+stage = "S07_artifacts"
+relax_gate = ["md_sections"]
+extra_outputs = ["01_protocol/site_specific_artifact.md"]
+reason = "This paper uses a machine-readable site form instead of the generic prose section, while all artifact integrity checks remain active."
+
+[[stage_override.add_gate]]
+check = "temp_clean"
+
+[freeform]
+reason = "The institution issues approval PDFs with server-generated filenames that cannot be declared one by one before retrieval."
+globs = ["01_protocol/site_approvals/*.pdf"]
+'''
+    local_file.write_text(valid_text, encoding="utf-8")
+    data = overrides.load(st.dir)
+    problems = overrides.validate(data, stages)
+    record("a documented paper-local overlay validates", not problems, "; ".join(problems))
+
+    effective = registry.load(st.config(), data)
+    record("the overlay marks only the named stages",
+           effective.stage("S01_intake").skipped
+           and effective.stage("S03_protocol").skipped
+           and not effective.stage("S02_feasibility").skipped)
+    record("a strengthening adds an output and a gate only to this paper",
+           "01_protocol/site_specific_artifact.md" in effective.stage("S07_artifacts").outputs
+           and any(g.get("check") == "temp_clean" for g in effective.stage("S07_artifacts").gate)
+           and "01_protocol/site_specific_artifact.md" not in master.stage("S07_artifacts").outputs)
+    record("the named non-protected gate is relaxed, while other gates remain",
+           not any(g.get("check") == "md_sections" for g in effective.stage("S07_artifacts").gate)
+           and any(g.get("check") == "artifact_plan_sane"
+                   for g in effective.stage("S07_artifacts").gate))
+    record("every effective change is printed for context-reset recovery",
+           len(effective.override_notes) == 6
+           and sum("SKIPPED" in note for note in effective.override_notes) == 2
+           and any("relaxed" in note for note in effective.override_notes)
+           and any("added" in note for note in effective.override_notes)
+           and any("extra output" in note for note in effective.override_notes)
+           and any("freeform" in note for note in effective.override_notes),
+           " | ".join(effective.override_notes))
+    record("all --force-resistant gates are also protected from config relaxation",
+           cli.NON_OVERRIDABLE_GATES <= overrides.PROTECTED_CHECKS,
+           str(sorted(cli.NON_OVERRIDABLE_GATES - overrides.PROTECTED_CHECKS)))
+
+    # The current stage is skipped without fake outputs, a fake gate or a fake handoff.
+    p = subprocess.run([sys.executable, str(wf_tool), "status", "--brief"],
+                       capture_output=True, text=True, env=env, encoding="utf-8", errors="replace")
+    record("status announces that the workflow is customised",
+           p.returncode == 0 and "PAPER-LOCAL WORKFLOW OVERRIDES" in (p.stdout or "")
+           and "S01_intake: SKIPPED" in (p.stdout or ""), (p.stdout or "").strip()[-180:])
+    p = subprocess.run([sys.executable, str(wf_tool), "advance"],
+                       capture_output=True, text=True, env=env, encoding="utf-8", errors="replace")
+    st.load()
+    record("advance records the active skip and moves to the next runnable stage",
+           p.returncode == 0 and st.status_of("S01_intake") == "skipped"
+           and st.current == "S02_feasibility",
+           (p.stdout or "").strip()[-140:])
+    record("the exact override that governed the skip is fingerprinted in state",
+           st.stage_info("S01_intake").get("paper_override_fingerprint")
+           == effective.stage("S01_intake").override_fingerprint)
+    p = subprocess.run([sys.executable, str(wf_tool), "override", "init", "--force"],
+                       capture_output=True, text=True, env=env, encoding="utf-8", errors="replace")
+    record("--force cannot erase an override that is already workflow history",
+           p.returncode != 0 and "already governed" in (p.stdout or ""),
+           (p.stdout or "").strip()[-130:])
+
+    # Simulate S02 becoming green: normal completion crosses consecutive paper-local skips.
+    nxt, skipped = effective.transition_after("S02_feasibility")
+    st.complete("S02_feasibility", nxt.id if nxt else None,
+                [(s.id, s.skip_reason, s.override_fingerprint) for s in skipped],
+                effective.stage("S02_feasibility").override_fingerprint)
+    record("normal completion crosses a following skipped stage",
+           nxt is not None and nxt.id == "S04_data"
+           and st.status_of("S03_protocol") == "skipped" and st.current == "S04_data",
+           f"next={nxt.id if nxt else None}; S03={st.status_of('S03_protocol')}")
+    record("unchanged completed overrides remain valid",
+           not overrides.validate_against_state(data, st))
+
+    changed = json.loads(json.dumps(data))
+    changed["stage_override"][1]["reason"] += " Retrospectively changed."
+    issues = overrides.validate_against_state(changed, st)
+    record("a completed stage's override cannot be edited retrospectively",
+           any("changed after" in issue for issue in issues), "; ".join(issues))
+    removed = {"schema": 1, "stage_override": data["stage_override"][2:],
+               "freeform": data["freeform"]}
+    issues = overrides.validate_against_state(removed, st)
+    record("a completed stage's override cannot be silently removed",
+           any("was removed" in issue or "changed after" in issue for issue in issues),
+           "; ".join(issues))
+    changed_freeform = json.loads(json.dumps(data))
+    changed_freeform["freeform"]["globs"] = ["01_protocol/different/*.pdf"]
+    issues = overrides.validate_against_state(changed_freeform, st)
+    record("global freeform allowances are immutable after they governed a stage",
+           any("changed after" in issue for issue in issues), "; ".join(issues))
+
+    # A loop legitimately permits returning a stage from an overridden shape to the master.
+    loop_root = scoped / "loop_override_to_master"
+    loop_state = State(loop_root, ".wf")
+    loop_state.create(master.meta["name"], master.meta["version"], master.first().id)
+    one_override = {"schema": 1, "stage_override": [{
+        "stage": "S01_intake", "extra_outputs": ["00_input/local.md"]}]}
+    one_pipe = registry.load(None, one_override)
+    loop_state.complete("S01_intake", "S02_feasibility", override_fingerprint=
+                        one_pipe.stage("S01_intake").override_fingerprint)
+    loop_state.rewind("S01_intake", "returning this stage to the master definition")
+    record("an active rewound stage may remove its old override",
+           not overrides.validate_against_state({}, loop_state))
+    loop_state.complete("S01_intake", "S02_feasibility", override_fingerprint="")
+    record("completion under the master clears the stale override fingerprint",
+           "paper_override_fingerprint" not in loop_state.stage_info("S01_intake")
+           and not overrides.validate_against_state({}, loop_state))
+
+    # Simple targets already had a safe paper-local home; prove it remains separate.
+    p = subprocess.run([sys.executable, str(wf_tool), "config", "set",
+                        "intro_words_max", "601"], capture_output=True, text=True, env=env,
+                       encoding="utf-8", errors="replace")
+    record("wf config set writes only this paper's config.toml",
+           p.returncode == 0 and (scoped / ".wf/config.toml").is_file()
+           and "intro_words_max = 601" in (scoped / ".wf/config.toml").read_text(encoding="utf-8"))
+
+    # In-process helpers must inherit the selected paper; this is the class of bug that leaked
+    # 68 EFetch payloads into <engine>/project before _export_paper_env existed.
+    old_project = os.environ.get("MEDPAPER_PROJECT")
+    old_root = os.environ.get("MEDPAPER_ROOT")
+    try:
+        os.environ.pop("MEDPAPER_PROJECT", None)
+        cli._export_paper_env(scoped)
+        from pubmed import eutils as eu
+        record("in-process PubMed helpers resolve to the active paper",
+               eu.project_root().resolve() == scoped.resolve(), str(eu.project_root()))
+        record("their cache directory is inside the paper, never <engine>/project",
+               eu.cache_dir().resolve().is_relative_to(scoped.resolve()), str(eu.cache_dir()))
+    finally:
+        if old_project is None:
+            os.environ.pop("MEDPAPER_PROJECT", None)
+        else:
+            os.environ["MEDPAPER_PROJECT"] = old_project
+        if old_root is None:
+            os.environ.pop("MEDPAPER_ROOT", None)
+        else:
+            os.environ["MEDPAPER_ROOT"] = old_root
+
+    # Paper-owned scripts are also fenced: they must consume the selected root, and the wrapper
+    # gives them that root even when invoked from the mother engine directory.
+    code_dir = scoped / "03_analysis/code"
+    code_dir.mkdir(parents=True, exist_ok=True)
+    bad_script = code_dir / "bad_root.py"
+    bad_script.write_text(
+        "from pathlib import Path\nPath('project/03_analysis/results/x.txt').write_text('x')\n",
+        encoding="utf-8")
+    load_all()
+    scoped_pipe = registry.load(st.config(), data)
+    ctx = Ctx(pipeline=scoped_pipe, state=st, project=scoped,
+              stage=scoped_pipe.stage("S05_analysis"),
+              spec={"check": "paper_scripts_scoped",
+                    "patterns": ["03_analysis/code/**/*.py"]})
+    result = get("paper_scripts_scoped")(ctx)
+    record("a paper script using Path('project') is blocked", not result.ok, result.detail)
+
+    bad_script.write_text(
+        "from pathlib import Path\n"
+        "from wfcore.paths import project_dir\n"
+        "PROJECT = project_dir()  # real call, but the write below ignores it\n"
+        "open('project/03_analysis/results/x.txt', 'w').write('x')\n",
+        encoding="utf-8")
+    result = get("paper_scripts_scoped")(ctx)
+    record("an unused safe-root call cannot hide a literal project/ write",
+           not result.ok and "literal project/" in result.detail, result.detail)
+    bad_r = code_dir / "bad_root.R"
+    bad_r.write_text(
+        'PROJECT <- Sys.getenv("MEDPAPER_PROJECT")\nwrite.csv(data.frame(x=1), "project/out.csv")\n',
+        encoding="utf-8")
+    ctx.spec["patterns"] = ["03_analysis/code/**/*.py", "03_analysis/code/**/*.R"]
+    result = get("paper_scripts_scoped")(ctx)
+    record("R scripts are covered by the same literal project/ protection",
+           not result.ok and "bad_root.R" in result.detail, result.detail)
+    bad_r.unlink()
+    ctx.spec["patterns"] = ["03_analysis/code/**/*.py"]
+
+    legacy_state = State(scoped / "legacy_state", ".wf")
+    legacy_state.create(master.meta["name"], "1.3.9", "S05_analysis")
+    legacy_state.migrate_pipeline(master.meta["version"], [s.id for s in master.stages])
+    legacy_ctx = Ctx(pipeline=scoped_pipe, state=legacy_state, project=scoped,
+                     stage=scoped_pipe.stage("S05_analysis"),
+                     spec={"check": "paper_scripts_scoped",
+                           "patterns": ["03_analysis/code/**/*.py"]})
+    legacy_result = get("paper_scripts_scoped")(legacy_ctx)
+    record("legacy in-flight scripts get an explicit non-blocking migration warning",
+           not legacy_result.ok and legacy_result.severity == "warn"
+           and any("Legacy paper migration" in hint for hint in legacy_result.hints),
+           legacy_result.detail)
+
+    bad_script.unlink()
+    good_script = code_dir / "good_root.py"
+    good_script.write_text(
+        "from pathlib import Path\n"
+        "from wfcore.paths import project_dir\n"
+        "p = project_dir() / '03_analysis/results/run_script_marker.txt'\n"
+        "p.parent.mkdir(parents=True, exist_ok=True)\n"
+        "p.write_text('inside paper', encoding='utf-8')\n"
+        "Path('cwd_marker.txt').write_text('paper cwd', encoding='utf-8')\n",
+        encoding="utf-8")
+    result = get("paper_scripts_scoped")(ctx)
+    record("a paper script resolving project_dir passes the isolation gate", result.ok,
+           result.detail)
+    p = subprocess.run([sys.executable, str(wf_tool), "run-script",
+                        "03_analysis/code/good_root.py"], capture_output=True, text=True,
+                       env=env, encoding="utf-8", errors="replace")
+    marker = scoped / "03_analysis/results/run_script_marker.txt"
+    record("wf run-script executes with the selected paper as cwd",
+           p.returncode == 0 and marker.is_file()
+           and marker.read_text(encoding="utf-8") == "inside paper"
+           and (scoped / "cwd_marker.txt").is_file()
+           and (scoped / "cwd_marker.txt").read_text(encoding="utf-8") == "paper cwd",
+           ((p.stdout or "") + (p.stderr or "")).strip()[-140:])
+    p = subprocess.run([sys.executable, str(wf_tool), "run-script", "../outside.py"],
+                       capture_output=True, text=True, env=env, encoding="utf-8", errors="replace")
+    record("wf run-script refuses a path outside the paper",
+           p.returncode != 0 and "outside the paper" in (p.stdout or ""),
+           (p.stdout or "").strip()[-100:])
+    with patch.dict(os.environ, {"MEDPAPER_PROJECT": str(scoped)}):
+        try:
+            paths.resolve_paper_path("project/../../project/engine-write.txt")
+            escaped = False
+        except ValueError:
+            escaped = True
+    record("the logical project/ alias rejects traversal out of the paper", escaped)
+    with patch.dict(os.environ, {"MEDPAPER_PROJECT": str(scoped)}):
+        try:
+            paths.paper_output_path(ROOT / "project/engine-write.txt")
+            absolute_output_rejected = False
+        except ValueError:
+            absolute_output_rejected = True
+    record("engine helpers reject an explicit output outside the selected paper",
+           absolute_output_rejected)
+
+    # Standalone engine tools (not launched through wf.py) follow the active pointer too. This
+    # is the second leak route: an active paper selected by `wf use` must be enough.
+    fake_root = scoped / "standalone_engine"
+    fake_paper = fake_root / "papers/selected"
+    (fake_paper / ".wf").mkdir(parents=True)
+    State(fake_paper, ".wf").create(master.meta["name"], master.meta["version"], master.first().id)
+    (fake_root / ".wf").mkdir(parents=True)
+    (fake_root / ".wf/active").write_text("selected\n", encoding="utf-8")
+    standalone_env = {k: v for k, v in env.items() if k != "MEDPAPER_PROJECT"}
+    standalone_env["MEDPAPER_ROOT"] = str(fake_root)
+    standalone_env["PYTHONPATH"] = str(ROOT / "tools")
+    p = subprocess.run([sys.executable, "-c",
+                        "from pubmed import eutils; print(eutils.project_root()); "
+                        "print(eutils.cache_dir())"], capture_output=True, text=True,
+                       env=standalone_env, encoding="utf-8", errors="replace")
+    record("standalone PubMed tools follow the paper selected with wf use",
+           p.returncode == 0 and str(fake_paper) in (p.stdout or "")
+           and (fake_paper / "06_refs/cache").is_dir(),
+           ((p.stdout or "") + (p.stderr or "")).strip()[-140:])
+    p = subprocess.run([sys.executable, str(ROOT / "tools/data_manifest.py"), "init"],
+                       capture_output=True, text=True, env=standalone_env,
+                       encoding="utf-8", errors="replace")
+    record("standalone data_manifest writes to the selected paper without --project",
+           p.returncode == 0
+           and (fake_paper / "02_data/acquisition_manifest.json").is_file(),
+           ((p.stdout or "") + (p.stderr or "")).strip()[-140:])
+    table_code = (
+        "from tables.threeline import write_table; "
+        "write_table('project/04_tables/main/Table1.xlsx','Table 1','Table 1. Test.',"
+        "['Item','Value'],[['n','1']],['Data are counts.'])")
+    p = subprocess.run([sys.executable, "-c", table_code], capture_output=True, text=True,
+                       env=standalone_env, encoding="utf-8", errors="replace")
+    record("the documented project/... alias maps table output into the selected paper",
+           p.returncode == 0 and (fake_paper / "04_tables/main/Table1.xlsx").is_file(),
+           ((p.stdout or "") + (p.stderr or "")).strip()[-120:])
+    record("standalone tools did not create the mother engine's project/ fallback",
+           not (fake_root / "project").exists(), str(fake_root / "project"))
+    (fake_root / ".wf/active").write_text("missing-paper\n", encoding="utf-8")
+    p = subprocess.run([sys.executable, "-c",
+                        "from pubmed import eutils; print(eutils.project_root())"],
+                       capture_output=True, text=True, env=standalone_env,
+                       encoding="utf-8", errors="replace")
+    record("a stale active marker fails closed instead of falling back to engine/project",
+           p.returncode != 0 and "Refusing to fall back" in
+           ((p.stdout or "") + (p.stderr or "")) and not (fake_root / "project").exists(),
+           ((p.stdout or "") + (p.stderr or "")).strip()[-150:])
+
+    # Doctor makes any future regression visible instead of letting a 1 MB/run drip accumulate.
+    fake_engine = scoped / "fake_engine"
+    (fake_engine / "papers/p").mkdir(parents=True)
+    (fake_engine / "project/06_refs/cache").mkdir(parents=True)
+    (fake_engine / "project/06_refs/cache/leak.xml").write_bytes(b"wrong root")
+    with patch.object(cli.paths, "repo_root", return_value=fake_engine):
+        rows = cli._engine_hygiene_rows()
+    record("doctor reports paper artifacts leaked into the engine project/",
+           any(name == "engine project/" and status == "BROKEN" for name, status, _ in rows),
+           str(rows))
+    (fake_engine / "project/06_refs/cache/leak.xml").unlink()
+    with patch.object(cli.paths, "repo_root", return_value=fake_engine):
+        rows = cli._engine_hygiene_rows()
+    record("doctor clears once the engine contains no paper artifacts",
+           any(name == "engine project/" and status == "ok" for name, status, _ in rows),
+           str(rows))
+
+    after = engine_snapshot()
+    record("a full paper-local customisation cycle leaves every engine file byte-identical",
+           before == after,
+           f"before={len(before)} after={len(after)} changed="
+           f"{sorted(set(before) ^ set(after))[:4]}")
+    shutil.rmtree(scoped, ignore_errors=True)
 
 
 def run_visual_deferral(proj: Path) -> None:
@@ -1491,7 +2037,7 @@ def run_codex_integration() -> None:
                f"card must name `{agent}` so the work is not done in the main context")
 
     record("pipeline and skill versions agree",
-           pipe["meta"]["version"] == "1.3.9" and 'version: "2.0.0"' in skill,
+           pipe["meta"]["version"] == "1.4.0" and 'version: "2.0.0"' in skill,
            f'pipeline={pipe["meta"]["version"]}, skill=2.0.0 (Kiro adapter revision)')
     record("all 25 stage cards exist",
            len(pipe["stage"]) == 25 and
@@ -1514,6 +2060,7 @@ def run_codex_integration() -> None:
     package_card = (ROOT / "pipeline/stages/S23_package.md").read_text(encoding="utf-8")
     package_human_card = (ROOT / "pipeline/stages/S24_package_human_review.md").read_text(encoding="utf-8")
     human_card = (ROOT / "pipeline/stages/S19_human_review.md").read_text(encoding="utf-8")
+    journal_card = (ROOT / "pipeline/stages/S20_journal.md").read_text(encoding="utf-8")
     final_audit_card = (ROOT / "pipeline/stages/S25_submission_audit.md").read_text(encoding="utf-8")
     record("independent reviewer is singular, read-only, and before author intake",
            independent.get("needs_user", False) is False and human.get("needs_user") is True and
@@ -1566,6 +2113,31 @@ def run_codex_integration() -> None:
            '"s19_review_release_explicit"' in
            (ROOT / "tools/wfcore/cli.py").read_text(encoding="utf-8"),
            "versioned review ZIP + exact paths + package-bound non-overridable stop")
+    journal = next(s for s in pipe["stage"] if s["id"] == "S20_journal")
+    polish = next(s for s in pipe["stage"] if s["id"] == "S22_polish")
+    journal_stages = {s["id"]: {g["check"] for g in s["gate"]}
+                      for s in pipe["stage"] if s["id"] in {
+                          "S20_journal", "S21_authors", "S22_polish", "S23_package",
+                          "S24_package_human_review", "S25_submission_audit"}}
+    record("S19 freezes science and every journal stage keeps that boundary",
+           "scientific_freeze_captured" in human_checks
+           and all({"scientific_freeze_intact", "journal_variant_ready"}.issubset(checks_)
+                   for checks_ in journal_stages.values())
+           and all("variant_preserves_science" in journal_stages[sid] for sid in {
+               "S22_polish", "S23_package", "S24_package_human_review",
+               "S25_submission_audit"})
+           and "07_manuscript/scientific_freeze.json" in human["outputs"],
+           "S19 capture -> S20 variant -> S22/S23/S24/S25 intact/delta checks")
+    record("S23 renders the journal variant, never the frozen manuscript",
+           "--input project/08_submission/manuscript/full_manuscript.md" in package_card
+           and "--input project/08_submission/manuscript/title_page.md" in package_card
+           and "--input project/07_manuscript/full_manuscript.md" not in package_card,
+           "the Word source lives inside the submission integration area")
+    record("journal switching clears the old submission tree before rebuilding S20",
+           "reset-journal --confirm-journal" in journal_card
+           and "loop --to S20_journal" in journal_card
+           and "not merely call `open-variant --force`" in journal_card,
+           "old cache, cover letter, bundle and approvals cannot survive")
     record("Word package contract covers reported defects",
            all(term in package_card for term in ("all text black", "external hyperlinks",
                                                   "supplementary Methods", "Figure legends",
@@ -2371,6 +2943,13 @@ def run_manuscript_docx(proj: Path) -> None:
         build("cover_letter", cover, "cover_letter.docx"),
         build("supplementary", manuscript / "supplementary_methods.md", "supplementary_methods.docx"),
     ])
+    receipt_dir = submission / "build_receipts"
+    receipts = sorted(receipt_dir.glob("*.json")) if receipt_dir.is_dir() else []
+    record("every built DOCX has a deterministic source/output receipt",
+           builds_ok and len(receipts) == 4
+           and all(json.loads(p.read_text(encoding="utf-8")).get("output_sha256")
+                   for p in receipts),
+           f"{len(receipts)} receipt(s)")
     word_xmls = []
     for name in ("manuscript.docx", "title_page.docx", "cover_letter.docx",
                  "supplementary_methods.docx"):
@@ -2512,11 +3091,30 @@ def run_manuscript_docx(proj: Path) -> None:
            outcome.detail[:110])
     title_page_docx.write_bytes(approved_title_page)
 
-    from wfcore.packagecontent import write_baseline
+    from wfcore.packagecontent import build_receipt_path, write_baseline
+    title_receipt = build_receipt_path(proj, title_page_docx)
+    held_receipt = title_receipt.with_suffix(".held")
+    title_receipt.replace(held_receipt)
+    try:
+        write_baseline(proj)
+        missing_receipt_rejected = False
+    except ValueError as exc:
+        missing_receipt_rejected = "build receipt missing" in str(exc)
+    finally:
+        held_receipt.replace(title_receipt)
+    record("S23 baseline refuses a DOCX with no deterministic build receipt",
+           missing_receipt_rejected)
     baseline_path = write_baseline(proj)
     outcome = gate("package_content_matches_baseline", "S23_package")
     record("S23 captures a valid submission visible-text baseline",
            baseline_path.is_file() and outcome.ok, outcome.detail)
+    title_receipt = build_receipt_path(proj, title_page_docx)
+    approved_receipt = title_receipt.read_bytes()
+    title_receipt.write_text("{}", encoding="utf-8")
+    outcome = gate("package_content_matches_baseline", "S24_package_human_review")
+    record("tampering with a deterministic DOCX build receipt is rejected",
+           not outcome.ok and "build receipt changed" in outcome.detail, outcome.detail[:120])
+    title_receipt.write_bytes(approved_receipt)
     baseline_cli = ROOT / "tools/package_content.py"
     blocked_capture = subprocess.run(
         [sys.executable, str(baseline_cli), "capture", "--replace", "--project", str(proj)],
@@ -2599,6 +3197,9 @@ def run_manuscript_docx(proj: Path) -> None:
     record("final freeze includes the S23 content baseline",
            any(item.get("path") == "08_submission/package_content_baseline.json"
                for item in freeze_payload.get("files", [])))
+    record("final freeze includes every deterministic DOCX build receipt",
+           sum(str(item.get("path", "")).startswith("08_submission/build_receipts/")
+               for item in freeze_payload.get("files", [])) == 4)
     audit_path = submission / "independent_submission_audit.md"
     audit_path.write_text("# Verdict\n\nPASS\n", encoding="utf-8")
     outcome = gate("submission_audit_matches_freeze", "S25_submission_audit")
@@ -2845,6 +3446,7 @@ def main() -> int:
         run_reference_proof(proj)
         run_reference_identity(proj)
         run_scientific_freeze(proj)
+        run_paper_overrides(proj)
         run_qc(proj)
         run_visual_deferral(proj)
         run_archetypes(proj)

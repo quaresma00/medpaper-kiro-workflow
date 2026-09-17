@@ -2,7 +2,7 @@
 
 一套面向医学与临床研究的 Kiro 工作流。它把“研究想法”推进为经过数据、文献、统计结果、图表、人工复核和期刊规则共同校验的投稿包，而不是只让 AI 一次性写出一篇看似完整的论文。
 
-当前版本：`1.3.9`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE
+当前版本：`1.4.0`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE
 
 ## 这套工作流解决什么问题
 
@@ -56,6 +56,27 @@
 5. 患者级数据、个人信息、凭据和密钥未经明确授权不得上传到外部服务。
 6. ImageGen 可参与图片的视觉检查和改进建议，但不能代替由数据和代码生成科研图，也不能绕过数值核对。
 7. 工作流不会自行撰写或加入 AI 使用声明；如期刊要求，只把它记录为由用户决定的合规事项。
+
+## 母版、单篇定制与期刊稿分离
+
+`pipeline/`、`tools/`、`reference/` 和 `.kiro/` 是所有论文共用的母版。运行论文时不应修改这些目录；否则某篇研究的特殊需求会改变后续所有项目。每篇论文只在自己的 `papers/<slug>/` 内写文件。简单数值配置写入该论文的 `.wf/config.toml`：
+
+```powershell
+python tools/wf.py config set intro_words_max 600
+```
+
+如果研究设计确实需要不同的流程形状，使用论文自己的覆盖文件，而不是改母版：
+
+```powershell
+python tools/wf.py override init
+# 编辑 papers/<slug>/.wf/overrides.toml
+python tools/wf.py override validate
+python tools/wf.py override show
+```
+
+覆盖文件可以增加输出和门禁，也可以在写明充分理由后放宽非完整性门禁或跳过真正不适用的普通阶段。数据完整性、文献/数字溯源、全文身份、视觉欠账、科学稿冻结等门禁，以及 S18、S19、S24、S25 的审阅/审计阶段不能关闭。`wf status` 每次都会显示本篇所有覆盖；阶段完成时还会保存覆盖条目的指纹，事后不能悄悄修改或删除。若研究设计后来真正变化，应先 `wf loop --to <stage>` 回到负责阶段，再修改覆盖。论文自有 Python/R 脚本统一通过 `wf run-script <相对路径.py|.R>` 执行，工作目录固定为本篇论文，并监测母版目录是否被写入。
+
+科学稿与期刊稿也分开。S19 经用户确认无需继续修改后，`scientific_freeze.py capture` 冻结 `07_manuscript/` 的科学内容；S20 选刊后，在 `08_submission/manuscript/` 创建该期刊的副本。字数限制、结构化摘要、参考文献样式、题名页和期刊声明只改这个副本。改投另一期刊时，先返回 S20 并运行 `scientific_freeze.py reset-journal --confirm-journal "<旧期刊>"`，清空旧期刊的缓存、题名页、润色记录、cover letter、bundle、基线和审批，再从同一冻结稿生成新期刊副本。这样既不会反复改动已经确认的论文，也不会把上一期刊的任何投稿残留带到下一期刊。
 
 ## 25 个阶段分别做什么
 

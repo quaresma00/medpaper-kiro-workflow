@@ -20,7 +20,17 @@ half-finish it and move on.
    Write `project/03_analysis/method_scan.md`: for each candidate method, what it is,
    which retrieved papers use it, and whether it fits our data. Cite with `[@key]`.
 2. **Analyse.** Every analysis lives in a script under `project/03_analysis/code/`.
-   Scripts must be re-runnable from a clean checkout and must set a seed where relevant.
+   Scripts must be re-runnable from a clean checkout, must set a seed where relevant, and must
+   resolve the selected paper rather than assuming that the current directory contains a
+   physical `project/` folder:
+```python
+from wfcore.paths import project_dir
+PROJECT = project_dir()
+RESULTS = PROJECT / "03_analysis" / "results"
+```
+   Run each with `python tools/wf.py run-script 03_analysis/code/<script>.py`. The wrapper
+   exports the selected paper and adds `tools/` to `PYTHONPATH`; direct execution without a
+   paper root should fail closed rather than write into the shared engine.
 3. **Dump results as JSON.** Each script writes to `project/03_analysis/results/*.json`.
    One file per analysis block. Structure them so a human can find a value:
 ```json

@@ -8,7 +8,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import paths
+from . import overrides, paths
 
 
 @dataclass
@@ -21,6 +21,10 @@ class Stage:
     needs_user: bool = False
     loopable: bool = False
     index: int = 0
+    # Set by a paper-local override in .wf/overrides.toml, never by the master pipeline.
+    skipped: bool = False
+    skip_reason: str = ""
+    override_fingerprint: str = ""
 
     def card_path(self) -> Path:
         return paths.pipeline_dir() / self.card
@@ -35,6 +39,9 @@ class Pipeline:
     freeform: list[str]
     stages: list[Stage]
     raw: dict
+    # Human-readable summary of what this paper's overrides.toml changed. Printed by `wf status`
+    # on every call, so a customised workflow can never look like the standard one.
+    override_notes: list[str] = field(default_factory=list)
 
     # ---- lookups -------------------------------------------------------
     def stage(self, sid: str) -> Stage:
@@ -65,10 +72,21 @@ class Pipeline:
         raise KeyError(f"stage token '{token}' matched {len(hits)} stages")
 
     def next_of(self, sid: str) -> Stage | None:
+        """Immediate physical successor in the master order (including skipped stages)."""
         s = self.stage(sid)
         if s.index + 1 < len(self.stages):
             return self.stages[s.index + 1]
         return None
+
+    def transition_after(self, sid: str) -> tuple[Stage | None, list[Stage]]:
+        """Next runnable stage plus every paper-local skip crossed to reach it."""
+        skipped: list[Stage] = []
+        for stage in self.stages[self.stage(sid).index + 1:]:
+            if stage.skipped:
+                skipped.append(stage)
+                continue
+            return stage, skipped
+        return None, skipped
 
     def stages_after(self, sid: str) -> list[Stage]:
         return self.stages[self.stage(sid).index + 1 :]
@@ -86,7 +104,8 @@ class Pipeline:
         return out
 
 
-def load(config_overrides: dict | None = None) -> Pipeline:
+def load(config_overrides: dict | None = None,
+         paper_overrides: dict | None = None) -> Pipeline:
     pf = paths.pipeline_file()
     if not pf.exists():
         raise SystemExit(f"pipeline definition missing: {pf}")
@@ -113,7 +132,7 @@ def load(config_overrides: dict | None = None) -> Pipeline:
     if config_overrides:
         targets.update(config_overrides.get("targets", {}))
 
-    return Pipeline(
+    pipeline = Pipeline(
         meta=data.get("meta", {}),
         layout=data.get("layout", {}),
         policy=data.get("policy", {}),
@@ -122,3 +141,14 @@ def load(config_overrides: dict | None = None) -> Pipeline:
         stages=stages,
         raw=data,
     )
+
+    # Paper-local shape changes are applied last, and only after validation, so an illegal
+    # override cannot take effect even for the duration of one command. The master file on disk
+    # is never modified - two papers can run different shapes from the same engine.
+    if paper_overrides:
+        problems = overrides.validate(paper_overrides, stages)
+        if problems:
+            raise SystemExit(
+                "refusing to apply .wf/overrides.toml:\n  " + "\n  ".join(problems))
+        pipeline.override_notes = overrides.apply(pipeline, paper_overrides)
+    return pipeline

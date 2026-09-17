@@ -7,8 +7,9 @@ figure/table reference or scientific claim.
 **You are editing `08_submission/manuscript/`, not `07_manuscript/`.** The science was frozen
 when the user released S19; this stage is journal-specific work, so it happens on the variant
 S20 opened. `polish.py` and every gate here resolve there automatically - you do not pass
-different paths. The frozen copy is what the fact-preservation check measures against, which is
-why it must stay untouched.
+different paths. The pre-polish snapshot and report also live under the variant, so S22 writes
+nothing into `07_manuscript/`. The separate `variant_preserves_science` gate compares the final
+variant to the frozen source directly.
 
 `variant_preserves_science` compares the variant to the frozen source directly. Prose may be
 tightened as much as the journal's cap requires. A number, citation or artifact reference that
@@ -43,8 +44,9 @@ restore it and tighten prose instead, or get the user's explicit authorisation a
    `polish_reviewed YES` with a concrete reason.
 
 ## Outputs
-- `07_manuscript/polish_report.json`
-- `07_manuscript/polish_log.md`
+- `08_submission/manuscript/polish_report.json`
+- `08_submission/manuscript/polish_log.md`
+- `08_submission/manuscript/prepolish/` (fact-preservation snapshot)
 
 ## Hard rules
 - Wording only. Never change a number, citekey, artifact reference or conclusion strength.

@@ -14,7 +14,13 @@ by hand, so every table in the paper is identical.
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
+
+_TOOLS = Path(__file__).resolve().parents[1]
+if str(_TOOLS) not in sys.path:
+    sys.path.insert(0, str(_TOOLS))
+from wfcore import paths as wfpaths  # noqa: E402
 
 try:
     from openpyxl import Workbook
@@ -147,7 +153,7 @@ def write_workbook(path: str | Path, tables: list[dict]) -> Path:
     for spec in tables:
         ws = wb.create_sheet(title=spec["sheet"][:31])
         _write_sheet(ws, spec)
-    p = Path(path)
+    p = wfpaths.paper_output_path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     wb.save(p)
     print(f"wrote {p}  ({len(tables)} sheet(s))")

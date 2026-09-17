@@ -64,9 +64,16 @@ This copies the frozen manuscript, supplementary Methods and statements into
 `08_submission/manuscript/`. From here on that copy is what S21 completes, S22 polishes and
 S23 renders to DOCX; every gate that reads "the manuscript" resolves there automatically.
 
-If the user later picks a different journal, re-run with `--force`. That discards this
-adaptation and takes a fresh copy from the same frozen text, so the second journal never
-inherits the first journal's trims and the reviewed manuscript is never edited twice.
+If the user later picks a different journal, do **not** overwrite S20 files in place and do
+not merely call `open-variant --force`: that would leave the old journal's cache, bundle,
+cover letter and approvals nearby. First route back to S20 and clear the whole submission area:
+```
+.\.venv\Scripts\python.exe tools/wf.py loop --to S20_journal --why "switching target journal"
+.\.venv\Scripts\python.exe tools/manuscript/scientific_freeze.py reset-journal --confirm-journal "<old journal>"
+```
+Then repeat S20 from the shortlist with fresh official evidence and call `open-variant` for the
+new journal. `07_manuscript/` and its freeze are never touched. `open-variant --force` is only
+for rebuilding the current S20 variant; it clears S21+ downstream files as well as the variant.
 
 ## Outputs
 - `08_submission/journal_shortlist.md`

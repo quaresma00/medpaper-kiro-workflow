@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from wfcore import dataproof  # noqa: E402
+from wfcore import dataproof, paths as wfpaths  # noqa: E402
 from wfcore.state import State  # noqa: E402
 
 
@@ -70,9 +70,9 @@ def _skeleton() -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description="manage the medpaper acquisition proof")
     parser.add_argument("command", choices=["init", "sync", "verify"])
-    parser.add_argument("--project", type=Path, default=Path("project"))
+    parser.add_argument("--project", type=Path, default=None)
     args = parser.parse_args()
-    project = args.project.resolve()
+    project = wfpaths.resolve_paper_path(args.project or "project").resolve()
     manifest_path = project / dataproof.MANIFEST_REL
 
     if args.command == "init":

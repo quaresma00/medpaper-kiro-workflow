@@ -16,28 +16,28 @@ r"""Freeze the settled scientific manuscript, and open/inspect the journal varia
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from wfcore import scifreeze  # noqa: E402
+from wfcore import paths as wfpaths, scifreeze  # noqa: E402
 
 
 def project_root() -> Path:
-    env = os.environ.get("MEDPAPER_PROJECT")
-    if env:
-        return Path(env)
-    repo = Path(__file__).resolve().parents[2]
-    return repo / "project"
+    return wfpaths.project_dir()
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="scientific freeze and journal variant")
     ap.add_argument("command",
-                    choices=("capture", "verify", "open-variant", "delta", "show"))
+                    choices=("capture", "verify", "open-variant", "reset-journal",
+                             "delta", "show"))
     ap.add_argument("--journal", default="", help="target journal, for open-variant")
+    ap.add_argument("--confirm-journal", default="",
+                    help="reset-journal: exact OLD journal name being discarded")
     ap.add_argument("--force", action="store_true",
                     help="re-freeze after a genuine rework, or replace an existing variant")
     args = ap.parse_args()
@@ -67,6 +67,27 @@ def main() -> int:
         print(f"  {scifreeze.VARIANT_DIR}/")
         print("A genuine scientific change routes through tools/rework.py to its owning stage.")
         return 2
+
+    if args.command == "reset-journal":
+        state_path = proj / ".wf/state.json"
+        try:
+            current = json.loads(state_path.read_text(encoding="utf-8")).get("current", "")
+        except (FileNotFoundError, json.JSONDecodeError):
+            current = ""
+        if current != "S20_journal":
+            raise SystemExit(
+                f"reset-journal is allowed only after looping to S20_journal (current={current or 'unknown'}).\n"
+                "Run: tools/wf.py loop --to S20_journal --why \"switching target journal\"")
+        old = scifreeze.variant_meta(proj).get("journal", "")
+        if old and args.confirm_journal.strip() != old:
+            raise SystemExit(
+                f"confirm the journal being discarded exactly:\n"
+                f"  scientific_freeze.py reset-journal --confirm-journal \"{old}\"")
+        removed = scifreeze.reset_journal(proj)
+        print(f"cleared {len(removed)} old journal-specific file(s) from 08_submission/")
+        print("frozen 07_manuscript/ was not touched. Rebuild S20 target/guidelines/style, then:")
+        print('  scientific_freeze.py open-variant --journal "<new journal>"')
+        return 0
 
     if args.command == "open-variant":
         if not args.journal.strip():

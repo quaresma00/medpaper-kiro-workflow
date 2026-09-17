@@ -50,27 +50,33 @@ pipeline's own SubFigure panel title as a critical failure.
    strictest requirements and satisfies them by construction:
 ```python
 import sys; sys.path.insert(0, "tools")
+from wfcore.paths import project_dir
 from figures.style import apply_style, save
 from figures.recipes import km_survival, forest_plot, roc_curve, volcano_plot
 
+PROJECT = project_dir()
 apply_style()                      # add palette="nejm" if the journal expects its house colours
 fig, _ = km_survival(groups, time_points=[0, 12, 24, 36],
                      hr=1.87, hr_ci=[1.34, 2.61])   # values read from results JSON
-save(fig, "project/05_figures/out/Figure1", width="single", archetype="km_survival")
+save(fig, PROJECT / "05_figures/out/Figure1", width="single", archetype="km_survival")
 ```
    Recipes take statistics as **numbers, not display strings**, so read them out of
    `03_analysis/results/*.json`. Never pass a pre-formatted `"HR 1.87"` - that is how a
    hand-typed number reaches a figure.
 
 2. For anything without a recipe, one script per figure under `project/05_figures/code/`,
-   named after the plan's `script` field, starting from the shared style:
+   named after the plan's `script` field, starting from the shared style. Run every figure
+   script with `python tools/wf.py run-script 05_figures/code/<script>.py`; never assume a
+   physical `<engine>/project` directory exists:
 ```python
+from wfcore.paths import project_dir
 from figures.style import apply_style, figure, save
 
+PROJECT = project_dir()
 apply_style()                      # journal rcParams: fonts, line widths, no top/right spines
 fig, panels = figure(width="double", height_mm=90, panels=(1, 2))   # SubFigure-based layout
 ...
-save(fig, "project/05_figures/out/Figure1", width="double", archetype="box_jitter")
+save(fig, PROJECT / "05_figures/out/Figure1", width="double", archetype="box_jitter")
 ```
 3. **Multi-panel figures are built panel-first.** Each panel is a `SubFigure` that owns its
    own axes, ticks, labels, legend and colorbar. Never place panels by hand with

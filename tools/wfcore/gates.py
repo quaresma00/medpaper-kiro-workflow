@@ -30,6 +30,9 @@ def _resolve_manuscript_paths(spec: dict, project: Path) -> dict:
 
 
 def run_stage(pipeline, state, project: Path, stage) -> list[Result]:
+    if getattr(stage, "skipped", False):
+        return [Result(True, "paper_override_skip",
+                       f"{stage.id} is inapplicable to this paper: {stage.skip_reason}")]
     checks.load_all()
     results: list[Result] = []
     if not stage.gate:

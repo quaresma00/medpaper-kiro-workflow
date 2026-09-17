@@ -107,8 +107,20 @@ def project_dir(layout: dict | None = None) -> Path:
     slug = active_paper()
     if slug:
         cand = papers_dir() / slug
-        if cand.is_dir():
+        if (cand / state_dir / "state.json").is_file():
             return cand
+        available = [p.name for p in list_papers()]
+        raise SystemExit(
+            f"active paper marker names '{slug}', but its state is missing. Refusing to fall "
+            f"back to <engine>/project.\nSelect a real paper with `wf use <slug>`. Available: "
+            + (", ".join(available) if available else "(none)"))
+
+    available = list_papers()
+    if available:
+        raise SystemExit(
+            "papers exist but none is selected. Refusing to fall back to <engine>/project, "
+            "which would pollute the mother workflow.\nSelect one with:  wf use "
+            + available[0].name)
 
     name = (layout or {}).get("project_dir", "project")
     return repo_root() / name
@@ -132,3 +144,44 @@ def rel(p: Path) -> str:
         return p.resolve().relative_to(repo_root()).as_posix()
     except ValueError:
         return p.as_posix()
+
+
+def resolve_paper_path(raw: str | Path, layout: dict | None = None) -> Path:
+    """Resolve the documented `project/...` alias against the active paper.
+
+    Stage cards historically use `project/05_figures/...` and similar paths because the
+    workflow began as a single-paper engine. In one-engine/many-papers mode, treating that as a
+    normal relative path writes into <engine>/project whenever a standalone script runs from
+    the engine root. `project/` is therefore a logical alias, not a physical directory:
+
+        project/05_figures/out/Figure1.png
+            -> papers/<selected>/05_figures/out/Figure1.png
+
+    Absolute paths and other relative paths retain their ordinary meaning. This lets a user
+    still pass an explicit file outside the paper where a command supports it.
+    """
+    p = Path(raw)
+    if p.is_absolute():
+        return p.resolve()
+    parts = p.parts
+    if parts and parts[0].casefold() == "project":
+        base = project_dir(layout).resolve()
+        candidate = (base / Path(*parts[1:])).resolve()
+        try:
+            candidate.relative_to(base)
+        except ValueError as exc:
+            raise ValueError(f"logical project path escapes the selected paper: {raw}") from exc
+        return candidate
+    return p
+
+
+def paper_output_path(raw: str | Path, layout: dict | None = None) -> Path:
+    """Resolve an output path and refuse writes outside the selected paper."""
+    paper = project_dir(layout).resolve()
+    resolved = resolve_paper_path(raw, layout)
+    candidate = resolved.resolve() if resolved.is_absolute() else (Path.cwd() / resolved).resolve()
+    try:
+        candidate.relative_to(paper)
+    except ValueError as exc:
+        raise ValueError(f"output path must stay inside the selected paper: {raw}") from exc
+    return candidate

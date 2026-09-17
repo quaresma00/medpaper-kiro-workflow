@@ -39,6 +39,16 @@ def default_source(project: Path, role: str) -> str:
     return scifreeze.resolve(project, rel) if rel else ""
 
 
+def build_receipt_path(project: Path, docx: Path) -> Path:
+    """Receipt location outside bundle/ so the upload manifest contains upload files only."""
+    try:
+        rel = docx.resolve().relative_to(project.resolve()).as_posix()
+    except ValueError as exc:
+        raise ValueError(f"DOCX leaves the paper: {docx}") from exc
+    safe = rel.replace("/", "__") + ".json"
+    return project / "08_submission/build_receipts" / safe
+
+
 def _safe_path(project: Path, raw: str) -> tuple[str, Path]:
     rel = PurePosixPath(str(raw).replace("\\", "/"))
     if rel.is_absolute() or not rel.parts or ".." in rel.parts:
@@ -104,7 +114,14 @@ def build_baseline(project: Path) -> dict:
         if not path.is_file():
             raise ValueError(f"manifest DOCX missing: {rel}")
         role = str(item.get("role", "")).strip().casefold()
-        source_raw = str(item.get("source") or default_source(project, role)).strip()
+        expected_source = default_source(project, role)
+        source_raw = str(item.get("source") or expected_source).strip()
+        if (expected_source.startswith("08_submission/manuscript/")
+                and source_raw.replace("\\", "/") != expected_source):
+            raise ValueError(
+                f"{rel}: role '{role}' must bind to the journal variant {expected_source}, "
+                f"not {source_raw}. 07_manuscript/ is the frozen scientific source and is never "
+                "rendered directly after S20.")
         record = {
             "path": rel,
             "role": role,
@@ -117,6 +134,29 @@ def build_baseline(project: Path) -> dict:
                 raise ValueError(f"source for {rel} is missing: {source_rel}")
             record["source"] = source_rel
             record["source_sha256"] = _sha256_file(source_path)
+
+        receipt_path = build_receipt_path(project, path)
+        if not receipt_path.is_file():
+            raise ValueError(
+                f"{rel}: deterministic build receipt missing: "
+                f"{receipt_path.relative_to(project).as_posix()}. Rebuild with build_docx.py; "
+                "a manifest source claim is not proof of what produced a DOCX.")
+        try:
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{rel}: build receipt invalid JSON: {exc}") from exc
+        if receipt.get("output_sha256") != record["binary_sha256"]:
+            raise ValueError(f"{rel}: DOCX differs from its deterministic build receipt")
+        if source_raw:
+            sources = {str(item.get("path")): str(item.get("sha256"))
+                       for item in receipt.get("sources", [])}
+            if sources.get(source_rel) != record["source_sha256"]:
+                raise ValueError(
+                    f"{rel}: receipt does not bind the claimed source {source_rel} at its "
+                    "current hash")
+        receipt_rel = receipt_path.relative_to(project).as_posix()
+        record["build_receipt"] = receipt_rel
+        record["build_receipt_sha256"] = _sha256_file(receipt_path)
         records.append(record)
     if not records:
         raise ValueError("manifest contains no DOCX files to bind")
@@ -208,6 +248,18 @@ def verify_baseline(project: Path) -> tuple[bool, list[str], int]:
                 problems.append(
                     f"{rel}: source {source_raw} changed after S23; rebuild the DOCX and recapture at S23"
                 )
+        receipt_raw = str(item.get("build_receipt", "")).strip()
+        if not receipt_raw:
+            problems.append(f"{rel}: S23 baseline has no deterministic build receipt")
+        else:
+            try:
+                _, receipt = _safe_path(project, receipt_raw)
+                receipt_sha = _sha256_file(receipt)
+            except (OSError, ValueError) as exc:
+                problems.append(f"{rel}: build receipt cannot be verified ({exc})")
+                continue
+            if receipt_sha != item.get("build_receipt_sha256"):
+                problems.append(f"{rel}: deterministic build receipt changed after S23")
     if problems:
         return False, problems, len(records)
     detail = f"{len(records)} DOCX visible-text baseline(s) match"

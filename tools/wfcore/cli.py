@@ -10,12 +10,13 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import json
+import os
 import re
 import shutil
 import sys
 from pathlib import Path
 
-from . import checks, gates, paths, registry, scifreeze
+from . import checks, gates, overrides, paths, registry, scifreeze
 from .state import State
 
 BAR = "=" * 78
@@ -43,8 +44,15 @@ NON_OVERRIDABLE_GATES = {
     # claims about a study nobody read into the Discussion.
     "deepread_complete",
     # Editing the reviewed manuscript to satisfy a journal is the churn the freeze exists to
-    # stop; --force must not reopen that door.
+    # stop; --force must not reopen that door. Capture is protected too, otherwise S19 could
+    # simply force past the boundary before the journal is chosen.
+    "scientific_freeze_captured",
     "scientific_freeze_intact",
+    "journal_variant_ready",
+    "variant_preserves_science",
+    # Paper-authored code that does not consume the selected paper root can write into the
+    # shared engine. This is structural isolation, not an optional style check.
+    "paper_scripts_scoped",
 }
 
 
@@ -94,11 +102,31 @@ def _no_state_help(pipe, proj: Path) -> None:
     print(f"list papers at any time with:  {wf()} papers")
 
 
+def _export_paper_env(proj: Path) -> None:
+    """Tell every in-process tool module which paper is active.
+
+    tools/pubmed/eutils.py and friends resolve their project root from MEDPAPER_PROJECT and fall
+    back to <engine>/project when it is unset. The driver resolves the paper through paths.py
+    instead, so anything a check imports and calls in-process used to write to the engine's own
+    project/ directory rather than to the paper.
+
+    That was not theoretical: the live reference_provenance gate calls eu.efetch(..., purpose=
+    "gate") in-process, and every run deposited a ~1 MB EFetch payload in <engine>/project/
+    06_refs/cache/. Sixty-eight of them accumulated - engine pollution, and the gate's own
+    evidence filed outside the paper it belonged to. Exporting here fixes the whole class rather
+    than that one call site.
+    """
+    os.environ["MEDPAPER_PROJECT"] = str(proj.resolve())
+    os.environ.setdefault("MEDPAPER_ROOT", str(paths.repo_root()))
+
+
 def _load(need_state: bool = True):
     tmp_state = State(paths.project_dir({}), ".wf")
-    overrides = tmp_state.config() if tmp_state.config_file.exists() else {}
-    pipe = registry.load(overrides)
+    cfg = tmp_state.config() if tmp_state.config_file.exists() else {}
+    paper_over = overrides.load(tmp_state.dir)
+    pipe = registry.load(cfg, paper_over)
     proj = paths.project_dir(pipe.layout)
+    _export_paper_env(proj)
     st = State(proj, pipe.layout.get("state_dir", ".wf"))
     if need_state:
         if not st.exists():
@@ -107,15 +135,41 @@ def _load(need_state: bool = True):
         st.load()
         st.migrate_pipeline(str(pipe.meta.get("version", "0")),
                             [stage.id for stage in pipe.stages], STAGE_ALIASES)
+        history_problems = overrides.validate_against_state(paper_over, st)
+        if history_problems:
+            raise SystemExit(
+                "refusing retrospective paper-local override:\n  "
+                + "\n  ".join(history_problems)
+                + "\nRestore the recorded override first, run `wf loop --to STAGE --why \"...\"`, "
+                  "then change it while that stage is active.")
     return pipe, st, proj
 
 
 def _mark(pipe, st, stage) -> str:
+    if getattr(stage, "skipped", False):
+        return "-"
     if st.is_done(stage.id):
         return "x"
     if st.current == stage.id:
         return ">"
     return " "
+
+
+def _print_overrides(pipe) -> None:
+    """Reprint the paper's workflow overrides on every status call.
+
+    A customised workflow must never be mistaken for the standard one, especially after a
+    context reset: the next agent has to know this paper skips a stage or dropped a gate, and
+    why, without going looking for a config file.
+    """
+    notes = getattr(pipe, "override_notes", [])
+    if not notes:
+        return
+    print("PAPER-LOCAL WORKFLOW OVERRIDES  (.wf/overrides.toml; the master pipeline is unchanged)")
+    for note in notes:
+        print(f"  ! {note}")
+    print("  integrity gates and review stages cannot be overridden - see wfcore/overrides.py")
+    print()
 
 
 def _print_progress(pipe, st) -> None:
@@ -126,6 +180,8 @@ def _print_progress(pipe, st) -> None:
         suffix = ""
         if m == ">":
             suffix = "   <-- you are here" + (f" (revisit #{loops})" if loops else "")
+        elif m == "-":
+            suffix = f"   SKIPPED for this paper: {getattr(s, 'skip_reason', '') or 'no reason'}"
         print(f"  [{m}] {s.index + 1:>2}. {s.id:<20} {s.title}{suffix}")
 
 
@@ -311,6 +367,8 @@ def cmd_status(args) -> int:
             "blocking": blocking,
             "warnings": warned,
             "outputs": stage.outputs,
+            "paper_overrides": pipe.override_notes,
+            "stage_skipped": stage.skipped,
             "results": [{"check": r.check, "label": r.label, "detail": r.detail} for r in results],
         }, indent=2, ensure_ascii=False))
         return 0
@@ -323,6 +381,7 @@ def cmd_status(args) -> int:
     print(f"paper   {proj}   ({paths.describe_project_source(pipe.layout)})")
     print()
     _print_invariants(pipe)
+    _print_overrides(pipe)
     _print_progress(pipe, st)
     print()
     print(f"GATE  ({len(results) - blocking - warned}/{len(results)} passing"
@@ -414,6 +473,26 @@ def cmd_check(args) -> int:
 def cmd_advance(args) -> int:
     pipe, st, proj = _load()
     stage = pipe.stage(st.current)
+
+    # A paper-local skip is itself the audited decision: the reason lives in overrides.toml,
+    # is printed on every status call, and is copied into durable state here. It does not need
+    # fake outputs, a fake green gate or a handoff note pretending work was done.
+    if stage.skipped:
+        nxt, skipped_after = pipe.transition_after(stage.id)
+        chain = [(s.id, s.skip_reason, s.override_fingerprint) for s in skipped_after]
+        st.skip_current(stage.id, stage.skip_reason, nxt.id if nxt else None, chain,
+                        stage.override_fingerprint)
+        labels = [stage.id, *[s.id for s in skipped_after]]
+        print(f"paper-local override skipped: {', '.join(labels)}")
+        for sid in labels:
+            print(f"  {sid}: {pipe.stage(sid).skip_reason}")
+        if nxt:
+            print(f"now at {nxt.id} - {nxt.title}")
+            print(f"\nnext:  {wf()} status")
+        else:
+            print("pipeline complete (remaining stages were explicitly skipped for this paper).")
+        return 0
+
     results = gates.run_stage(pipe, st, proj, stage)
     ok, blocking, _ = gates.summarize(results)
     non_overridable_failures = [r for r in results if r.blocking and
@@ -441,6 +520,17 @@ def cmd_advance(args) -> int:
         if "s19_review_release_explicit" in failed_names:
             print("--force cannot waive S19 review. Present the current versioned ZIP and exact "
                   "artifact paths, then wait for the user's explicit no-further-review statement.")
+        freeze_failures = failed_names & {
+            "scientific_freeze_captured", "scientific_freeze_intact",
+            "journal_variant_ready", "variant_preserves_science",
+        }
+        if freeze_failures:
+            print("--force cannot waive the S19 scientific freeze or journal-variant boundary. "
+                  "Freeze the reviewed science, open a fresh S20 variant, and put every "
+                  "journal-specific edit under 08_submission/manuscript/.")
+        if "paper_scripts_scoped" in failed_names:
+            print("--force cannot run paper code that has no paper root. Use `wf run-script` and "
+                  "derive paths from MEDPAPER_PROJECT or wfcore.paths.project_dir().")
         return 2
     if not ok and not args.force:
         print(f"refusing to advance: {blocking} blocking issue(s) in {stage.id}")
@@ -463,8 +553,14 @@ def cmd_advance(args) -> int:
         st.add_note(f"[FORCED ADVANCE] gate had {blocking} blocking issue(s): "
                     + "; ".join(f"{r.check}: {r.detail}" for r in results if r.blocking), stage.id)
 
-    nxt = pipe.next_of(stage.id)
-    st.complete(stage.id, nxt.id if nxt else None)
+    nxt, skipped_between = pipe.transition_after(stage.id)
+    st.complete(stage.id, nxt.id if nxt else None,
+                [(s.id, s.skip_reason, s.override_fingerprint) for s in skipped_between],
+                stage.override_fingerprint)
+    if skipped_between:
+        print("paper-local override also skipped:")
+        for skipped_stage in skipped_between:
+            print(f"  {skipped_stage.id}: {skipped_stage.skip_reason}")
     if nxt:
         print(f"{stage.id} closed. now at {nxt.id} - {nxt.title}")
         print(f"\nnext:  {wf()} status")
@@ -514,7 +610,8 @@ def cmd_tree(args) -> int:
     print(DASH)
     for s in pipe.stages:
         m = _mark(pipe, st, s)
-        print(f"[{m}] {s.index + 1:>2}. {s.id:<20} {s.title}")
+        suffix = (f"  [paper-local skip: {s.skip_reason}]" if s.skipped else "")
+        print(f"[{m}] {s.index + 1:>2}. {s.id:<20} {s.title}{suffix}")
         if args.verbose:
             for o in s.outputs:
                 print(f"        out  {'ok' if (proj / o).exists() else '--'}  {o}")
@@ -628,8 +725,15 @@ def cmd_archetype(args) -> int:
 
 def cmd_doctor(args) -> int:
     pipe = registry.load()
-    proj = paths.project_dir(pipe.layout)
+    resolution_error = ""
+    try:
+        proj = paths.project_dir(pipe.layout)
+    except SystemExit as exc:
+        resolution_error = str(exc)
+        proj = paths.repo_root() / pipe.layout.get("project_dir", "project")
     rows: list[tuple[str, str, str]] = []
+    if resolution_error:
+        rows.append(("paper selection", "BROKEN", resolution_error.replace("\n", " ")))
 
     rows.append(("python", "ok", sys.version.split()[0]))
     rows.append(("pipeline.toml", "ok" if paths.pipeline_file().exists() else "MISSING",
@@ -734,6 +838,8 @@ def cmd_doctor(args) -> int:
     rows.append(("NCBI_API_KEY", "ok" if key else "not set",
                  "10 req/s" if key else "3 req/s without a key; set NCBI_API_KEY to raise it"))
 
+    rows.extend(_engine_hygiene_rows())
+
     width = max(len(r[0]) for r in rows)
     bad = 0
     for name, status, detail in rows:
@@ -743,6 +849,43 @@ def cmd_doctor(args) -> int:
     print(DASH)
     print("doctor: OK" if bad == 0 else f"doctor: {bad} problem(s) need attention")
     return 0 if bad == 0 else 1
+
+
+def _engine_hygiene_rows() -> list[tuple[str, str, str]]:
+    """Has paper work leaked into the engine?
+
+    Worth a standing check rather than a one-off cleanup: this went unnoticed until 68 stray
+    EFetch payloads (~68 MB) had accumulated in <engine>/project/06_refs/cache/, because a tool
+    imported in-process resolved its project root to the engine default. The leak is fixed at
+    source in _export_paper_env, but a silent 1 MB-per-run drip is exactly the kind of thing
+    that should announce itself.
+    """
+    root = paths.repo_root()
+    rows: list[tuple[str, str, str]] = []
+
+    papers = root / "papers"
+    engine_project = root / "project"
+    using_papers = papers.is_dir() and any(p.is_dir() for p in papers.iterdir())
+    if using_papers and engine_project.is_dir():
+        stray = [p for p in engine_project.rglob("*")
+                 if p.is_file() and p.name != ".gitkeep"]
+        if stray:
+            mb = sum(p.stat().st_size for p in stray) / 1_048_576
+            rows.append(("engine project/", "BROKEN",
+                         f"{len(stray)} stray file(s), {mb:.0f} MB - paper work written into the "
+                         f"engine. You run papers from papers/, so nothing should live here. "
+                         f"Inspect, then: Remove-Item '{engine_project}' -Recurse -Force"))
+        else:
+            rows.append(("engine project/", "ok", "no paper artifacts in the engine"))
+    elif using_papers:
+        rows.append(("engine project/", "ok", "absent; papers live in papers/"))
+
+    stash = [p for p in root.glob(".review_stash/*") if p.is_file()]
+    if stash:
+        rows.append(("stray artifacts", "BROKEN",
+                     f".review_stash/ holds {len(stash)} paper file(s) at the engine root; move "
+                     f"them into the paper they belong to"))
+    return rows
 
 
 def _science_python() -> Path | None:
@@ -766,6 +909,137 @@ def _probe_modules(python: Path, mods) -> dict[str, bool]:
         return json.loads(out.stdout.strip() or "{}")
     except Exception:  # noqa: BLE001
         return {}
+
+
+def _engine_write_snapshot() -> dict[str, tuple[int, int]]:
+    """Cheap tripwire for a paper script writing into the shared engine."""
+    roots = [paths.pipeline_dir(), paths.tools_dir(), paths.reference_dir(),
+             paths.repo_root() / ".kiro", paths.repo_root() / "project"]
+    out = {}
+    for root in roots:
+        if not root.exists():
+            continue
+        for path in root.rglob("*"):
+            if (not path.is_file() or "__pycache__" in path.parts
+                    or path.suffix in {".pyc", ".pyo"}):
+                continue
+            stat = path.stat()
+            out[str(path.resolve())] = (stat.st_size, stat.st_mtime_ns)
+    return out
+
+
+def cmd_run_script(args) -> int:
+    """Run one paper-owned Python/R script with the selected paper exported."""
+    import subprocess
+
+    _, _, proj = _load()
+    raw = Path(args.script)
+    script = (raw if raw.is_absolute() else proj / raw).resolve()
+    try:
+        script.relative_to(proj.resolve())
+    except ValueError:
+        print(f"refusing to run a script outside the paper: {script}")
+        return 2
+    suffix = script.suffix.casefold()
+    if suffix not in {".py", ".r"} or not script.is_file():
+        print(f"paper script not found (or not .py/.R): {script}")
+        return 2
+    if suffix == ".py":
+        executable = _science_python()
+        if executable is None:
+            print("science venv is missing; run `uv venv .venv` first")
+            return 2
+    else:
+        executable = shutil.which("Rscript")
+        if executable is None:
+            print("Rscript is missing; run `wf doctor` and install/configure R first")
+            return 2
+    env = os.environ.copy()  # _load already exported MEDPAPER_PROJECT and MEDPAPER_ROOT
+    tools = str(paths.tools_dir())
+    env["PYTHONPATH"] = tools + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+    cmd = [str(executable), str(script), *args.script_args]
+    print(f"paper  {proj}")
+    print(f"cwd    {proj}")
+    print(f"run    {' '.join(cmd)}")
+    before = _engine_write_snapshot()
+    done = subprocess.run(cmd, cwd=proj, env=env)
+    after = _engine_write_snapshot()
+    changed = sorted(path for path in set(before) | set(after) if before.get(path) != after.get(path))
+    if changed:
+        print("CRITICAL: the paper script changed shared-engine path(s):")
+        for path in changed[:12]:
+            print(f"  {path}")
+        print("The command is failed even if the script exited 0. Inspect/revert those engine "
+              "changes before continuing; paper code may write only under the paper root.")
+        return 2
+    return int(done.returncode)
+
+
+def cmd_override(args) -> int:
+    """Create, inspect or validate this paper's workflow overlay."""
+    master = registry.load()
+    proj = paths.project_dir(master.layout)
+    st = State(proj, master.layout.get("state_dir", ".wf"))
+    if not st.exists():
+        _no_state_help(master, proj)
+        return 2
+    st.load()
+    target = overrides.overrides_path(st.dir)
+
+    if args.action == "init":
+        if target.exists() and not args.force:
+            print(f"keeping existing {paths.rel(target)}")
+            print("use `wf override show`, or pass --force only to replace it with the blank template")
+            return 1
+        governed = [sid for sid, info in (st.data.get("stages") or {}).items()
+                    if info.get("paper_override_fingerprint")]
+        if target.exists() and args.force and governed:
+            print("refusing to replace overrides.toml: it already governed finished stage(s): "
+                  + ", ".join(governed))
+            print("The file is workflow history now. Loop back before changing an entry; do not "
+                  "erase the record with --force.")
+            return 2
+        target.write_text(overrides.TEMPLATE, encoding="utf-8")
+        print(f"created paper-local template: {paths.rel(target)}")
+        print("the master pipeline was not touched: pipeline/pipeline.toml")
+        print("uncomment only the change this paper needs, then run:  wf override validate")
+        return 0
+
+    if not target.is_file():
+        print(f"no paper-local workflow override: {paths.rel(target)}")
+        print("this paper uses the unmodified master workflow")
+        print("create a documented template with:  wf override init")
+        return 0
+
+    if args.action == "show":
+        print(f"# {paths.rel(target)}\n")
+        print(target.read_text(encoding="utf-8").rstrip())
+        print("\n# effective changes")
+
+    try:
+        data = overrides.load(st.dir)
+    except SystemExit as exc:
+        print(exc)
+        return 2
+    problems = overrides.validate(data, master.stages)
+    problems.extend(overrides.validate_against_state(data, st))
+    if problems:
+        print(f"override is INVALID ({len(problems)} problem(s)):")
+        for problem in problems:
+            print(f"  [FAIL] {problem}")
+        print("the override has not been applied; the master workflow is unchanged")
+        return 2
+
+    effective = registry.load(st.config(), data)
+    if effective.override_notes:
+        for note in effective.override_notes:
+            print(f"  {note}")
+    else:
+        print("  (none - the file is a blank template)")
+    print("override is valid; changes apply only to this paper")
+    print(f"paper   {proj}")
+    print(f"master  {paths.pipeline_file()} (unchanged)")
+    return 0
 
 
 def cmd_config(args) -> int:
@@ -875,7 +1149,19 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("doctor", help="environment and wiring check")
     p.set_defaults(fn=cmd_doctor)
 
-    p = sub.add_parser("config", help="view or override per-project targets")
+    p = sub.add_parser("run-script",
+                       help="run a paper-owned Python script with MEDPAPER_PROJECT exported")
+    p.add_argument("script", help="paper-relative .py or .R path, e.g. 03_analysis/code/analysis.py")
+    p.add_argument("script_args", nargs=argparse.REMAINDER)
+    p.set_defaults(fn=cmd_run_script)
+
+    p = sub.add_parser("override", help="paper-local workflow shape; never edits the master")
+    p.add_argument("action", choices=("init", "show", "validate"))
+    p.add_argument("--force", action="store_true",
+                   help="init only: replace an existing file with the blank commented template")
+    p.set_defaults(fn=cmd_override)
+
+    p = sub.add_parser("config", help="view or override per-paper numeric/string targets")
     p.add_argument("action", choices=["list", "get", "set"])
     p.add_argument("key", nargs="?")
     p.add_argument("value", nargs="?")

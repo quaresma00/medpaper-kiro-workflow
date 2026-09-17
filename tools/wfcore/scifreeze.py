@@ -62,14 +62,35 @@ OPTIONAL_SCIENTIFIC = (
     "06_refs/verified.json",
 )
 
-# Files the journal variant owns. Everything else is read straight from the frozen source.
-# statements.md and title_page.md are here because which statements a journal demands, and how
-# a title page is laid out, are journal facts rather than scientific ones.
-VARIANT_FILES = (
+# Scientific prose copied from the reviewed source when a journal is selected. Only these
+# participate in the science-preservation delta.
+ADAPTED_TEXT_FILES = (
     "full_manuscript.md",
     "supplementary_methods.md",
     "title_page.md",
     "statements.md",
+)
+
+# Everything a journal-specific pass owns. Reports/snapshots belong beside the variant; writing
+# them under 07_manuscript/ after S19 would violate the read-only boundary even if they did not
+# alter full_manuscript.md itself.
+VARIANT_FILES = (*ADAPTED_TEXT_FILES,
+                 "polish_report.json", "polish_log.md", "polish_allowlist.tsv")
+VARIANT_PREFIXES = ("prepolish/",)
+
+# Produced after S20 and therefore invalid the moment the journal variant is replaced. S20's
+# target/guideline/style files are deliberately not here: `open_variant --force` is called after
+# those have been refreshed for the new journal. `reset-journal` clears the whole submission
+# tree before a clean S20 rerun.
+JOURNAL_DOWNSTREAM = (
+    "08_submission/cover_letter.md",
+    "08_submission/bundle",
+    "08_submission/package_content_baseline.json",
+    "08_submission/submission_qc.md",
+    "08_submission/package_human_review.md",
+    "08_submission/package_review_freeze.json",
+    "08_submission/independent_submission_audit.md",
+    "08_submission/build_receipts",
 )
 
 # Fact classes that must survive journal adaptation. Prose may be tightened to fit a word cap;
@@ -116,7 +137,10 @@ def resolve(project: Path, rel: str) -> str:
     if not rel.startswith(f"{SOURCE_DIR}/"):
         return rel
     name = rel[len(SOURCE_DIR) + 1:]
-    if name in VARIANT_FILES and variant_exists(project):
+    if ((name in VARIANT_FILES
+         or any(name == prefix.rstrip("/") or name.startswith(prefix)
+                for prefix in VARIANT_PREFIXES))
+            and variant_exists(project)):
         return f"{VARIANT_DIR}/{name}"
     return rel
 
@@ -205,6 +229,40 @@ def verify_freeze(project: Path) -> tuple[bool, list[str], int]:
 # ---------------------------------------------------------------------------
 # the journal variant
 # ---------------------------------------------------------------------------
+def _remove(path: Path) -> bool:
+    if path.is_dir():
+        shutil.rmtree(path)
+        return True
+    if path.exists():
+        path.unlink()
+        return True
+    return False
+
+
+def clear_journal_downstream(project: Path) -> list[str]:
+    """Remove every S21+ artifact that cannot belong to a replacement journal variant."""
+    removed = []
+    for rel in JOURNAL_DOWNSTREAM:
+        if _remove(project / rel):
+            removed.append(rel)
+    return removed
+
+
+def reset_journal(project: Path) -> list[str]:
+    """Start S20 from a blank submission area while leaving the scientific freeze intact."""
+    ok, problems, _ = verify_freeze(project)
+    if not ok:
+        raise SystemExit("refusing journal reset: frozen science has drifted:\n  "
+                         + "\n  ".join(problems))
+    root = project / "08_submission"
+    removed = []
+    if root.exists():
+        removed = [p.relative_to(project).as_posix() for p in root.rglob("*") if p.is_file()]
+        shutil.rmtree(root)
+    root.mkdir(parents=True, exist_ok=True)
+    return removed
+
+
 def open_variant(project: Path, journal: str, *, force: bool = False) -> tuple[Path, list[str]]:
     """Take a fresh journal-adaptation copy from the frozen scientific source."""
     ok, problems, _ = verify_freeze(project)
@@ -216,15 +274,30 @@ def open_variant(project: Path, journal: str, *, force: bool = False) -> tuple[P
               "the frozen text. A variant taken from drifted science is not traceable to review."
         )
     dest = project / VARIANT_DIR
+    existing_meta = variant_meta(project) if dest.exists() else {}
+    old_journal = str(existing_meta.get("journal", "")).strip()
+    if force and old_journal and old_journal.casefold() != journal.strip().casefold():
+        raise SystemExit(
+            f"refusing to replace journal '{old_journal}' with '{journal}' in place. A journal "
+            "switch must clear the entire old submission tree, not just manuscript/:\n"
+            f"  loop to S20, then scientific_freeze.py reset-journal --confirm-journal "
+            f"\"{old_journal}\"")
     if dest.exists() and any(dest.iterdir()) and not force:
         raise SystemExit(
             f"{VARIANT_DIR} already holds a variant. Switching journals means discarding the "
             f"previous adaptation:\n  --force to replace it. The frozen science is untouched "
             f"either way."
         )
+    # `--force` means a NEW journal variant, not an in-place overwrite. Delete the directory
+    # first so a title page, polish report, snapshot or journal-only statement from journal A
+    # cannot survive merely because journal B has not generated its replacement yet.
+    if dest.exists() and force:
+        shutil.rmtree(dest)
+    if force:
+        clear_journal_downstream(project)
     dest.mkdir(parents=True, exist_ok=True)
     copied = []
-    for name in VARIANT_FILES:
+    for name in ADAPTED_TEXT_FILES:
         src = project / SOURCE_DIR / name
         if src.is_file() and src.stat().st_size > 0:
             shutil.copy2(src, dest / name)
@@ -277,7 +350,7 @@ def variant_delta(project: Path) -> tuple[bool, list[str], dict]:
     if not variant_exists(project):
         return False, [f"{VARIANT_DIR}/full_manuscript.md missing; no variant has been opened"], {}
     problems, summary = [], {}
-    for name in VARIANT_FILES:
+    for name in ADAPTED_TEXT_FILES:
         src, var = project / SOURCE_DIR / name, project / VARIANT_DIR / name
         if not var.is_file():
             continue

@@ -7,7 +7,17 @@ Get the real data in place with an auditable trail, and describe it before analy
 1. Execute the full retrieval from `02_data/acquisition_plan.md`. Retrieval scripts and exact
    queries live under `project/02_data/acquisition/`; raw payloads and source count/page
    receipts land in `project/02_data/raw/` and are then treated as read-only. Never edit a
-   raw file.
+   raw file. Here and throughout the cards, `project/` is a logical name for the paper printed
+   by `wf status`, not the physical `<engine>/project` directory.
+   - Every acquisition script must resolve that root explicitly:
+```python
+from wfcore.paths import project_dir
+PROJECT = project_dir()
+# write only below PROJECT / "02_data" / ...
+```
+     Run it through `python tools/wf.py run-script 02_data/acquisition/<script>.py`. The wrapper
+     exports `MEDPAPER_PROJECT` and fails rather than letting a relative `Path("project")` pollute
+     the shared engine.
    - Request the source-reported total first, then acquire every record in the
      protocol-defined universe. Exhaust all pages/cursors and retain the terminal response.
    - Never introduce a convenience cap such as SQL `LIMIT`/`TOP`, `head()`, `sample()`,

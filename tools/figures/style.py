@@ -15,7 +15,13 @@ See reference/figure-standards.md for the numbers and their sources.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
+
+_TOOLS = Path(__file__).resolve().parents[1]
+if str(_TOOLS) not in sys.path:
+    sys.path.insert(0, str(_TOOLS))
+from wfcore import paths as wfpaths  # noqa: E402
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -219,7 +225,7 @@ def save(fig, stem: str | Path, width: str = "single", dpi: int = 600,
     `archetype` is recorded in the sidecar so qc.py can check the archetype's mandatory
     elements; if omitted it is read from artifact_plan.json by qc.py instead.
     """
-    stem = Path(stem)
+    stem = wfpaths.paper_output_path(stem)
     stem.parent.mkdir(parents=True, exist_ok=True)
     written = {}
 

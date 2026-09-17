@@ -11,10 +11,12 @@ Generated from result JSONs by code, never retyped.
 
 ```python
 import sys; sys.path.insert(0, "tools")
+from wfcore.paths import project_dir
 from tables.threeline import write_table, write_workbook
 
+PROJECT = project_dir()
 write_table(
-    path="project/04_tables/main/Table1.xlsx",
+    path=PROJECT / "04_tables/main/Table1.xlsx",
     sheet="Table 1",
     title="Table 1. Baseline characteristics of the study population.",
     header=["Characteristic", "Group A (n=123)", "Group B (n=456)", "P value"],
@@ -41,11 +43,13 @@ write_table(
  "tables": [{"id": "Table 1", "file": "04_tables/main/Table1.xlsx", "sheet": "Table 1",
              "n_rows": 0, "source_results": ["03_analysis/results/baseline.json"]}]}
 ```
-4. Run it, then verify the structure rather than assuming:
+4. Run it through the paper-aware wrapper, then verify the structure rather than assuming:
 ```
-.\.venv\Scripts\python.exe project/04_tables/code/build_tables.py
+.\.venv\Scripts\python.exe tools/wf.py run-script 04_tables/code/build_tables.py
 .\.venv\Scripts\python.exe tools/wf.py check
 ```
+   Do not run `python project/04_tables/...` from the engine root: in a multi-paper workspace
+   that path is the mother engine, not the selected paper.
 5. **Visual inspection - timing depends on `visual_review_mode`** (see the S11 card for why).
    The structural checks above (`tables_threeline`, `tables_match_plan`,
    `numbers_have_provenance`) are code and block here in both modes.

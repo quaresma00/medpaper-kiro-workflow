@@ -45,7 +45,32 @@ python tools/wf.py use other-paper            # switch
 
 `status` prints which paper it resolved and why, so a wrong-paper mistake is visible in one
 line. Resolution order: `MEDPAPER_PROJECT`, then an initialised paper at or above the working
-directory, then the paper selected with `wf use`, then `<engine>/project`.
+directory, then the paper selected with `wf use`; `<engine>/project` is used only when no
+initialised papers exist at all. If papers exist but selection is missing or stale, resolution
+fails closed instead of writing into the mother engine.
+
+## Customise one paper without changing the engine
+
+The folders `pipeline/`, `tools/`, `reference/` and `.kiro/` are the shared mother workflow.
+Never edit them to accommodate one study: that changes every other current and future paper.
+There are two paper-local mechanisms instead:
+
+```
+python tools/wf.py config set intro_words_max 600  # values -> <paper>/.wf/config.toml
+python tools/wf.py override init                    # shape  -> <paper>/.wf/overrides.toml
+python tools/wf.py override validate
+python tools/wf.py override show
+```
+
+`overrides.toml` can declare extra outputs, add gates, relax a non-protected gate, skip a truly
+inapplicable non-protected stage, or permit a documented paper-specific file glob. Weakening
+needs a substantive reason. Integrity gates (data completeness, reference/number provenance,
+full-text identity, visual debt, scientific freeze) and S18/S19/S24/S25 review/audit stages
+cannot be removed. `wf status` reprints every effective override; the exact entry is
+fingerprinted when its stage finishes, so it cannot be edited or removed retrospectively.
+Loop back to that stage first if the scientific design genuinely changes. Run paper-owned
+Python or R code through `wf run-script <paper-relative.py|.R>`; it exports the selected root,
+runs with the paper as cwd, and fails if shared-engine files change.
 
 ## Delegate the expensive reading
 
@@ -112,7 +137,9 @@ the work.
 | `wf note "..."` | Append to the handoff log |
 | `wf loop --to S05_analysis --why "..."` | Deliberately reopen an earlier stage |
 | `wf clean [--apply]` | Report scratch and undeclared files; delete scratch |
-| `wf config set KEY VALUE` | Override a target (word counts, reference counts, caps) |
+| `wf config set KEY VALUE` | Override a target for this paper (`.wf/config.toml`) |
+| `wf override init/show/validate` | Change this paper's workflow shape without editing the mother workflow |
+| `wf run-script 03_analysis/code/analysis.py` | Run a paper script with its root exported; prevents writes to `<engine>/project` |
 | `wf invariants` | Reprint the non-negotiable rules |
 
 ## The absolute rules
@@ -149,9 +176,12 @@ the work.
    science needs no further change, `tools/manuscript/scientific_freeze.py capture` hashes it.
    `07_manuscript/` is read-only from then on. Word caps, abstract shape, reference style, title
    page and required statements are presentation, and are applied to the variant S20 opens at
-   `08_submission/manuscript/`. Choosing a different journal discards that copy and takes a fresh
-   one from the same frozen text, so a second journal never re-edits the reviewed manuscript.
-   Gates resolve to the variant automatically. `scientific_freeze_intact` is non-overridable.
+   `08_submission/manuscript/`. Choosing a different journal first loops to S20 and runs
+   `scientific_freeze.py reset-journal --confirm-journal "<old>"`; this clears the entire old
+   submission tree, after which S20 takes a fresh copy from the same frozen text. A second
+   journal never inherits the first journal's title page, cache, cover letter, trims, bundle or
+   approvals. Gates resolve to the variant automatically. The freeze/variant gates are
+   non-overridable.
 9. **Route every revision through `tools/rework.py`.** A user's change request goes to the
    earliest owning stage, updates the source of truth, and rebuilds downstream. Never patch a
    rendered artifact directly.
