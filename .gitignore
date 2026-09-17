@@ -46,3 +46,8 @@ Desktop.ini
 .DS_Store
 .idea/
 .vscode/
+
+# Project content that landed in the engine root by mistake. Paper artifacts belong in
+# papers/<slug>/, which is already ignored; this keeps a stray one from being committed as if it
+# were engine code. If you find something here, move it into its paper rather than deleting it.
+.review_stash/
