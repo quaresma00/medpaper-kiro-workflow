@@ -89,7 +89,8 @@ def main() -> int:
                 f"confirm the journal being discarded exactly:\n"
                 f"  scientific_freeze.py reset-journal --confirm-journal \"{old}\"")
         removed = scifreeze.reset_journal(proj)
-        print(f"cleared {len(removed)} old journal-specific file(s) from 08_submission/")
+        print(f"archived {len(removed)} old journal-specific file(s) to "
+              f"{scifreeze.ARCHIVE_DIR}/ (nothing deleted; no gate reads the archive)")
         print("frozen 07_manuscript/ was not touched. Rebuild S20 target/guidelines/style, then:")
         print('  scientific_freeze.py open-variant --journal "<new journal>"')
         return 0

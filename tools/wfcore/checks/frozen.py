@@ -28,7 +28,7 @@ def scientific_freeze_captured(ctx: Ctx) -> Result:
     except SystemExit as exc:
         return Result(False, "scientific_freeze_captured", str(exc))
     entries = freeze.get("files", {})
-    missing = [rel for rel in scifreeze.REQUIRED_SCIENTIFIC if rel not in entries]
+    missing = scifreeze.uncovered_required(entries)
     if missing:
         return Result(
             False,
@@ -52,12 +52,31 @@ def scientific_freeze_captured(ctx: Ctx) -> Result:
 @check("scientific_freeze_intact")
 def scientific_freeze_intact(ctx: Ctx) -> Result:
     """S20 onward: the frozen science has not been edited to satisfy a journal."""
+    s19_done = ctx.state.status_of("S19_human_review") == "done"
     if not scifreeze.is_frozen(ctx.project):
-        # Nothing frozen yet: a project that predates the freeze, or one still upstream of S19.
-        # Say so rather than reporting a pass that was never tested.
+        if s19_done:
+            # S19 closed, so the freeze must exist. A missing (or deleted) freeze would
+            # otherwise let every journal stage pass while editing the reviewed text.
+            return Result(
+                False, "scientific_freeze_intact",
+                f"S19 is complete but {scifreeze.FREEZE_REL} is missing; the reviewed science "
+                "is not frozen",
+                ["Restore the freeze file if it was deleted. If S19 closed without one, loop to "
+                 "S19 and run tools/manuscript/scientific_freeze.py capture after the user's "
+                 "explicit no-further-review confirmation."])
+        # Nothing frozen yet: the paper is still upstream of S19. Say so rather than
+        # reporting a pass that was never tested.
         return Result(True, "scientific_freeze_intact",
                       "no scientific freeze on record; nothing to hold to (pre-S19 project)")
     ok, problems, count = scifreeze.verify_freeze(ctx.project)
+    if ok and s19_done:
+        binding = _approval_binding_problems(ctx)
+        if binding:
+            return Result(
+                False, "scientific_freeze_intact", "; ".join(binding),
+                ["The freeze must be the text the user released at S19. Loop to S19, present "
+                 "the current review ZIP, record manuscript_human_reviewed NO_FURTHER_REVIEW "
+                 "with its package ID, then re-capture the freeze."])
     if ok:
         return Result(True, "scientific_freeze_intact",
                       f"{count} frozen scientific file(s) unchanged since review closed")
@@ -73,6 +92,35 @@ def scientific_freeze_intact(ctx: Ctx) -> Result:
             "with tools/rework.py, rebuild, and re-freeze with `capture --force`.",
         ],
     )
+
+
+def _approval_binding_problems(ctx: Ctx) -> list[str]:
+    """Bind the freeze to the user's explicit S19 release (as far as the record allows).
+
+    Every freeze must sit under a NO_FURTHER_REVIEW decision. Freezes captured by 1.6.0+ also
+    record the review package ID, so the decision rationale must name it and the freeze must
+    not predate the decision. Older freezes carry no package ID and are held to the decision
+    alone, so papers frozen before 1.6.0 keep working.
+    """
+    decision = ctx.state.decision("manuscript_human_reviewed")
+    if not decision or decision.get("value") != "NO_FURTHER_REVIEW":
+        return ["the scientific freeze is not backed by an explicit S19 "
+                "manuscript_human_reviewed=NO_FURTHER_REVIEW decision"]
+    try:
+        freeze = scifreeze.load_freeze(ctx.project)
+    except SystemExit as exc:
+        return [str(exc)]
+    package_id = str(freeze.get("review_package_id", ""))
+    if not package_id:
+        return []
+    token = package_id[:12]
+    problems = []
+    if token not in str(decision.get("rationale", "")):
+        problems.append(f"the freeze is bound to S19 review package {token}, which the "
+                        "approval decision does not name")
+    if str(freeze.get("frozen_at", "")) < str(decision.get("at", "")):
+        problems.append("the scientific freeze predates the current S19 approval")
+    return problems
 
 
 @check("journal_variant_ready")

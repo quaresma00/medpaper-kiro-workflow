@@ -100,7 +100,8 @@ further review is needed.
    style, title-page layout, which statements are mandatory. Applying them in place meant that
    choosing a second journal re-edited text you had already signed off, twice over, with nothing
    recording what drifted. Now S20 opens `08_submission/manuscript/` for the chosen journal and
-   every journal-driven edit lands there. Switching journals throws that copy away and takes a
+   every journal-driven edit lands there. Switching journals archives that copy under
+   `08_submission/journal_archives/` and takes a
    fresh one from this frozen text.
 
    Only re-freeze (`capture --force`) when a rework round genuinely reopened a scientific stage

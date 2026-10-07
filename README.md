@@ -2,7 +2,18 @@
 
 一套面向医学与临床研究的 Kiro 工作流。它把“研究想法”推进为经过数据、文献、统计结果、图表、人工复核和期刊规则共同校验的投稿包，而不是只让 AI 一次性写出一篇看似完整的论文。
 
-当前版本：`1.5.0`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE + R 4.3+
+当前版本：`1.6.0`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE + R 4.3+
+
+## 1.6.0 变化
+
+- **PubMed 实时核验短时复用**：`reference_provenance`（`live = true`）通过后，把本次 gate EFetch 原始 XML 的 SHA-256 记入论文自己的 `.wf/reference_live.json`。24 小时内（`live_reference_age_hours_max`）后续阶段重新解析该 XML 并逐条比对文献库，一致时直接复用；文献库或 XML 变化、超时都会重新联网。S13 与 S25 始终强制实时核验。
+- **gate 失败即停与短时复用**：`outputs_exist` 失败后，其余检查标为 `dependent_checks_pending`，不再执行，也不能 `--force`。`wf check` 为纯本地检查（md_sections、md_wordcount、no_ai_boilerplate、supplementary_methods_clean、numbers_have_provenance、manuscript_structure、docx_bundle_ready）写 120 秒回执。紧接着的 `wf advance` 在输入文件、引擎、配置、决定、overrides 完全一致时复用。完整性、审批、冻结和实时检查一律重跑。
+- **冻结加固**：S19 完成后若缺少科学冻结，`scientific_freeze_intact` 直接失败。冻结同时覆盖 `03_analysis/results/*.json`，记录 S19 审阅包 ID，并要求 `manuscript_human_reviewed=NO_FURTHER_REVIEW` 的理由中写明该 ID。1.6.0 之前的冻结只校验该决定，原有论文不受影响。
+- **换刊归档**：`reset-journal` 与 `open-variant --force` 不再删除旧期刊内容，而是移到 `08_submission/journal_archives/<期刊>-<UTC 时间>/`；`no_orphans` 与 `wf clean` 忽略该目录。
+- **R 图来源绑定**：`save_medpaper()` 先写临时文件，全部成功后再改名替换，渲染失败时保留旧图。同时输出 `cairo_pdf` 矢量母版。sidecar 记录 `script`、`script_sha256`、`source_hashes`（来自计划的 `source_results`）和 `render_hashes`。`qc.py` 的 `r_render_provenance` 在脚本、结果或图件变化后判定失败。作图期间 ggplot 警告按错误处理（`warn = 2`）。视觉审阅改为绑定 PNG 的 SHA-256。
+- **非 R 图需说明理由**：`figure_engine = R` 时，Python 图须在计划中写 `renderer` 和不少于 20 字的 `renderer_reason`。已批准的 Python 图原样保留，不为改用 R 出图而重拟合模型。
+- **P 值与符号校验**：`P<0.001` 必须有结果 JSON 中确实小于 0.001 的 P 值支持（或分析自身写出的同一阈值、或 allowlist 声明）。负号与 `−`（U+2212）视为同一符号，正负号不同即不匹配；显示精度用 Decimal 计算。CONVENTIONS 与 `environment` 排除保持不变。
+- **S18 审阅覆盖**：新增 `reader_review_coverage`。审阅报告须内嵌 `reviewed_artifacts` 哈希块，由 `review_package.py reader-inputs` 生成，覆盖正文、表格和全部已渲染的图。报告还须包含 `Reader comprehension` 与 `Medical presentation` 两节，每节不少于 80 字。
 
 ## 1.5.0 变化
 
@@ -84,7 +95,7 @@ python tools/wf.py override show
 
 覆盖文件可以增加输出和门禁，也可以在写明充分理由后放宽非完整性门禁或跳过真正不适用的普通阶段。数据完整性、文献/数字溯源、全文身份、视觉欠账、科学稿冻结等门禁，以及 S18、S19、S24、S25 的审阅/审计阶段不能关闭。`wf status` 每次都会显示本篇所有覆盖；阶段完成时还会保存覆盖条目的指纹，事后不能悄悄修改或删除。若研究设计后来真正变化，应先 `wf loop --to <stage>` 回到负责阶段，再修改覆盖。论文自有 Python/R 脚本统一通过 `wf run-script <相对路径.py|.R>` 执行，工作目录固定为本篇论文，并监测母版目录是否被写入。
 
-科学稿与期刊稿也分开。S19 经用户确认无需继续修改后，`scientific_freeze.py capture` 冻结 `07_manuscript/` 的科学内容；S20 选刊后，在 `08_submission/manuscript/` 创建该期刊的副本。字数限制、结构化摘要、参考文献样式、题名页和期刊声明只改这个副本。改投另一期刊时，先返回 S20 并运行 `scientific_freeze.py reset-journal --confirm-journal "<旧期刊>"`，清空旧期刊的缓存、题名页、润色记录、cover letter、bundle、基线和审批，再从同一冻结稿生成新期刊副本。这样既不会反复改动已经确认的论文，也不会把上一期刊的任何投稿残留带到下一期刊。
+科学稿与期刊稿也分开。S19 经用户确认无需继续修改后，`scientific_freeze.py capture` 冻结 `07_manuscript/` 的科学内容；S20 选刊后，在 `08_submission/manuscript/` 创建该期刊的副本。字数限制、结构化摘要、参考文献样式、题名页和期刊声明只改这个副本。改投另一期刊时，先返回 S20 并运行 `scientific_freeze.py reset-journal --confirm-journal "<旧期刊>"`，把旧期刊的缓存、题名页、润色记录、cover letter、bundle、基线和审批整体移到 `08_submission/journal_archives/`（归档保留，不参与任何门禁），再从同一冻结稿生成新期刊副本。这样既不会反复改动已经确认的论文，也不会把上一期刊的任何投稿残留带到下一期刊。
 
 ## 25 个阶段分别做什么
 

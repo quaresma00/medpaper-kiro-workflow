@@ -55,7 +55,10 @@ def _say(msg: str) -> None:
 SIDECAR_KEYS = ("figure", "archetype", "n_axes", "min_font_pt", "max_font_pt", "min_line_pt",
                 "text_clipped_at_edge", "axes_tightbbox_overlaps", "glyph_warnings",
                 "tick_label_collisions", "interior_voids", "elements", "figure_text")
-SIDECAR_OPTIONAL_KEYS = ("engine",)
+# Provenance keys written by save_medpaper() since 1.6.0; legacy sidecars without them still
+# validate, but an R figure without them only warns until it is re-rendered.
+PROVENANCE_KEYS = ("script", "script_sha256", "source_hashes", "render_hashes")
+SIDECAR_OPTIONAL_KEYS = ("engine", *PROVENANCE_KEYS)
 
 
 def targets() -> dict:
@@ -274,6 +277,16 @@ def qc_figure(entry: dict, tgt: dict, arch_reg: dict | None = None) -> dict:
         add("artist_audit_schema", not schema,
             "; ".join(schema) if schema else "sidecar schema valid")
         engine = art.get("engine", "python")
+        if engine == "R":
+            if any(k in art for k in PROVENANCE_KEYS):
+                problems = _r_provenance_problems(art, entry, png_rel)
+                add("r_render_provenance", not problems,
+                    "; ".join(problems[:6]) if problems
+                    else "R script, result inputs and rendered outputs match the render receipt")
+            else:
+                add("r_render_provenance", False,
+                    "legacy R sidecar has no provenance receipt; re-render with save_medpaper() "
+                    "to bind the figure to its script and results", severity="warn")
         policy = str(tgt.get("figure_engine", "R")).strip()
         if policy.casefold() not in ("r", "python"):
             add("figure_engine_valid", False,
@@ -345,6 +358,47 @@ def qc_figure(entry: dict, tgt: dict, arch_reg: dict | None = None) -> dict:
         "ok": not blocking,
         "visual_reviewed": False,
     }
+
+
+def _r_provenance_problems(art: dict, entry: dict, png_rel: str) -> list[str]:
+    """Does the R render receipt still describe the script, results and bytes on disk?"""
+    from wfcore.packagefreeze import _safe_path, _sha256
+    project = project_root()
+    problems: list[str] = []
+
+    def digest(rel: str) -> str | None:
+        try:
+            _, path = _safe_path(project, rel)
+        except ValueError:
+            return None
+        return _sha256(path) if path.is_file() else None
+
+    renders = art.get("render_hashes") or {}
+    if not isinstance(renders, dict) or png_rel not in renders:
+        problems.append("no bound PNG render receipt")
+        renders = renders if isinstance(renders, dict) else {}
+    for rel, expected in renders.items():
+        if digest(rel) != str(expected).upper():
+            problems.append(f"render changed after save_medpaper: {rel}")
+    script = str(art.get("script") or "")
+    planned = str(entry.get("script") or "")
+    if planned and script != planned:
+        problems.append(f"drawn by {script or 'an unidentified script'}, plan says {planned}")
+    if script and digest(script) != str(art.get("script_sha256", "")).upper():
+        problems.append(f"R script changed after render: {script}")
+    sources = art.get("source_hashes") or {}
+    if not isinstance(sources, dict):
+        sources = {}
+        problems.append("source_hashes must be an object")
+    if "source_results" in entry:
+        declared = {str(s) for s in entry.get("source_results") or []}
+        if set(sources) != declared:
+            problems.append("result sources in the render receipt differ from the plan's "
+                            "source_results")
+    for rel, expected in sources.items():
+        if digest(rel) != str(expected).upper():
+            problems.append(f"result changed after render: {rel}")
+    return problems
 
 
 def _archetype_checks(archetype: str, found: dict, reg: dict) -> list[dict]:
@@ -488,8 +542,8 @@ def contact_sheet(max_px: int = 1400) -> int:
 def confirm(fid: str, note: str) -> int:
     """Record that a rendered figure was actually looked at.
 
-    The flag is bound to the PNG's mtime, so a re-render silently invalidates it - the same
-    binding the QC pass already uses. This exists so the report is never hand-edited, which
+    The flag is bound to the PNG's SHA-256 (legacy reports: its mtime), so a re-render that
+    changes the bytes invalidates it - the same binding the QC pass already uses. This exists so the report is never hand-edited, which
     is exactly the failure mode the rest of the pipeline refuses to trust.
     """
     if len(note.strip()) < 20:
@@ -506,8 +560,9 @@ def confirm(fid: str, note: str) -> int:
         have = ", ".join(str(f.get("id")) for f in figs) or "(none)"
         raise SystemExit(f"{fid} has no QC entry. Present: {have}")
 
-    live = _mtime(entry.get("png", "") or "")
-    if live is not None and entry.get("png_mtime") is not None and live != entry["png_mtime"]:
+    rel = entry.get("png", "") or ""
+    if ((entry.get("png_sha256") or entry.get("png_mtime") is not None)
+            and not _same_render(entry, _png_sha256(rel), _mtime(rel))):
         raise SystemExit(
             f"{fid} was re-rendered after its last QC run - the QC report is stale.\n"
             "Re-run: tools/figures/qc.py --all, look at the new render, then confirm."
@@ -570,11 +625,16 @@ def main() -> int:
     results = []
     for e in entries:
         res = qc_figure(e, tgt, arch_reg)
-        # a re-render invalidates a previous visual review
+        # A visual review is bound to the PNG bytes: a changed render invalidates it, while a
+        # re-render that reproduces identical bytes keeps it (no needless second look).
         old = previous.get(res["id"])
-        if old and old.get("png_mtime") == _mtime(e.get("file", "")):
+        live_sha = _png_sha256(e.get("file", ""))
+        if old and _same_render(old, live_sha, _mtime(e.get("file", ""))):
             res["visual_reviewed"] = old.get("visual_reviewed", False)
             res["review_rounds"] = old.get("review_rounds", 0)
+            if old.get("review_log"):
+                res["review_log"] = old["review_log"]
+        res["png_sha256"] = live_sha
         res["png_mtime"] = _mtime(e.get("file", ""))
         results.append(res)
 
@@ -607,6 +667,25 @@ def main() -> int:
         print("visual_review_mode = inline: open each PNG now, then record what you saw:")
         _say('  tools/figures/qc.py --confirm "Figure 1" --note "<what you saw>"')
     return 0 if fails == 0 else 2
+
+
+def _png_sha256(rel: str) -> str | None:
+    if not rel:
+        return None
+    p = project_root() / rel
+    if not p.is_file():
+        return None
+    import hashlib
+    return hashlib.sha256(p.read_bytes()).hexdigest().upper()
+
+
+def _same_render(entry: dict, live_sha: str | None, live_mtime: float | None) -> bool:
+    """Is the PNG on disk the one this QC entry judged? SHA-256 first; legacy entries by mtime."""
+    if entry.get("png_sha256"):
+        return live_sha is not None and entry["png_sha256"] == live_sha
+    if entry.get("png_mtime") is not None:
+        return live_mtime is not None and entry["png_mtime"] == live_mtime
+    return False
 
 
 def _mtime(rel: str) -> float | None:

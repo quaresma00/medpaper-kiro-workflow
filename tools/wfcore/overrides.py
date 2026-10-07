@@ -54,6 +54,7 @@ _ALLOWED_FREEFORM = {"reason", "globs"}
 # asserts every non-overridable gate is also unrelaxable, because a gate you cannot --force past
 # but can switch off in a config file is not actually protected.
 PROTECTED_CHECKS = frozenset({
+    "dependent_checks_pending",
     "data_acquisition_complete",
     "reference_provenance",
     "refs_library",

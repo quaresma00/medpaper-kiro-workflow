@@ -344,6 +344,15 @@ def reference_provenance(ctx: Ctx) -> Result:
     try:
         library = ctx.read_json(LIB)
         entries = library.get("entries", [])
+        from ..liverefs import FORCED_LIVE_STAGES, cached_sources, store_sources
+        stage_id = getattr(ctx.stage, "id", "")
+        cached = (None if stage_id in FORCED_LIVE_STAGES else
+                  cached_sources(ctx.project, entries,
+                                 float(ctx.target("live_reference_age_hours_max", 24))))
+        if cached is not None:
+            return Result(True, "reference_provenance",
+                          f"{len(entries)} unchanged record(s) match hashed independent live "
+                          "PubMed XML within the freshness window (live re-fetch reused)")
         pmids = [str(item.get("pmid", "")) for item in entries]
         if not pmids or any(not re.fullmatch(r"\d+", pmid) for pmid in pmids):
             raise ValueError("every entry must have a numeric PMID")
@@ -374,6 +383,7 @@ def reference_provenance(ctx: Ctx) -> Result:
     if live_problems:
         return Result(False, "reference_provenance", "; ".join(live_problems[:8]),
                       ["Rebuild the affected entry from the returned PubMed record; never edit the proof to match."])
+    store_sources(ctx.project, live_records)
     return Result(True, "reference_provenance",
                   f"{len(entries)} record(s) independently re-fetched and matched against live PubMed")
 

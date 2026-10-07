@@ -28,7 +28,7 @@ first keep panels from filling up with explanatory text later.
      "content": "what the reader learns from it, in one sentence",
      "archetype": "flow_diagram",
      "panels": ["A", "B"], "width": "single|1.5|double",
-     "script": "05_figures/code/fig1_flow.py",
+     "script": "05_figures/code/fig1_flow.R",
      "file": "05_figures/out/Figure1.png",
      "tiff": "05_figures/out/Figure1.tiff",
      "source_results": ["03_analysis/results/dataset_summary.json"]}
@@ -49,7 +49,12 @@ first keep panels from filling up with explanatory text later.
 ```
    Structural requirements the gate enforces: sequential numbering with no gaps; each
    main table in its own xlsx; **all supplementary tables in a single xlsx, one sheet
-   each**; every figure has a `width`, a `script` and an `archetype`.
+   each**; every figure has a `width`, a `script` and an `archetype`. Figures render in R
+   by default (`figure_engine`); a figure whose script is the other engine (e.g. an approved
+   Python figure that is kept as it is) needs `"renderer": "Python"` and a
+   `"renderer_reason"` of at least 20 characters. Never refit a confirmed model just to draw
+   it in R. `source_results` lists the result files the figure is drawn from; the R render
+   receipt binds to exactly that list.
    If the reporting guideline requires a flow diagram (STROBE/CONSORT/STARD/PRISMA),
    it is Figure 1.
 

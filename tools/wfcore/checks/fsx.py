@@ -144,6 +144,9 @@ def no_orphans(ctx: Ctx) -> Result:
         if not p.is_file():
             continue
         rel = p.relative_to(ctx.project).as_posix()
+        # Archived journal variants/packages are kept on purpose (a rejected journal's work).
+        if rel.startswith("08_submission/journal_archives/"):
+            continue
         if rel in declared:
             continue
         if any(fnmatch.fnmatch(rel, g) for g in free + always):

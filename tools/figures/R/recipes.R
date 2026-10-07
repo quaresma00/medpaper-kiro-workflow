@@ -78,7 +78,12 @@ recipe_cif <- function(data, time, status, group, times, cause = 1, gray_p = NUL
   fml <- stats::as.formula(sprintf("survival::Surv(%s, %s) ~ %s", time, status, group))
   ci <- tidycmprsk::cuminc(fml, data = data)
   pal <- medpaper_palette(palette, length(lv))
-  curve <- ggsurvfit::ggcuminc(ci, outcome = outcome) + ggsurvfit::add_censor_mark(size = 1.2) +
+  curve <- ggsurvfit::ggcuminc(ci, outcome = outcome)
+  # tidy_cuminc() carries NA estimates past the last event; ggplot drops them with a warning,
+  # which save_medpaper treats as an error (warn = 2). Dropping them here draws the same curve.
+  if ("estimate" %in% names(curve$data))
+    curve$data <- curve$data[!is.na(curve$data$estimate), , drop = FALSE]
+  curve <- curve + ggsurvfit::add_censor_mark(size = 1.2) +
     scale_colour_manual(values = pal) +
     scale_x_continuous(breaks = times) + coord_cartesian(xlim = range(times)) +
     labs(x = xlab, y = ylab, colour = NULL) + theme_medpaper() +

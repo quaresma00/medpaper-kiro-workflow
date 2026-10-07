@@ -1,6 +1,7 @@
 """Artifact-plan, table and figure structural checks."""
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 
@@ -118,6 +119,27 @@ def artifact_plan_sane(ctx: Ctx) -> Result:
         if not e.get("file"):
             problems.append(f"{tag}: missing 'file'")
         if e["_group"].endswith("figures"):
+            # R is the default renderer (targets.figure_engine). A figure drawn by the other
+            # engine is legitimate - an approved Python figure is kept, never refit in R - but
+            # the plan must say so and why, so a mixed set stays traceable.
+            policy = "python" if str(ctx.target("figure_engine", "R")).strip().casefold() == "python" else "r"
+            script = str(e.get("script", "")).casefold()
+            renderer = e.get("renderer")
+            if renderer is not None and renderer not in ("R", "Python"):
+                problems.append(f"{tag}: renderer must be R or Python")
+            else:
+                inferred = (str(renderer).casefold() if renderer is not None else
+                            "r" if script.endswith(".r") else "python" if script.endswith(".py")
+                            else None)
+                expected_suffix = {"r": ".r", "python": ".py"}.get(inferred or "")
+                if renderer is not None and script and not script.endswith(expected_suffix):
+                    problems.append(f"{tag}: script extension differs from declared renderer")
+                if inferred and inferred != policy and \
+                        len(str(e.get("renderer_reason", "")).strip()) < 20:
+                    problems.append(
+                        f"{tag}: rendered with {'R' if inferred == 'r' else 'Python'} although "
+                        f"figure_engine = {'R' if policy == 'r' else 'python'}; add "
+                        "'renderer_reason' (>= 20 characters) naming the concrete reason")
             if e.get("width") not in ("single", "double", "1.5"):
                 problems.append(f"{tag}: width must be single | 1.5 | double")
             if not e.get("script"):
@@ -567,6 +589,12 @@ def figures_qc_pass(ctx: Ctx) -> Result:
                   if not c.get("ok") and c.get("severity") == "warn"]
         if failed:
             problems.append(f"{eid}: failing {', '.join(failed)}")
+        bound = str(f.get("png_sha256") or "")
+        png = ctx.p(str(e.get("file", ""))) if e.get("file") else None
+        if bound and png is not None and png.is_file():
+            live = hashlib.sha256(png.read_bytes()).hexdigest().upper()
+            if live != bound.upper():
+                problems.append(f"{eid}: re-rendered after its QC/visual review; re-run qc.py")
         if warned:
             warnings.append(f"{eid}: {', '.join(warned)}")
         if not f.get("visual_reviewed"):

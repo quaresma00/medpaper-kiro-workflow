@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+from decimal import Decimal, InvalidOperation
 
 from .. import xlsxlite
 from . import Ctx, Result, check
@@ -28,7 +29,18 @@ ARTIFACT_RE = re.compile(
     r"[A-Za-z]?\d+[A-Za-z]?(?:\s*[-,and]+\s*[A-Za-z]?\d+[A-Za-z]?)*",
     re.I,
 )
-NUM_RE = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)(?![\w])")
+# A sign directly attached to a number is part of it: "-0.42" and "−0.42" (U+2212) are the
+# same finding, and "0.42" is a different one.
+MINUS = "\u2212"
+NUM_RE = re.compile(r"(?<![\w.])([+\-\u2212]?\d+(?:\.\d+)?)(?![\w])")
+# P-value thresholds. "P<0.001" is a claim about a result, not a convention: some reported
+# P value must actually be below 0.001.
+P_RE = re.compile(r"\b[Pp]\s*([<>=\u2264\u2265])\s*(0?\.\d+(?:[eE][+-]?\d+)?)\b")
+P_STATED_RE = re.compile(r"([<>\u2264\u2265])\s*(0?\.\d+)")
+
+
+def _plain(token: str) -> str:
+    return token.replace(MINUS, "-").lstrip("+")
 
 
 # ---------------------------------------------------------------------------
@@ -55,7 +67,7 @@ def _walk(obj, sink: set[str]) -> None:
 
 def _norm(v) -> str:
     try:
-        f = float(v)
+        f = float(_plain(v) if isinstance(v, str) else v)
     except (TypeError, ValueError):
         return str(v)
     if f == int(f) and abs(f) < 1e15:
@@ -63,7 +75,21 @@ def _norm(v) -> str:
     return repr(round(f, 10))
 
 
-def _pool(ctx: Ctx) -> tuple[set[float], set[str], list[str]]:
+def _stated_thresholds(obj, sink: set[tuple[str, str]]) -> None:
+    """P thresholds the analysis itself wrote as text, e.g. a formatted "<0.001"."""
+    if isinstance(obj, str):
+        for op, tok in P_STATED_RE.findall(obj):
+            sink.add((op, _norm(tok)))
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            _stated_thresholds(v, sink)
+    elif isinstance(obj, (list, tuple)):
+        for v in obj:
+            _stated_thresholds(v, sink)
+
+
+def _pool(ctx: Ctx, stated: set[tuple[str, str]] | None = None
+          ) -> tuple[set[float], set[str], list[str]]:
     """-> (float pool, raw-string pool, source file names)"""
     strings: set[str] = set()
     sources: list[str] = []
@@ -78,6 +104,8 @@ def _pool(ctx: Ctx) -> tuple[set[float], set[str], list[str]]:
             # run, never of a manuscript number. Only the writers' top-level key is dropped.
             data = {k: v for k, v in data.items() if k != "environment"}
         _walk(data, strings)
+        if stated is not None:
+            _stated_thresholds(data, stated)
     floats: set[float] = set()
     for s in strings:
         try:
@@ -87,8 +115,9 @@ def _pool(ctx: Ctx) -> tuple[set[float], set[str], list[str]]:
     return floats, strings, sources
 
 
-def _allowlist(ctx: Ctx) -> set[str]:
-    allowed = set(CONVENTIONS)
+def _explicit_allowlist(ctx: Ctx) -> set[str]:
+    """Tokens the paper declared in number_allowlist.tsv (with a reason), without conventions."""
+    allowed: set[str] = set()
     p = ctx.p(ALLOWLIST)
     if p.exists():
         for line in p.read_text(encoding="utf-8").splitlines():
@@ -101,18 +130,32 @@ def _allowlist(ctx: Ctx) -> set[str]:
     return allowed
 
 
+def _allowlist(ctx: Ctx) -> set[str]:
+    return set(CONVENTIONS) | _explicit_allowlist(ctx)
+
+
+def _decimals(token: str) -> int:
+    try:
+        exponent = Decimal(_plain(token)).as_tuple().exponent
+    except InvalidOperation:
+        return 0
+    return max(0, -exponent) if isinstance(exponent, int) else 0
+
+
 def _matches(token: str, floats: set[float], strings: set[str]) -> bool:
-    if token in strings:
+    if token in strings or _plain(token) in strings:
         return True
     try:
-        val = float(token)
+        val = float(_plain(token))
     except ValueError:
         return False
     if val in floats:
         return True
-    # Tolerate rounding to the precision the author displayed.
-    dp = len(token.split(".")[1]) if "." in token else 0
+    # Tolerate rounding to the precision the author displayed, never a flipped sign.
+    dp = _decimals(token)
     for f in floats:
+        if (f < 0) != (val < 0) and f != 0 and val != 0:
+            continue
         if round(f, dp) == val:
             return True
         if dp == 0 and abs(f - val) < 0.5 and f != 0:
@@ -125,17 +168,45 @@ def _scrub(text: str) -> str:
     text = CITE_RE.sub(" ", text)
     text = ARTIFACT_RE.sub(" ", text)
     text = re.sub(r"^\s*#{1,6}\s.*$", " ", text, flags=re.M)
-    text = re.sub(r"\bp\s*[<>=]\s*0?\.0+\d*\b", " ", text, flags=re.I)  # p<0.001 style
     text = re.sub(r"\b(19|20)\d{2}\s*[-\u2013]\s*(19|20)?\d{2}\b", " ", text)  # not scrubbed values
     return text
 
 
-def _offenders(text: str, floats, strings, allowed) -> list[tuple[int, str]]:
+def _p_ok(op: str, token: str, floats, stated, explicit) -> bool:
+    """Is a stated P threshold backed by an executed result?"""
+    if token in explicit:
+        return True  # declared in number_allowlist.tsv with a reason (e.g. an alpha in Methods)
+    if (op, _norm(token)) in stated:
+        return True  # the analysis itself wrote this formatted threshold
+    threshold = float(token)
+    candidates = [f for f in floats if 0 <= f <= 1]
+    if op == "<":
+        return any(f < threshold for f in candidates)
+    if op == "\u2264":
+        return any(f <= threshold for f in candidates)
+    if op == ">":
+        return any(f > threshold for f in candidates)
+    if op == "\u2265":
+        return any(f >= threshold for f in candidates)
+    return _matches(token, set(candidates), {_norm(f) for f in candidates})
+
+
+def _offenders(text: str, floats, strings, allowed, stated=frozenset(),
+               explicit=frozenset()) -> list[tuple[int, str]]:
     bad: list[tuple[int, str]] = []
     for lineno, raw in enumerate(_scrub(text).splitlines(), start=1):
+        def pvalue(match, _lineno=lineno):
+            op, token = match.groups()
+            if not _p_ok(op, token, floats, stated, explicit):
+                bad.append((_lineno, "P" + op + token))
+            return " "
+        raw = P_RE.sub(pvalue, raw)
+        # A formatted table cell carries the threshold without the P label.
+        if re.fullmatch(r"\s*[<\u2264]\s*0?\.\d+\s*", raw):
+            raw = P_RE.sub(pvalue, "P" + raw.strip())
         for m in NUM_RE.finditer(raw):
             tok = m.group(1)
-            if tok in allowed:
+            if tok in allowed or _plain(tok) in allowed:
                 continue
             if _matches(tok, floats, strings):
                 continue
@@ -156,7 +227,8 @@ def numbers_have_provenance(ctx: Ctx) -> Result:
                 return Result(True, "numbers_have_provenance", f"{rel}: optional file absent")
             return Result(False, "numbers_have_provenance", f"{rel} missing")
 
-    floats, strings, sources = _pool(ctx)
+    stated: set[tuple[str, str]] = set()
+    floats, strings, sources = _pool(ctx, stated)
     if not sources:
         return Result(
             False,
@@ -165,6 +237,7 @@ def numbers_have_provenance(ctx: Ctx) -> Result:
             ["Analysis code must dump every reported statistic to JSON before any prose is written."],
         )
     allowed = _allowlist(ctx)
+    explicit = _explicit_allowlist(ctx)
     if source == "tables":
         offenders = []
         for p in ctx.glob("04_tables/main/*.xlsx") + ctx.glob("04_tables/supplementary/*.xlsx"):
@@ -173,10 +246,7 @@ def numbers_have_provenance(ctx: Ctx) -> Result:
             except Exception as exc:  # noqa: BLE001 - report, do not crash the gate
                 return Result(False, "numbers_have_provenance", f"cannot read {p.name}: {exc}")
             for sheet, ref, val in cells:
-                for m in NUM_RE.finditer(str(val)):
-                    tok = m.group(1)
-                    if tok in allowed or _matches(tok, floats, strings):
-                        continue
+                if _offenders(str(val), floats, strings, allowed, stated, explicit):
                     offenders.append(f"{p.name}[{sheet}]!{ref}={val}")
         if offenders:
             uniq = sorted(set(offenders))
@@ -191,7 +261,7 @@ def numbers_have_provenance(ctx: Ctx) -> Result:
             )
         return Result(True, "numbers_have_provenance", f"all table values trace to {len(sources)} result file(s)")
 
-    bad = _offenders(ctx.read(rel), floats, strings, allowed)
+    bad = _offenders(ctx.read(rel), floats, strings, allowed, stated, explicit)
     if bad:
         shown = "; ".join(f"line {ln}: {tok}" for ln, tok in bad[:10])
         return Result(
@@ -201,6 +271,7 @@ def numbers_have_provenance(ctx: Ctx) -> Result:
             [
                 "Every statistic must already exist in 03_analysis/results/*.json, written by executed code.",
                 f"For genuine constants (thresholds, conventions), add them to {ALLOWLIST} as 'value<TAB>reason'.",
+                "A 'P<0.001' needs a reported P value below 0.001; a sign must match the result's sign.",
                 "Do not fix this by rounding differently. Re-run the analysis and dump the value.",
             ],
         )
@@ -261,7 +332,7 @@ def numbers_cross_match(ctx: Ctx) -> Result:
             tok = m.group(1)
             if tok in allowed or tok in pool:
                 continue
-            if any(abs(float(tok) - float(v)) < 10 ** -max(0, len(tok.split(".")[1]) if "." in tok else 0)
+            if any(abs(float(_plain(tok)) - float(_plain(v))) < 10 ** -_decimals(tok)
                    for v in pool if _is_num(v)):
                 continue
             problems.append(f"{tok} cited to {matched_label} but absent from it")
@@ -282,7 +353,7 @@ def numbers_cross_match(ctx: Ctx) -> Result:
 
 def _is_num(v) -> bool:
     try:
-        float(v)
+        float(_plain(str(v)))
         return True
     except (TypeError, ValueError):
         return False

@@ -29,7 +29,19 @@ def _resolve_manuscript_paths(spec: dict, project: Path) -> dict:
     return out
 
 
-def run_stage(pipeline, state, project: Path, stage) -> list[Result]:
+# A failure in one of these means the stage's inputs are not there yet. Running the dependent
+# checks would only print a cascade of consequential failures (and cost a live PubMed round
+# trip) for the agent to read; they are reported as pending instead, never as passed.
+STOP_ON_FAIL = frozenset({"outputs_exist"})
+
+
+def run_stage(pipeline, state, project: Path, stage, *, reuse: bool = False,
+              record: bool = False) -> list[Result]:
+    """Run a stage gate.
+
+    record=True (wf check) writes short-lived receipts for passing pure-local checks;
+    reuse=True (wf advance) may reuse them. See gatecache for what is and is not reusable.
+    """
     if getattr(stage, "skipped", False):
         return [Result(True, "paper_override_skip",
                        f"{stage.id} is inapplicable to this paper: {stage.skip_reason}")]
@@ -38,6 +50,10 @@ def run_stage(pipeline, state, project: Path, stage) -> list[Result]:
     if not stage.gate:
         results.append(Result(True, "-", "stage declares no gate"))
         return results
+    receipts = None
+    if reuse or record:
+        from .gatecache import Receipts
+        receipts = Receipts(project, pipeline, state)
     for spec in stage.gate:
         spec = _resolve_manuscript_paths(spec, project)
         name = spec.get("check")
@@ -50,12 +66,27 @@ def run_stage(pipeline, state, project: Path, stage) -> list[Result]:
             continue
         ctx = Ctx(pipeline=pipeline, state=state, project=project, stage=stage, spec=spec)
         try:
-            res = fn(ctx)
+            identity = receipts.identity(stage, spec) if receipts else None
+            res = receipts.get(identity) if receipts and reuse else None
+            if res is None:
+                res = fn(ctx)
+                # A pure check must not change the very inputs it certifies.
+                if receipts and identity and identity == receipts.identity(stage, spec):
+                    receipts.put(identity, res)
         except Exception as exc:  # noqa: BLE001 - a broken check must not brick the pipeline
             res = Result(False, name, f"check raised {type(exc).__name__}: {exc}")
         if "severity" in spec and not res.ok:
             res.severity = spec["severity"]
         results.append(res)
+        if res.blocking and name in STOP_ON_FAIL:
+            results.append(Result(
+                False, "dependent_checks_pending",
+                "required outputs are missing; the remaining checks of this gate were not run "
+                "and cannot be forced",
+                ["Create the missing outputs listed above, then run `wf check` again."]))
+            break
+    if receipts:
+        receipts.save()
     return results
 
 

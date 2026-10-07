@@ -5,10 +5,13 @@
 #   save_medpaper(p, "05_figures/out/Figure1", width = "single", archetype = "km_survival")
 #
 # save_medpaper() renders at the exact physical width from the paper's targets, normalises the
-# outer ink margins with the same rule tools/figures/qc.py judges, writes PNG + LZW TIFF and an
-# artist-audit sidecar 05_figures/qc/<stem>.artist.json with the same schema style.save()
-# writes. Every measurement in the sidecar is computed from the drawn grob tree. Do not
-# hand-tune plot.margin: the outer margin is set here.
+# outer ink margins with the same rule tools/figures/qc.py judges, writes PNG + LZW TIFF + a
+# vector PDF master and an artist-audit sidecar 05_figures/qc/<stem>.artist.json with the same
+# schema style.save() writes, plus provenance (script, script_sha256, source_hashes,
+# render_hashes). Outputs are staged and renamed into place only after every render succeeded,
+# so a failed render keeps the previous figure. ggplot warnings are errors inside
+# save_medpaper (options(warn = 2)). Every measurement in the sidecar is computed from the
+# drawn grob tree. Do not hand-tune plot.margin: the outer margin is set here.
 
 suppressPackageStartupMessages({
   library(ggplot2)
@@ -660,9 +663,64 @@ scale_fill_medpaper <- function(name = "okabe_ito", ...) scale_fill_manual(value
   invisible(path)
 }
 
+.mf_sha256 <- function(path) {
+  if (!file.exists(path)) stop("cannot hash a missing file: ", path, call. = FALSE)
+  if (requireNamespace("digest", quietly = TRUE)) return(toupper(digest::digest(file = path, algo = "sha256")))
+  if (requireNamespace("openssl", quietly = TRUE)) {
+    con <- file(path, "rb"); on.exit(close(con), add = TRUE)
+    return(toupper(as.character(openssl::sha256(con))))
+  }
+  if (requireNamespace("cli", quietly = TRUE)) return(toupper(cli::hash_file_sha256(path)))
+  stop("save_medpaper needs one of the R packages digest, openssl or cli to hash its provenance", call. = FALSE)
+}
+
+.mf_rel <- function(path, paper) {
+  a <- gsub("\\\\", "/", normalizePath(path, winslash = "/", mustWork = FALSE))
+  b <- sub("/+$", "", gsub("\\\\", "/", paper))
+  if (.Platform$OS.type == "windows") {
+    if (startsWith(tolower(a), paste0(tolower(b), "/"))) return(substring(a, nchar(b) + 2))
+  } else if (startsWith(a, paste0(b, "/"))) return(substring(a, nchar(b) + 2))
+  a
+}
+
+# The plotting script, paper-relative. wf run-script exports MEDPAPER_SCRIPT; a direct Rscript
+# call falls back to --file=. Empty when neither identifies a script inside the paper.
+.mf_script_rel <- function(paper) {
+  s <- Sys.getenv("MEDPAPER_SCRIPT")
+  if (!nzchar(s)) {
+    f <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
+    if (!length(f)) return("")
+    s <- sub("^--file=", "", f[1])
+  }
+  abs <- if (grepl("^([A-Za-z]:)?[/\\\\]", s)) s else file.path(paper, s)
+  if (!file.exists(abs) || !.mf_within(abs, paper)) return("")
+  .mf_rel(abs, paper)
+}
+
+# source_results the artifact plan declares for the figure rendered to `png_rel`.
+.mf_plan_sources <- function(paper, png_rel) {
+  plan_file <- file.path(paper, "01_protocol", "artifact_plan.json")
+  if (!file.exists(plan_file)) return(character(0))
+  plan <- tryCatch(jsonlite::fromJSON(plan_file, simplifyVector = FALSE), error = function(e) NULL)
+  if (is.null(plan)) return(character(0))
+  for (group in c("main_figures", "supp_figures")) for (e in plan[[group]] %||% list()) {
+    if (identical(gsub("\\\\", "/", as.character(e$file %||% "")), png_rel)) {
+      src <- unlist(e$source_results %||% list(), use.names = FALSE)
+      src <- as.character(src[nzchar(src)])
+      return(src[file.exists(file.path(paper, src))])
+    }
+  }
+  character(0)
+}
+
 # ---------------------------------------------------------------------------
 save_medpaper <- function(plot, stem, width = "single", height_mm = NULL, dpi = 600,
-                          archetype = NULL, tiff = TRUE) {
+                          archetype = NULL, tiff = TRUE, pdf = TRUE) {
+  # A ggplot warning while building the figure ("Removed 3 rows containing missing values")
+  # means data were silently dropped from what the reader sees. Treat it as an error here,
+  # where the figure is built and drawn; the previous render is kept (see staging below).
+  old_warn <- options(warn = 2)
+  on.exit(options(old_warn), add = TRUE)
   if (!(inherits(plot, "ggplot") || inherits(plot, "patchwork")))
     stop("save_medpaper measures ggplot/patchwork objects; build the figure with ggplot2 (+ patchwork), not a gtable, survminer list or base graphics", call. = FALSE)
   if (!is.character(stem) || length(stem) != 1 || !nzchar(stem) || grepl("\\.(png|tiff?|pdf)$", stem, ignore.case = TRUE))
@@ -725,22 +783,31 @@ save_medpaper <- function(plot, stem, width = "single", height_mm = NULL, dpi = 
     message("! outer margins could not be equalised: t/r/b/l = ", paste(measured[c("top", "right", "bottom", "left")], collapse = "/"), " px")
 
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+  # Stage every output next to its final name and publish only after all of them rendered and
+  # the audit succeeded. A failed render leaves the previous approved figure untouched.
   png <- paste0(abs_stem, ".png")
-  ragg::agg_png(png, width = w_mm, height = h_mm, units = "mm", res = dpi, background = "white")
-  dev <- dev.cur()
-  local({
+  tif <- if (isTRUE(tiff)) paste0(abs_stem, ".tiff") else NULL
+  pdf_out <- if (isTRUE(pdf)) paste0(abs_stem, ".pdf") else NULL
+  finals <- c(png, tif, pdf_out)
+  stage_of <- function(f) sub("(\\.[A-Za-z]+)$", ".render-tmp\\1", f)
+  staged <- vapply(finals, stage_of, character(1))
+  on.exit(for (s in staged) if (file.exists(s)) unlink(s), add = TRUE)
+  .mf_draw_to <- function(open_device) {
+    open_device()
+    dev <- dev.cur()
     on.exit(if (dev %in% dev.list()) dev.off(dev), add = TRUE)
     grid.newpage(); grid.draw(gt)
-  })
-  tif <- NULL
-  if (isTRUE(tiff)) {
-    tif <- paste0(abs_stem, ".tiff")
-    ragg::agg_tiff(tif, width = w_mm, height = h_mm, units = "mm", res = dpi, background = "white", compression = "lzw")
-    dev <- dev.cur()
-    local({
-      on.exit(if (dev %in% dev.list()) dev.off(dev), add = TRUE)
-      grid.newpage(); grid.draw(gt)
-    })
+  }
+  .mf_draw_to(function() ragg::agg_png(stage_of(png), width = w_mm, height = h_mm, units = "mm", res = dpi, background = "white"))
+  if (!is.null(tif))
+    .mf_draw_to(function() ragg::agg_tiff(stage_of(tif), width = w_mm, height = h_mm, units = "mm", res = dpi, background = "white", compression = "lzw"))
+  if (!is.null(pdf_out)) {
+    # Vector master for typesetting. Device font-database notices are not data warnings.
+    use_cairo <- isTRUE(capabilities("cairo"))
+    suppressWarnings(.mf_draw_to(function() {
+      if (use_cairo) grDevices::cairo_pdf(stage_of(pdf_out), width = w_mm / 25.4, height = h_mm / 25.4, bg = "white")
+      else grDevices::pdf(stage_of(pdf_out), width = w_mm / 25.4, height = h_mm / 25.4, bg = "white", useDingbats = FALSE)
+    }))
   }
 
   base_family <- tryCatch(as.character(theme_get()$text$family %||% "Arial"), error = function(e) "Arial")
@@ -750,13 +817,30 @@ save_medpaper <- function(plot, stem, width = "single", height_mm = NULL, dpi = 
   dir.create(qc_dir, recursive = TRUE, showWarnings = FALSE)
   sidecar <- file.path(qc_dir, paste0(name, ".artist.json"))
   if (.mf_in_engine(sidecar)) stop("refusing to write a sidecar inside the engine", call. = FALSE)
+
+  # Provenance: which script drew this, from which results, into which bytes. qc.py refuses
+  # the figure once any of them changes, so a stale render cannot reach the package.
+  rel_of <- function(f) .mf_rel(f, paper)
+  script_rel <- .mf_script_rel(paper)
+  audit$script <- script_rel
+  audit$script_sha256 <- if (nzchar(script_rel)) .mf_sha256(file.path(paper, script_rel)) else ""
+  src_rels <- .mf_plan_sources(paper, rel_of(png))
+  audit$source_hashes <- stats::setNames(lapply(src_rels, function(r) .mf_sha256(file.path(paper, r))), src_rels)
+  if (!length(src_rels)) audit$source_hashes <- structure(list(), names = character(0))
+  audit$render_hashes <- stats::setNames(lapply(staged, .mf_sha256), vapply(finals, rel_of, character(1)))
+  for (i in seq_along(finals)) {
+    # file.rename replaces an existing target, so the old file is never removed first.
+    if (!file.rename(staged[i], finals[i])) stop("could not publish ", finals[i], call. = FALSE)
+  }
   keys <- c("figure", "archetype", "engine", "n_axes", "min_font_pt", "max_font_pt", "min_line_pt",
             "text_clipped_at_edge", "axes_tightbbox_overlaps", "glyph_warnings",
-            "tick_label_collisions", "interior_voids", "elements", "figure_text")
+            "tick_label_collisions", "interior_voids", "elements", "figure_text",
+            "script", "script_sha256", "source_hashes", "render_hashes")
   .mf_write_json(audit[keys], sidecar)
 
   px <- c(floor(w_mm / 25.4 * dpi), floor(h_mm / 25.4 * dpi))
-  cat(sprintf("wrote %s.png%s  %sx%s mm @ %d dpi\n", name, if (!is.null(tif)) paste0(" + ", name, ".tiff") else "",
+  cat(sprintf("wrote %s.png%s%s  %sx%s mm @ %d dpi\n", name, if (!is.null(tif)) paste0(" + ", name, ".tiff") else "",
+              if (!is.null(pdf_out)) paste0(" + ", name, ".pdf") else "",
               format(round(w_mm, 2)), format(round(h_mm, 2)), as.integer(dpi)))
   if (length(audit$axes_tightbbox_overlaps)) cat("  ! ", length(audit$axes_tightbbox_overlaps), " panel bounding-box overlap(s) - fix the layout, not the labels\n", sep = "")
   if (length(audit$text_clipped_at_edge)) cat("  ! ", length(audit$text_clipped_at_edge), " text element(s) clipped at the figure edge\n", sep = "")

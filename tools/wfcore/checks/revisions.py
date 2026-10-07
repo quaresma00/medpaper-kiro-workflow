@@ -110,6 +110,25 @@ def manuscript_review_package_current(ctx: Ctx) -> Result:
     )
 
 
+@check("reader_review_coverage")
+def reader_review_coverage(ctx: Ctx) -> Result:
+    """S18: the independent review saw the exact current text, tables and rendered figures."""
+    from .. import readerreview
+    problems = readerreview.verify(ctx.project)
+    if problems:
+        return Result(
+            False, "reader_review_coverage", "; ".join(problems[:6]),
+            ["Print the evidence block and give the reviewer exactly those files, including "
+             "every rendered figure PNG: .venv/Scripts/python.exe "
+             "tools/manuscript/review_package.py reader-inputs",
+             "Paste the printed ```json block into the review report, and write the reviewer's "
+             "'Reader comprehension' and 'Medical presentation' findings under those headings."],
+        )
+    n = len(readerreview.reader_inputs(ctx.project))
+    return Result(True, "reader_review_coverage",
+                  f"independent review is bound to {n} current file(s), rendered figures included")
+
+
 @check("s19_review_release_explicit")
 def s19_review_release_explicit(ctx: Ctx) -> Result:
     ok, details, manifest = verify_review_package(ctx.project)

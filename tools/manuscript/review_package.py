@@ -25,11 +25,16 @@ def _current_stage(project: Path) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="versioned S19 scientific-review ZIP")
-    parser.add_argument("command", choices=["build", "verify"])
+    parser.add_argument("command", choices=["build", "verify", "reader-inputs"])
     parser.add_argument("--project", type=Path, default=None)
     args = parser.parse_args()
     project = paths.paper_from_cli(args.project)
     try:
+        if args.command == "reader-inputs":
+            # S18: what the independent reviewer must be given, as the block its report embeds.
+            from wfcore import readerreview
+            print(readerreview.evidence_block(project))
+            return 0
         if args.command == "build":
             stage = _current_stage(project)
             if stage and stage != "S19_human_review":

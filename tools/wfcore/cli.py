@@ -31,6 +31,9 @@ STAGE_ALIASES = {
     "S20_package": "S17_assemble",
 }
 NON_OVERRIDABLE_GATES = {
+    # Checks that were not run because required outputs are missing are not "failed and
+    # forceable"; they are unknown. Forcing past them would advance on untested gates.
+    "dependent_checks_pending",
     "data_acquisition_complete",
     "reference_provenance",
     "refs_library",
@@ -603,7 +606,7 @@ def cmd_check(args) -> int:
     if not args.json:
         _warn_engine_cwd(proj, stdout=True)
     stage = pipe.resolve(args.stage) if args.stage else pipe.stage(st.current)
-    results = gates.run_stage(pipe, st, proj, stage)
+    results = gates.run_stage(pipe, st, proj, stage, record=True)
     ok, blocking, warned = gates.summarize(results)
     if args.json:
         print(json.dumps({
@@ -647,7 +650,7 @@ def cmd_advance(args) -> int:
             print("pipeline complete (remaining stages were explicitly skipped for this paper).")
         return 0
 
-    results = gates.run_stage(pipe, st, proj, stage)
+    results = gates.run_stage(pipe, st, proj, stage, reuse=True)
     ok, blocking, _ = gates.summarize(results)
     non_overridable_failures = [r for r in results if r.blocking and
                                 r.check in NON_OVERRIDABLE_GATES]

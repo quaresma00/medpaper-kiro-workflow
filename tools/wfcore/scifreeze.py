@@ -15,8 +15,9 @@ The split:
 
     08_submission/manuscript/ the journal variant. A copy taken at S20 once the journal is
                               known. This is what S21/S22 adapt and S23 renders to DOCX.
-                              Switching journals throws this away and takes a fresh copy;
-                              the frozen science is untouched.
+                              Switching journals moves it (and the old package) to
+                              08_submission/journal_archives/<journal>-<UTC>/ and takes a
+                              fresh copy; the frozen science is untouched.
 
 What is deliberately NOT frozen: rendered artifacts. Figure PNG/TIFF are re-rendered at the
 chosen journal's column width and palette, and table workbooks are rebuilt into its format.
@@ -45,7 +46,12 @@ REQUIRED_SCIENTIFIC = (
     "07_manuscript/full_manuscript.md",
     "06_refs/refs.bib",
     "06_refs/library.json",
+    # The executed results every number in the text traces to. A glob: at least one file must
+    # match, and every match is hashed. (Rendered figures/tables stay unfrozen; see above.)
+    "03_analysis/results/*.json",
 )
+FREEZE_SCHEMA = 2
+ARCHIVE_DIR = "08_submission/journal_archives"
 OPTIONAL_SCIENTIFIC = (
     "07_manuscript/supplementary_methods.md",
     "07_manuscript/title.md",
@@ -154,9 +160,33 @@ def resolve_all(project: Path, rels) -> list[str]:
 # ---------------------------------------------------------------------------
 # capture
 # ---------------------------------------------------------------------------
+def _is_glob(rel: str) -> bool:
+    return any(ch in rel for ch in "*?[")
+
+
+def uncovered_required(entries: dict) -> list[str]:
+    """Required scientific paths (or globs) that a freeze record does not cover."""
+    import fnmatch
+    out = []
+    for rel in REQUIRED_SCIENTIFIC:
+        if _is_glob(rel):
+            if not any(fnmatch.fnmatchcase(k, rel) for k in entries):
+                out.append(rel)
+        elif rel not in entries:
+            out.append(rel)
+    return out
+
+
 def scientific_files(project: Path) -> tuple[dict[str, Path], list[str]]:
     files, missing = {}, []
     for rel in REQUIRED_SCIENTIFIC:
+        if _is_glob(rel):
+            found = [p for p in sorted(project.glob(rel)) if p.is_file() and p.stat().st_size > 0]
+            if not found:
+                missing.append(rel)
+            for p in found:
+                files[p.relative_to(project).as_posix()] = p
+            continue
         p = project / rel
         if p.is_file() and p.stat().st_size > 0:
             files[rel] = p
@@ -173,14 +203,25 @@ def build_freeze(project: Path) -> dict:
     files, missing = scientific_files(project)
     if missing:
         raise SystemExit("cannot freeze; missing scientific source(s): " + ", ".join(missing))
-    return {
-        "schema": 1,
+    payload = {
+        "schema": FREEZE_SCHEMA,
         "frozen_at": _now(),
         "note": "Scientific record settled at S19. Journal adaptation happens in "
                 f"{VARIANT_DIR}/, never here.",
         "files": {rel: {"sha256": _sha256(p), "bytes": p.stat().st_size}
                   for rel, p in sorted(files.items())},
     }
+    # Bind the freeze to the S19 review ZIP the user released, so the gate can prove the frozen
+    # text is the reviewed text (scientific_freeze_intact checks the decision rationale).
+    latest = project / "07_manuscript/review_packages/latest_review_package.json"
+    if latest.is_file():
+        try:
+            package_id = str(json.loads(latest.read_text(encoding="utf-8")).get("package_id", ""))
+        except (OSError, json.JSONDecodeError):
+            package_id = ""
+        if package_id:
+            payload["review_package_id"] = package_id
+    return payload
 
 
 def write_freeze(project: Path, *, force: bool = False) -> Path:
@@ -241,26 +282,80 @@ def _remove(path: Path) -> bool:
     return False
 
 
-def clear_journal_downstream(project: Path) -> list[str]:
-    """Remove every S21+ artifact that cannot belong to a replacement journal variant."""
+def _slug(text: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", str(text).casefold()).strip("-")
+    return slug[:60] or "journal"
+
+
+def _journal_name(project: Path) -> str:
+    name = str(variant_meta(project).get("journal", "")).strip()
+    if name:
+        return name
+    try:
+        meta = json.loads((project / "08_submission/target_journal.json").read_text(encoding="utf-8"))
+        return str(meta.get("journal", "")).strip()
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return ""
+
+
+def new_archive_dir(project: Path) -> Path:
+    """A fresh 08_submission/journal_archives/<journal-slug>-<UTC stamp>/ (not yet created)."""
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    base = project / ARCHIVE_DIR / f"{_slug(_journal_name(project))}-{stamp}"
+    out, n = base, 1
+    while out.exists():
+        n += 1
+        out = base.with_name(f"{base.name}-{n}")
+    return out
+
+
+def _archive(project: Path, rel: str, archive: Path) -> bool:
+    """Move one submission-tree path into `archive`, keeping its path below 08_submission/."""
+    src = project / rel
+    if not src.exists():
+        return False
+    dest = archive / Path(rel).relative_to("08_submission")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(src), str(dest))
+    return True
+
+
+def clear_journal_downstream(project: Path, archive: Path | None = None) -> list[str]:
+    """Move every S21+ artifact that cannot belong to a replacement journal variant aside.
+
+    Nothing is deleted: a journal switch after a rejection must not lose the previous
+    journal's adapted text and package. They go to 08_submission/journal_archives/, which no
+    gate reads.
+    """
+    archive = archive or new_archive_dir(project)
     removed = []
     for rel in JOURNAL_DOWNSTREAM:
-        if _remove(project / rel):
+        if _archive(project, rel, archive):
             removed.append(rel)
     return removed
 
 
 def reset_journal(project: Path) -> list[str]:
-    """Start S20 from a blank submission area while leaving the scientific freeze intact."""
+    """Start S20 from a blank submission area while leaving the scientific freeze intact.
+
+    The old submission tree is archived under 08_submission/journal_archives/, not deleted.
+    Returns the original paths of the files that were moved aside.
+    """
     ok, problems, _ = verify_freeze(project)
     if not ok:
         raise SystemExit("refusing journal reset: frozen science has drifted:\n  "
                          + "\n  ".join(problems))
     root = project / "08_submission"
-    removed = []
+    archives = project / ARCHIVE_DIR
+    removed: list[str] = []
     if root.exists():
-        removed = [p.relative_to(project).as_posix() for p in root.rglob("*") if p.is_file()]
-        shutil.rmtree(root)
+        children = [p for p in root.iterdir() if p.resolve() != archives.resolve()]
+        if children:
+            archive = new_archive_dir(project)
+            for child in children:
+                files = [child] if child.is_file() else [p for p in child.rglob("*") if p.is_file()]
+                removed.extend(p.relative_to(project).as_posix() for p in files)
+                _archive(project, child.relative_to(project).as_posix(), archive)
     root.mkdir(parents=True, exist_ok=True)
     return removed
 
@@ -290,13 +385,15 @@ def open_variant(project: Path, journal: str, *, force: bool = False) -> tuple[P
             f"previous adaptation:\n  --force to replace it. The frozen science is untouched "
             f"either way."
         )
-    # `--force` means a NEW journal variant, not an in-place overwrite. Delete the directory
-    # first so a title page, polish report, snapshot or journal-only statement from journal A
-    # cannot survive merely because journal B has not generated its replacement yet.
-    if dest.exists() and force:
-        shutil.rmtree(dest)
+    # `--force` means a NEW journal variant, not an in-place overwrite. Move the directory
+    # aside first so a title page, polish report, snapshot or journal-only statement from the
+    # previous variant cannot survive merely because the new one has not generated its
+    # replacement yet. It is archived, never deleted.
     if force:
-        clear_journal_downstream(project)
+        archive = new_archive_dir(project)
+        if dest.exists():
+            _archive(project, VARIANT_DIR, archive)
+        clear_journal_downstream(project, archive)
     dest.mkdir(parents=True, exist_ok=True)
     copied = []
     for name in ADAPTED_TEXT_FILES:

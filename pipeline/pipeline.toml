@@ -14,7 +14,7 @@
 
 [meta]
 name = "medpaper"
-version = "1.5.0"
+version = "1.6.0"
 schema = 1
 description = "Medical/clinical research pipeline: idea -> feasibility -> data -> analysis -> artifacts -> manuscript -> submission package."
 
@@ -55,9 +55,10 @@ invariants = [
   "Never upload patient-level, private or credential data to an external skill, plugin or service without explicit authorization.",
   "The S23 package is not final until S24 records the user's explicit request for final review and freezes the exact files, then S25 obtains one independent PASS from reader, editor and journal-compliance perspectives. Any post-confirmation change returns to S24.",
   "A user-requested revision never leaves the workflow. Route it with tools/rework.py to the earliest owning stage, update the source of truth, rebuild only true dependants, and invalidate downstream approvals. Word-only layout edits are allowed at S24 only when the S23 visible-text baseline is unchanged.",
-  "The scientific record is frozen when the user releases S19 review, and 07_manuscript/ is read-only from then on. Journal requirements - word caps, abstract shape, reference style, title page, required statements - are presentation, and are applied to the copy in 08_submission/manuscript/ that S20 opens for the chosen journal. Switching journals first loops to S20 and runs reset-journal to clear the entire old submission tree, then takes a fresh copy from the same frozen text; no prior cache, title page, cover letter, trim, bundle or approval may survive. scientific_freeze_intact, journal_variant_ready and variant_preserves_science are non-overridable. Prose may be tightened to fit a cap, but a number, citation or artifact reference that disappears is dropped content, which is a scientific decision needing the user's recorded authorisation.",
+  "The scientific record is frozen when the user releases S19 review, and 07_manuscript/ is read-only from then on. Journal requirements - word caps, abstract shape, reference style, title page, required statements - are presentation, and are applied to the copy in 08_submission/manuscript/ that S20 opens for the chosen journal. Switching journals first loops to S20 and runs reset-journal, which moves the entire old submission tree to 08_submission/journal_archives/<journal>-<UTC>/ (archived, never deleted, never read by a gate), then takes a fresh copy from the same frozen text; no prior cache, title page, cover letter, trim, bundle or approval may survive in the live tree. Once S19 is done a missing freeze fails the gate, and the freeze also covers 03_analysis/results/*.json. scientific_freeze_intact, journal_variant_ready and variant_preserves_science are non-overridable. Prose may be tightened to fit a cap, but a number, citation or artifact reference that disappears is dropped content, which is a scientific decision needing the user's recorded authorisation.",
   "Repeated feedback is handled as a persisted revision round at S19 (scientific manuscript) or S24 (journal package). Interpret the feedback once into atomic items, route the batch to its earliest owner, read and rebuild only affected sources/dependants, preserve unaffected approved evidence, and still run every applicable quality gate. Token or context pressure is never permission to omit an item, shorten the scientific work or skip validation; resume from tools/rework.py status after compaction.",
   "Every initial or revised S19 scientific version must have a current, versioned third-party review ZIP and be presented with clickable locations for the manuscript, optional supplementary Methods, tables, figures and independent verdict. Remain at S19 until the user explicitly states that no further review is needed; silence, file delivery, thanks, or a generic continue instruction is not approval.",
+  "Figures render in R by default (figure_engine); analysis may stay in Python. A figure drawn with the other engine needs `renderer` and a `renderer_reason` (>= 20 characters) in the artifact plan. Approved Python figures are kept as they are: never refit confirmed models just to render them in R. R figures carry a render receipt (script, result and output hashes); a changed script or result makes qc.py fail until the figure is re-rendered.",
   "If you are unsure where you are, run `.\\.venv\\Scripts\\python.exe tools\\wf.py status`. Never guess the current stage.",
 ]
 
@@ -70,6 +71,8 @@ always_allowed = [
   "temp/**",
   ".wf/**",
   ".kiro/**",
+  # Previous journals' variants and packages, moved aside (never deleted) on a journal switch.
+  "08_submission/journal_archives/**",
 ]
 
 # ------------------------------------------------------------------------------
@@ -98,6 +101,9 @@ column_width_mm_1_5 = 140.0
 # both identically; a figure rendered with the other engine is a warning, not a failure.
 figure_engine = "R"
 figure_dpi_min = 300
+# A passing independent live PubMed check is reused for this many hours by later live gates
+# (bound to the hashed EFetch XML and re-compared per record). S13 and S25 always re-fetch.
+live_reference_age_hours_max = 24
 figure_font_pt_min = 6.0
 figure_line_pt_min = 0.5
 figure_legend_words_max = 180
@@ -570,6 +576,10 @@ live = true
 check = "md_sections"
 path = "07_manuscript/independent_publishability_review.md"
 headings = ["Verdict", "Critical barriers", "Scientific validity", "Reporting completeness", "Tables and supplementary material", "Journal suitability", "Required revisions", "Post-revision outlook"]
+# The review must be bound (by hash) to the exact manuscript, tables and rendered figures it
+# judged, and say what a reader understands and how the medicine is presented.
+[[stage.gate]]
+check = "reader_review_coverage"
 [[stage.gate]]
 check = "decision_recorded"
 name = "independent_publishability"

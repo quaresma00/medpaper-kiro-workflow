@@ -126,6 +126,9 @@ def build_fixture(proj: Path) -> None:
                                                  "panel B a box plot; no single archetype fits",
                           "panels": ["A", "B"], "width": "double",
                           "script": "05_figures/code/fig1_primary.py",
+                          "renderer": "Python",
+                          "renderer_reason": "fixture figure drawn with matplotlib to exercise "
+                                             "the Python QC path",
                           "file": "05_figures/out/Figure1.png",
                           "tiff": "05_figures/out/Figure1.tiff",
                           "source_results": ["03_analysis/results/primary.json"]}],
@@ -915,6 +918,9 @@ def run_scientific_freeze(proj: Path) -> None:
     (scoped / "06_refs/refs.bib").write_text("@article{smith2020cohort, title={x}}\n",
                                              encoding="utf-8")
     (scoped / "06_refs/library.json").write_text('{"entries": []}', encoding="utf-8")
+    (scoped / "03_analysis/results").mkdir(parents=True, exist_ok=True)
+    (scoped / "03_analysis/results/primary.json").write_text(
+        '{"hr": 1.87, "n": 412, "mortality_pct": 23.4, "auc": 0.781}', encoding="utf-8")
 
     pipe = registry.load()
 
@@ -944,8 +950,9 @@ def run_scientific_freeze(proj: Path) -> None:
     r = run("scientific_freeze_captured", "S19_human_review")
     record("the freeze covers the scientific record", r.ok, r.detail)
     freeze = scifreeze.load_freeze(scoped)
-    record("the freeze hashes the manuscript, refs and library",
-           all(k in freeze["files"] for k in scifreeze.REQUIRED_SCIENTIFIC),
+    record("the freeze hashes the manuscript, refs, library and results JSON",
+           not scifreeze.uncovered_required(freeze["files"])
+           and "03_analysis/results/primary.json" in freeze["files"],
            f"{len(freeze['files'])} file(s)")
     record("re-freezing without --force is refused",
            _raises(lambda: scifreeze.write_freeze(scoped)),
@@ -1128,13 +1135,28 @@ def run_scientific_freeze(proj: Path) -> None:
                "cover_letter.md", "bundle", "build_receipts",
                "package_content_baseline.json", "package_human_review.md")),
            "no cover letter, bundle, baseline, receipt or approval can cross variants")
+    archived = sorted((submission / "journal_archives").glob("*/cover_letter.md"))
+    record("the replaced variant and package are archived, not deleted",
+           len(archived) == 1 and archived[0].read_text(encoding="utf-8") == "old cover letter"
+           and (archived[0].parent / "manuscript/title_page.md").is_file()
+           and archived[0].parent.name.startswith("endoscopy-international-open-"),
+           str([p.relative_to(scoped).as_posix() for p in archived]))
     record("same-journal rebuild preserves the current S20 metadata",
            (submission / "target_journal.json").is_file())
 
     removed = scifreeze.reset_journal(scoped)
+    live_tree = [p for p in submission.iterdir() if p.name != "journal_archives"]
     record("a full journal switch clears S20 metadata/cache and every downstream file",
            "08_submission/target_journal.json" in removed
-           and not any(submission.iterdir()), f"removed {len(removed)} file(s)")
+           and not live_tree, f"removed {len(removed)} file(s)")
+    record("reset-journal archives the old submission tree instead of deleting it",
+           any((d / "target_journal.json").is_file()
+               for d in (submission / "journal_archives").iterdir()),
+           "a rejected journal's variant and package stay recoverable")
+    orphan = run("no_orphans", "S20_journal")
+    record("no_orphans ignores 08_submission/journal_archives/",
+           not any("journal_archives" in part for part in orphan.detail.split(", ")),
+           orphan.detail[:120])
     (submission / "target_journal.json").write_text('{"journal":"Gut"}', encoding="utf-8")
     scifreeze.open_variant(scoped, "Gut")
     record("the new journal starts from the same frozen text",
@@ -1180,7 +1202,8 @@ def run_scientific_freeze(proj: Path) -> None:
     removed = scifreeze.reset_journal(scoped)
     record("reset-journal clears the entire old submission tree before a new S20 run",
            "08_submission/cache/old-journal.html" in removed
-           and not any((scoped / "08_submission").iterdir()),
+           and not [p for p in (scoped / "08_submission").iterdir()
+                    if p.name != "journal_archives"],
            f"removed {len(removed)} file(s)")
     record("reset-journal leaves the scientific freeze and manuscript unchanged",
            scifreeze.verify_freeze(scoped)[0]
@@ -1821,13 +1844,16 @@ def run_visual_deferral(proj: Path) -> None:
     # A re-render must invalidate the confirmation, or a stale look could ship.
     png = proj / data["figures"][0]["png"]
     if png.exists():
-        os.utime(png, (png.stat().st_atime, png.stat().st_mtime + 60))
+        # The binding is the PNG's SHA-256 (1.6.0): changed bytes, not a touched mtime.
+        original_png = png.read_bytes()
+        png.write_bytes(original_png + b"\0")
         p = subprocess.run([sys.executable, qc, "--confirm", "Figure 1", "--note",
                             "trying to confirm against a stale QC report on purpose"],
                            capture_output=True, text=True, env=env, encoding="utf-8",
                            errors="replace")
         record("--confirm refuses a report made stale by a re-render", p.returncode != 0,
                ((p.stdout or "") + (p.stderr or "")).strip()[-100:])
+        png.write_bytes(original_png)
 
     # Leave the fixture as later sections expect it.
     set_reviewed(True)
@@ -2075,7 +2101,7 @@ def run_codex_integration() -> None:
                f"card must name `{agent}` so the work is not done in the main context")
 
     record("pipeline and skill versions agree",
-           pipe["meta"]["version"] == "1.5.0" and 'version: "2.1.0"' in skill,
+           pipe["meta"]["version"] == "1.6.0" and 'version: "2.1.0"' in skill,
            f'pipeline={pipe["meta"]["version"]}, skill=2.1.0 (Kiro adapter revision)')
     record("all 25 stage cards exist",
            len(pipe["stage"]) == 25 and
@@ -4274,7 +4300,8 @@ t <- medpaper_targets(); cat("TARGETS", t$column_width_mm_single, t$column_width
             for n in ("Figure1", "Figure2", "Figure3", "Single", "RawKM", "CIF")
             if (P / f"05_figures/qc/{n}.artist.json").is_file()}
     record("sidecar keys are qc.SIDECAR_KEYS plus engine = R, at 05_figures/qc/<stem>.artist.json",
-           len(side) == 6 and all(set(s) == set(qc.SIDECAR_KEYS) | {"engine"} and s["engine"] == "R"
+           len(side) == 6 and all(set(s) == set(qc.SIDECAR_KEYS) | set(qc.SIDECAR_OPTIONAL_KEYS)
+                                  and s["engine"] == "R"
                                   and s["figure"] == n for n, s in side.items())
            and not (P / "05_figures/qc/05_figures").exists(), str(list(side)))
     from figures import elements as el
@@ -4458,6 +4485,418 @@ save_medpaper(nums, "05_figures/out/TicksOnly", width = "single")
         ext = not {x["name"]: x for x in r["checks"]}["artist_audit_schema"]["ok"]
     record("a legacy sidecar without engine passes the schema and only warns on engine policy", bool(legacy_ok))
     record("N: a sidecar missing a key or with an extra key fails artist_audit_schema", miss and ext)
+
+    # 1.6.0: render receipt, vector master, staged publish and warn = 2
+    section("R figures: render receipt, PDF master, failed render keeps the old figure")
+    prov_entry = {"id": "Figure S1", "file": "05_figures/out/Prov.png", "width": "single",
+                  "tiff": "05_figures/out/Prov.tiff", "script": "05_figures/code/prov.R",
+                  "source_results": ["03_analysis/results/primary.json"]}
+    plan2 = dict(plan, supp_figures=[prov_entry])
+    (P / "01_protocol/artifact_plan.json").write_text(_json.dumps(plan2), encoding="utf-8")
+    _r_script(P / "05_figures/code/prov.R",
+              'res <- jsonlite::fromJSON(medpaper_path("03_analysis/results/primary.json"))\n'
+              'p <- ggplot(data.frame(x = 1:5, y = c(2, 3, 5, 4, res$hr)), aes(x, y)) + geom_point() +'
+              ' labs(x = "X", y = "Y") + theme_medpaper()\n'
+              'save_medpaper(p, "05_figures/out/Prov", width = "single")\n')
+    pp = _wf("run-script", "05_figures/code/prov.R", env=env, cwd=tmp)
+    prov_side = (_json.loads((P / "05_figures/qc/Prov.artist.json").read_text(encoding="utf-8"))
+                 if (P / "05_figures/qc/Prov.artist.json").is_file() else {})
+    record("save_medpaper records script, script_sha256, source_hashes and render_hashes",
+           pp.returncode == 0 and prov_side.get("script") == "05_figures/code/prov.R"
+           and set(prov_side.get("source_hashes", {})) == {"03_analysis/results/primary.json"}
+           and {"05_figures/out/Prov.png", "05_figures/out/Prov.tiff", "05_figures/out/Prov.pdf"}
+           <= set(prov_side.get("render_hashes", {})), _out(pp)[-200:])
+    pdf_path = out_dir / "Prov.pdf"
+    record("a vector PDF master is written beside PNG/TIFF",
+           pdf_path.is_file() and pdf_path.read_bytes()[:4] == b"%PDF")
+
+    def prov_check():
+        with __import__("unittest.mock", fromlist=["patch"]).patch.dict(
+                os.environ, {"MEDPAPER_PROJECT": str(P)}):
+            r = qc.qc_figure(prov_entry, tg, arch)
+        return {x["name"]: x for x in r["checks"]}.get("r_render_provenance", {})
+    record("an unchanged render passes r_render_provenance", prov_check().get("ok") is True,
+           prov_check().get("detail", ""))
+    res_path = P / "03_analysis/results/primary.json"
+    original = res_path.read_bytes()
+    res_path.write_bytes(original + b"\n")
+    c = prov_check()
+    record("N: a changed result file fails r_render_provenance",
+           c.get("ok") is False and "result changed" in c.get("detail", ""), c.get("detail", ""))
+    res_path.write_bytes(original)
+    script_path = P / "05_figures/code/prov.R"
+    script_text = script_path.read_text(encoding="utf-8")
+    script_path.write_text(script_text + "# edited\n", encoding="utf-8")
+    c = prov_check()
+    record("N: an edited plotting script fails r_render_provenance",
+           c.get("ok") is False and "script changed" in c.get("detail", ""), c.get("detail", ""))
+    script_path.write_text(script_text, encoding="utf-8")
+
+    before = (out_dir / "Prov.png").read_bytes()
+    _r_script(P / "05_figures/code/prov_bad.R",
+              'p <- ggplot(data.frame(x = c(1, 2, NA), y = c(1, 2, 3)), aes(x, y)) + geom_point() +'
+              ' labs(x = "X", y = "Y") + theme_medpaper()\n'
+              'save_medpaper(p, "05_figures/out/Prov", width = "single")\n')
+    pb = _wf("run-script", "05_figures/code/prov_bad.R", env=env, cwd=tmp)
+    record("N: a ggplot warning (rows silently dropped) fails the render (warn = 2)",
+           pb.returncode != 0, _out(pb)[-160:])
+    record("a failed render keeps the previous figure byte-identical and leaves no staging files",
+           (out_dir / "Prov.png").read_bytes() == before
+           and not list(out_dir.glob("*.render-tmp.*")), str(list(out_dir.glob("*render-tmp*"))))
+    (P / "01_protocol/artifact_plan.json").write_text(_json.dumps(plan), encoding="utf-8")
+
+
+def run_v160(tmp: Path) -> None:
+    """1.6.0: live-reference cache, gate stop + receipts, freeze binding, renderer rule,
+    R provenance check, P thresholds, reader-review coverage."""
+    import copy
+    import time
+    from unittest.mock import patch
+
+    from wfcore import gatecache, gates, liverefs, readerreview, refproof, registry, scifreeze
+    from wfcore import checks as checks_mod
+    from wfcore.checks import Ctx, get, load_all
+    from wfcore.checks import numbers as nums
+    from wfcore.state import State
+
+    load_all()
+    pipe = registry.load()
+
+    # ---- PubMed live-verification cache ---------------------------------------------------
+    section("1.6.0 live PubMed check: hash-bound 24 h reuse, S13/S25 always live")
+    P = _new_paper(tmp / "liverefs")
+    refs = P / "06_refs"
+    (refs / "cache").mkdir(parents=True)
+    key, pmid, doi = "smith2025cache", "40123457", "10.1000/cache-doi"
+    title = "Caching independent reference verification"
+    abstract = "Independent live verification results were reused within a freshness window."
+    raw = f"""<?xml version="1.0" encoding="UTF-8"?>
+<PubmedArticleSet><PubmedArticle><MedlineCitation><PMID>{pmid}</PMID><Article>
+<ArticleTitle>{title}</ArticleTitle>
+<Abstract><AbstractText>{abstract}</AbstractText></Abstract>
+<AuthorList><Author><LastName>Smith</LastName><ForeName>Alice</ForeName></Author></AuthorList>
+<Journal><JournalIssue><PubDate><Year>2025</Year></PubDate></JournalIssue><Title>Journal of Evidence Integrity</Title></Journal>
+<ELocationID EIdType="doi">{doi}</ELocationID><PublicationTypeList><PublicationType>Journal Article</PublicationType></PublicationTypeList>
+</Article></MedlineCitation><PubmedData><ArticleIdList><ArticleId IdType="doi">{doi}</ArticleId></ArticleIdList></PubmedData>
+</PubmedArticle></PubmedArticleSet>"""
+    entry = {"citekey": key, "pmid": pmid, "doi": doi, "title": title, "abstract": abstract,
+             "authors": [{"last": "Smith", "first": "Alice"}],
+             "journal": "Journal of Evidence Integrity", "year": "2025", "source": "pubmed"}
+    lib_path = refs / "library.json"
+    lib_path.write_text(json.dumps({"entries": [entry]}, indent=2), encoding="utf-8")
+    vrel = "06_refs/cache/verify_efetch_pubmed_fixture.xml"
+    (P / vrel).write_text(raw, encoding="utf-8")
+    source = refproof.parse_pubmed_payload(raw)[pmid]
+    (refs / "verified.json").write_text(json.dumps({
+        "schema": refproof.SCHEMA,
+        "generator": {"tool": refproof.GENERATOR, "mode": "fresh_ncbi_pubmed_efetch",
+                      "source": "NCBI PubMed EFetch"},
+        "verified_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "strict": False, "library_sha256": refproof.file_sha256(lib_path),
+        "n_entries": 1, "n_verified": 1,
+        "records": {key: {"verified": True, "via": "pubmed", "pmid": pmid, "doi": doi,
+                          "evidence": {"source": refproof.SOURCE, "cache_file": vrel,
+                                       "payload_sha256": refproof.file_sha256(P / vrel),
+                                       "record_sha256": refproof.record_sha256(source),
+                                       "fresh_fetch": True}}}}, indent=2), encoding="utf-8")
+    grel = "06_refs/cache/gate_efetch_pubmed_fixture.xml"
+    (P / grel).write_text(raw, encoding="utf-8")
+    live = {"pmid": pmid, "doi": doi, "title": title, "abstract": abstract,
+            "authors": [{"last": "Smith", "first": "Alice"}],
+            "journal": "Journal of Evidence Integrity", "year": "2025", "flags": [],
+            "cache_file": grel}
+    st = State(P, ".wf").load()
+
+    def prov(stage_id: str):
+        return get("reference_provenance")(Ctx(pipeline=pipe, state=st, project=P,
+                                               stage=pipe.stage(stage_id),
+                                               spec={"check": "reference_provenance",
+                                                     "live": True}))
+    offline = patch("pubmed.eutils.efetch", side_effect=OSError("NCBI unreachable"))
+    with patch("pubmed.eutils.efetch", return_value=[live]) as fetch:
+        first = prov("S14_introduction")
+    record("cache miss: the live gate fetches, passes and stores a hash-bound receipt",
+           first.ok and fetch.call_count == 1 and (P / liverefs.REL).is_file(), first.detail[:100])
+    with offline:
+        hit = prov("S16_discussion")
+    record("cache hit: an unchanged library passes from the receipt without NCBI",
+           hit.ok and "reused" in hit.detail, hit.detail[:100])
+    with offline:
+        forced = [prov(s) for s in ("S13_reflib", "S25_submission_audit")]
+    record("S13 and S25 never use the cache (forced live, fail closed offline)",
+           all(not r.ok and "failed closed" in r.detail for r in forced),
+           "; ".join(r.detail[:50] for r in forced))
+    changed = dict(entry, title=title + " revisited")
+    record("a changed library entry misses the cache",
+           liverefs.cached_sources(P, [changed]) is None
+           and liverefs.cached_sources(P, [entry]) is not None)
+    receipt = json.loads((P / liverefs.REL).read_text(encoding="utf-8"))
+    (P / grel).write_text(raw.replace(title, title + "!"), encoding="utf-8")
+    tampered = liverefs.cached_sources(P, [entry]) is None
+    (P / grel).write_text(raw, encoding="utf-8")
+    receipt["at"] = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
+    (P / liverefs.REL).write_text(json.dumps(receipt), encoding="utf-8")
+    record("a tampered gate XML or an expired (>24 h) receipt misses the cache",
+           tampered and liverefs.cached_sources(P, [entry]) is None)
+    record("a mocked record without a gate EFetch payload cannot seed the cache",
+           liverefs.store_sources(P, [dict(live, cache_file="")]) is False)
+    record("the receipt lives in the paper's .wf/, never in the engine",
+           liverefs.REL.startswith(".wf/") and not (ROOT / ".wf").exists())
+
+    # ---- gate stop + receipts ---------------------------------------------------------------
+    section("1.6.0 gates: stop after missing outputs, 120 s receipts for pure checks only")
+    G = _new_paper(tmp / "gates")
+    gst = State(G, ".wf").load()
+    stage = copy.copy(pipe.stage("S02_feasibility"))
+    (G / "notes.md").write_text("# A\n\nx\n\n# B\n\ny\n", encoding="utf-8")
+    stage.gate = [{"check": "outputs_exist"},
+                  {"check": "md_sections", "path": "notes.md", "headings": ["A", "B"]},
+                  {"check": "reference_provenance", "live": True}]
+    res = gates.run_stage(pipe, gst, G, stage)
+    record("a missing output stops the gate; dependents are reported pending, not run",
+           [r.check for r in res] == ["outputs_exist", "dependent_checks_pending"]
+           and res[-1].blocking, str([r.check for r in res]))
+    from wfcore import cli
+    record("pending dependents cannot be forced past",
+           "dependent_checks_pending" in cli.NON_OVERRIDABLE_GATES)
+    stage.gate = [{"check": "md_sections", "path": "notes.md", "headings": ["A", "B"]}]
+    calls = {"n": 0}
+    real = checks_mod.REGISTRY["md_sections"]
+
+    def counting(ctx):
+        calls["n"] += 1
+        return real(ctx)
+    with patch.dict(checks_mod.REGISTRY, {"md_sections": counting}):
+        r1 = gates.run_stage(pipe, gst, G, stage, record=True)
+        r2 = gates.run_stage(pipe, gst, G, stage, reuse=True)
+        reused_once = calls["n"] == 1
+        (G / "notes.md").write_text("# A\n\nx changed\n\n# B\n\ny\n", encoding="utf-8")
+        r3 = gates.run_stage(pipe, gst, G, stage, reuse=True)
+    record("wf check -> wf advance reuses an unchanged pure-check PASS",
+           r1[0].ok and r2[0].ok and reused_once, f"calls={calls}")
+    record("a changed input re-executes the check (content-hash identity)",
+           r3[0].ok and calls["n"] == 2, f"calls={calls}")
+    rc = gatecache.Receipts(G, pipe, gst)
+    never = ("reference_provenance", "scientific_freeze_intact", "decision_recorded",
+             "s19_review_release_explicit", "data_acquisition_complete", "analysis_reproduces",
+             "bundle_matches_freeze", "reader_review_coverage")
+    record("integrity, approval, freeze and live checks are never cached",
+           all(rc.identity(stage, {"check": c}) is None for c in never))
+    ov = gst.dir / "overrides.toml"
+    id_before = rc.identity(stage, stage.gate[0])
+    ov.write_text("schema = 1\n", encoding="utf-8")
+    record("the identity includes the paper's overrides fingerprint",
+           gatecache.Receipts(G, pipe, gst).identity(stage, stage.gate[0]) != id_before)
+    ov.unlink()
+    data = json.loads((gst.dir / gatecache.REL).read_text(encoding="utf-8"))
+    for row in data.values():
+        row["at"] = time.time() - gatecache.TTL_SECONDS - 1
+    (gst.dir / gatecache.REL).write_text(json.dumps(data), encoding="utf-8")
+    with patch.dict(checks_mod.REGISTRY, {"md_sections": counting}):
+        gates.run_stage(pipe, gst, G, stage, reuse=True)
+    record("an expired receipt (> 120 s) re-executes", calls["n"] == 3, f"calls={calls}")
+
+    # ---- freeze after S19 ---------------------------------------------------------------------
+    section("1.6.0 freeze: missing after S19 fails, bound to the S19 approval")
+    F = _new_paper(tmp / "freeze")
+    for rel, text in (("07_manuscript/full_manuscript.md", "# Results\n\n412 patients.\n"),
+                      ("06_refs/refs.bib", "@article{a, title={x}}\n"),
+                      ("06_refs/library.json", '{"entries": []}'),
+                      ("03_analysis/results/primary.json", '{"n": 412}')):
+        (F / rel).parent.mkdir(parents=True, exist_ok=True)
+        (F / rel).write_text(text, encoding="utf-8")
+
+    def intact():
+        fst = State(F, ".wf").load()
+        return get("scientific_freeze_intact")(Ctx(pipeline=pipe, state=fst, project=F,
+                                                   stage=pipe.stage("S20_journal"),
+                                                   spec={"check": "scientific_freeze_intact"}))
+    record("before S19 a missing freeze still passes (upstream paper)", intact().ok)
+    fst = State(F, ".wf").load()
+    fst.stage_info("S19_human_review")["status"] = "done"
+    fst.save()
+    r = intact()
+    record("N: S19 done but no freeze fails (no silent pass)",
+           not r.ok and "S19 is complete" in r.detail, r.detail[:100])
+    pkg = F / "07_manuscript/review_packages"
+    pkg.mkdir(parents=True)
+    (pkg / "latest_review_package.json").write_text(
+        json.dumps({"package_id": "abcdef1234567890"}), encoding="utf-8")
+    fst = State(F, ".wf").load()
+    fst.record_decision("manuscript_human_reviewed", "NO_FURTHER_REVIEW",
+                        "user: no further review needed for v001")
+    scifreeze.write_freeze(F)
+    r = intact()
+    record("N: a freeze whose package ID the approval does not name fails",
+           not r.ok and "abcdef123456" in r.detail, r.detail[:100])
+    fst = State(F, ".wf").load()
+    fst.record_decision("manuscript_human_reviewed", "NO_FURTHER_REVIEW",
+                        "user: no further review needed for v001 abcdef123456")
+    scifreeze.write_freeze(F, force=True)
+    record("a freeze bound to the named S19 package passes", intact().ok, intact().detail[:100])
+    fst = State(F, ".wf").load()
+    fst.data["decisions"].pop("manuscript_human_reviewed")
+    fst.save()
+    record("N: a freeze without a NO_FURTHER_REVIEW decision fails", not intact().ok)
+
+    # ---- renderer rule ----------------------------------------------------------------------
+    section("1.6.0 artifact plan: a non-R figure must say why")
+    A = _new_paper(tmp / "plan")
+
+    def plan_with(**fig):
+        base = {"id": "Figure 1", "title": "t", "content": "c", "width": "single",
+                "archetype": "box_jitter", "file": "05_figures/out/Figure1.png",
+                "source_results": ["03_analysis/results/x.json"],
+                "script": "05_figures/code/fig1.R"}
+        base.update(fig)
+        (A / "01_protocol").mkdir(exist_ok=True)
+        (A / "01_protocol/artifact_plan.json").write_text(json.dumps(
+            {"main_figures": [base], "main_tables": [], "supp_figures": [],
+             "supp_tables": []}), encoding="utf-8")
+        return _gate("artifact_plan_sane", A, stage="S07_artifacts")
+    arch_ok = plan_with()
+    record("an R figure under the R default needs no reason", arch_ok.ok, arch_ok.detail[:100])
+    r = plan_with(script="05_figures/code/fig1.py")
+    record("N: a Python figure without renderer_reason fails",
+           not r.ok and "renderer_reason" in r.detail, r.detail[:100])
+    r = plan_with(script="05_figures/code/fig1.py", renderer="Python", renderer_reason="short")
+    record("N: a reason under 20 characters fails", not r.ok)
+    r = plan_with(script="05_figures/code/fig1.py", renderer="Python",
+                  renderer_reason="approved forest plot from the confirmed Python model; kept")
+    record("an approved Python figure with a concrete reason passes", r.ok, r.detail[:100])
+    r = plan_with(script="05_figures/code/fig1.R", renderer="Python",
+                  renderer_reason="approved forest plot from the confirmed Python model; kept")
+    record("N: a declared renderer that contradicts the script extension fails", not r.ok)
+    record("the invariant keeps approved Python figures instead of refitting in R",
+           any("never refit" in inv for inv in pipe.policy.get("invariants", [])))
+
+    # ---- R provenance in qc.py (no R needed) ---------------------------------------------------
+    section("1.6.0 qc.py: R render receipt and PNG-hash visual binding")
+    from figures import qc as figqc
+    import matplotlib.pyplot as plt
+    Q = _new_paper(tmp / "qcprov")
+    for sub in ("05_figures/out", "05_figures/qc", "05_figures/code", "03_analysis/results"):
+        (Q / sub).mkdir(parents=True, exist_ok=True)
+    fig = plt.figure(figsize=(3.54, 2.5), dpi=200)
+    fig.add_subplot(111).plot([0, 1], [0, 1])
+    fig.savefig(str(Q / "05_figures/out/Fig.png"))
+    plt.close(fig)
+    (Q / "05_figures/code/fig.R").write_text("# draws Fig\n", encoding="utf-8")
+    (Q / "03_analysis/results/r.json").write_text('{"x": 1}', encoding="utf-8")
+    from wfcore.packagefreeze import _sha256
+    from figures import elements as el
+    side = {"figure": "Fig", "archetype": None, "engine": "R", "n_axes": 1, "min_font_pt": 7,
+            "max_font_pt": 8, "min_line_pt": 0.6, "text_clipped_at_edge": [],
+            "axes_tightbbox_overlaps": [], "glyph_warnings": [], "tick_label_collisions": [],
+            "interior_voids": [], "elements": {k: {"found": False, "evidence": ""}
+                                               for k in el.DETECTORS},
+            "figure_text": [], "script": "05_figures/code/fig.R",
+            "script_sha256": _sha256(Q / "05_figures/code/fig.R"),
+            "source_hashes": {"03_analysis/results/r.json": _sha256(Q / "03_analysis/results/r.json")},
+            "render_hashes": {"05_figures/out/Fig.png": _sha256(Q / "05_figures/out/Fig.png")}}
+    (Q / "05_figures/qc/Fig.artist.json").write_text(json.dumps(side), encoding="utf-8")
+    qentry = {"id": "Fig", "file": "05_figures/out/Fig.png", "width": "single",
+              "script": "05_figures/code/fig.R", "source_results": ["03_analysis/results/r.json"]}
+
+    def provenance(entry_=qentry):
+        with patch.dict(os.environ, {"MEDPAPER_PROJECT": str(Q)}):
+            out = figqc.qc_figure(entry_, registry.effective_targets(Q), {})
+        return {c["name"]: c for c in out["checks"]}.get("r_render_provenance", {})
+    record("a matching R render receipt passes", provenance().get("ok") is True,
+           provenance().get("detail", ""))
+    (Q / "03_analysis/results/r.json").write_text('{"x": 2}', encoding="utf-8")
+    record("N: a result changed after rendering fails r_render_provenance",
+           provenance().get("ok") is False)
+    (Q / "03_analysis/results/r.json").write_text('{"x": 1}', encoding="utf-8")
+    record("N: plan source_results that differ from the receipt fail",
+           provenance(dict(qentry, source_results=["03_analysis/results/other.json"]))
+           .get("ok") is False)
+    record("N: a different plotting script than the plan fails",
+           provenance(dict(qentry, script="05_figures/code/other.R")).get("ok") is False)
+    legacy = {k: v for k, v in side.items() if k not in figqc.PROVENANCE_KEYS}
+    (Q / "05_figures/qc/Fig.artist.json").write_text(json.dumps(legacy), encoding="utf-8")
+    c = provenance()
+    record("a legacy R sidecar without a receipt only warns", c.get("ok") is False
+           and c.get("severity") == "warn")
+    with patch.dict(os.environ, {"MEDPAPER_PROJECT": str(Q)}):
+        sha = figqc._png_sha256("05_figures/out/Fig.png")
+        same = figqc._same_render({"png_sha256": sha}, sha, 1.0)
+        differs = figqc._same_render({"png_sha256": sha}, "0" * 64, 1.0)
+        legacy_ok = figqc._same_render({"png_mtime": 5.0}, sha, 5.0)
+    record("visual review is bound to the PNG SHA-256 (legacy reports fall back to mtime)",
+           same and not differs and legacy_ok)
+
+    # ---- P thresholds and signs ---------------------------------------------------------------
+    section("1.6.0 numbers: P thresholds and signs are checked, not scrubbed")
+    conv = nums.CONVENTIONS
+    record("P<0.001 with no result below 0.001 is an offender",
+           nums._offenders("Mortality differed (P<0.001).", {0.03}, {"0.03"}, set(conv))
+           == [(1, "P<0.001")])
+    record("P<0.001 backed by p = 0.00021 passes",
+           not nums._offenders("Mortality differed (P<0.001).", {0.00021}, {"0.00021"},
+                               set(conv)))
+    record("a formatted '<0.001' written by the analysis itself counts as provenance",
+           not nums._offenders("P<0.001", {0.001}, {"0.001"}, set(conv),
+                               stated={("<", "0.001")}))
+    record("a table cell '<0.001' is checked like P<0.001",
+           nums._offenders("<0.001", {0.2}, {"0.2"}, set(conv)) == [(1, "P<0.001")])
+    record("U+2212 minus and hyphen-minus are the same number",
+           not nums._offenders("change \u22120.42 units", {-0.42}, {"-0.42"}, set(conv)))
+    record("N: a flipped sign is an offender",
+           nums._offenders("change -0.42 units", {0.42}, {"0.42"}, set(conv)) == [(1, "-0.42")])
+    record("display precision uses Decimal (0.80 matches 0.8, 0.781 not 0.79)",
+           not nums._offenders("AUC 0.80", {0.8}, {"0.8"}, set())
+           and nums._offenders("AUC 0.79", {0.781}, {"0.781"}, set()) == [(1, "0.79")])
+    record("CONVENTIONS are kept (not emptied)", {"95", "0.05", "1"} <= conv)
+
+    # ---- S18 reader-review coverage -------------------------------------------------------------
+    section("1.6.0 S18: the independent review is bound to the rendered figures")
+    Rv = _new_paper(tmp / "reader")
+    for rel, data in (("07_manuscript/full_manuscript.md", "# Results\n\ntext\n"),
+                      ("05_figures/legends.md", "# Figure legends\n"),
+                      ("04_tables/table_captions.md", "# Table captions\n"),
+                      ("05_figures/out/Figure1.png", "png-bytes"),
+                      ("04_tables/main/Table1.xlsx", "xlsx-bytes")):
+        (Rv / rel).parent.mkdir(parents=True, exist_ok=True)
+        (Rv / rel).write_text(data, encoding="utf-8")
+    (Rv / "01_protocol").mkdir(exist_ok=True)
+    (Rv / "01_protocol/artifact_plan.json").write_text(json.dumps({
+        "main_figures": [{"id": "Figure 1", "file": "05_figures/out/Figure1.png"}],
+        "main_tables": [{"id": "Table 1", "file": "04_tables/main/Table1.xlsx"}]}),
+        encoding="utf-8")
+    body = ("A clinician can follow the cohort definition, the primary comparison and what "
+            "Figure 1 encodes without the text; the y-axis units need stating.")
+    med = ("Terminology and abbreviations are standard; the figure presents absolute risks "
+           "with intervals and denominators, which is appropriate for this population.")
+
+    def write_review(block: str, rc_text=body, mp_text=med):
+        (Rv / readerreview.REVIEW_REL).write_text(
+            f"# Verdict\n\nREVISE\n\n{block}\n\n## Reader comprehension\n\n{rc_text}\n\n"
+            f"## Medical presentation\n\n{mp_text}\n", encoding="utf-8")
+
+    def coverage():
+        return _gate("reader_review_coverage", Rv, stage="S18_independent_review")
+    write_review(readerreview.evidence_block(Rv))
+    r = coverage()
+    record("a review bound to the current manuscript, tables and figures passes", r.ok, r.detail[:100])
+    record("the inventory includes the rendered figure",
+           "05_figures/out/Figure1.png" in readerreview.reader_inputs(Rv))
+    (Rv / "05_figures/out/Figure1.png").write_text("re-rendered", encoding="utf-8")
+    r = coverage()
+    record("N: a figure re-rendered after the review fails", not r.ok and "Figure1.png" in r.detail,
+           r.detail[:100])
+    write_review(readerreview.evidence_block(Rv), rc_text="PASS")
+    record("N: a one-word Reader comprehension section fails", not coverage().ok)
+    write_review("no evidence block")
+    record("N: a review without the reviewed_artifacts block fails", not coverage().ok)
+    toml_text = (ROOT / "pipeline/pipeline.toml").read_text(encoding="utf-8")
+    s18 = next(s for s in __import__("tomllib").loads(toml_text)["stage"]
+               if s["id"] == "S18_independent_review")
+    record("reader_review_coverage is wired into the S18 gate and card",
+           any(g["check"] == "reader_review_coverage" for g in s18["gate"])
+           and "reader-inputs" in (ROOT / "pipeline/stages/S18_independent_review.md")
+           .read_text(encoding="utf-8"))
+    record("pipeline version is 1.6.0", pipe.meta.get("version") == "1.6.0")
 
 
 def run_reporting_checklist(tmp: Path) -> None:
@@ -4680,6 +5119,7 @@ def main() -> int:
         run_reproduce(tmp / "repro_root")
         run_r_figures(tmp / "rfig_root")
         run_reporting_checklist(tmp / "checklist_root")
+        run_v160(tmp / "v160_root")
         run_new_wiring()
         section("isolation")
         record("selftest did not touch the real papers root or user home",

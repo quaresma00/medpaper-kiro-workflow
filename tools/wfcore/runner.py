@@ -115,6 +115,8 @@ def run_paper_script(paper: Path, script: Path, args=(), *, timeout: float | Non
     env = os.environ.copy()
     env["MEDPAPER_PROJECT"] = str(paper)
     env["MEDPAPER_ROOT"] = str(paths.repo_root())
+    # Lets save_medpaper() bind a figure to the exact script that drew it.
+    env["MEDPAPER_SCRIPT"] = script.relative_to(paper).as_posix()
     tools = str(paths.tools_dir())
     env["PYTHONPATH"] = tools + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
     env["PYTHONIOENCODING"] = "utf-8"
