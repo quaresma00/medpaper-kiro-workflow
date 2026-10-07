@@ -7,8 +7,8 @@ Creates .venv, installs the pinned dependencies, wires the Kiro steering file, t
 and the skill (workspace and user level), then runs doctor and the regression suite.
 Safe to re-run.
 
-It deliberately does not create a paper: `wf new <slug>` does that, so the engine directory
-never accumulates an unnamed project/ alongside papers/.
+It deliberately does not create a paper: `wf new <slug>` does that, under the papers root
+outside the engine, so the engine directory stays a pure, maintenance-only workflow.
 """
 from __future__ import annotations
 
@@ -99,12 +99,12 @@ def main() -> int:
     print("\n" + "=" * 72)
     print("Start a paper:")
     print("    python tools/wf.py new <slug>        e.g. new sarcopenia-mortality")
-    print("\nThat creates papers/<slug>/ and selects it. Put your research idea file in")
-    print("papers/<slug>/00_input/, then run:")
-    print("    python tools/wf.py status")
+    print("\nThat creates <papers root>/<slug>/ (outside the engine) with its own .kiro/")
+    print("adapters and selects it. Open that folder as a Kiro workspace, put your research")
+    print("idea file in its 00_input/, then run the status command it prints.")
     print("\nOne engine, many papers: `wf papers` lists them, `wf use <slug>` switches.")
-    print("\nRestart Kiro (or reload the window) so it picks up .kiro/ - the steering file")
-    print("and the two hooks take effect from the next session.")
+    print("This engine folder is maintenance-only; restart Kiro (or reload the window) so it")
+    print("picks up .kiro/ - the steering file and the two hooks take effect next session.")
     print("=" * 72)
     return 0
 

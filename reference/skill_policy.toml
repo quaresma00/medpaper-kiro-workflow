@@ -33,7 +33,7 @@ default = "allow"
 # the same contract, so the rules are stated once here rather than per skill.
 #
 # 1. The pipeline is the sole workflow orchestrator. Stage order, gate state and the handoff
-#    log live in papers/<slug>/.wf/ and are changed only through tools/wf.py. A capability may
+#    log live in <paper>/.wf/ and are changed only through tools/wf.py. A capability may
 #    produce an artifact inside a stage; it may never decide what happens next.
 #
 # 2. Any capability that writes an artifact a stage declares must be registered in this file
@@ -87,7 +87,7 @@ default = "allow"
 
 [figure_authority]
 skill = "medical-sci-figure-skill"
-renders_with = "tools/figures/style.py"
+renders_with = "tools/figures/R/medfig.R (figure_engine = \"R\", default) or tools/figures/style.py (figure_engine = \"python\")"
 judged_by = "tools/figures/qc.py"
 
 # Conflicts, and which side governs. `resolution` is what the agent must actually do.
@@ -125,7 +125,9 @@ pipeline_says = "its own axes-free SubFigure row"
 governs = "pipeline"
 resolution = """A bbox_to_anchor legend hangs outside its panel's rectangle, which is exactly
 what qc.py's panel tight-bbox overlap and interior-void checks flag - it lands in a sibling
-panel's space. Panel-first composition (figure-standards.md section 4) is not optional here."""
+panel's space. Panel-first composition (figure-standards.md section 4) is not optional here.
+In R, place it with theme(legend.position) inside the plot, or collect it across a patchwork
+with plot_layout(guides = "collect")."""
 
 [[figure_authority.conflict]]
 item = "figure and axes titles"
@@ -136,7 +138,7 @@ resolution = """Agreement on substance - no narrative or explanatory text inside
 is invariant 8. They differ only on a short panel identifier, which the pipeline puts on the
 SubFigure so it spans the panel instead of starting after the y-axis decorations. Consequence:
 do not run the skill's audit_medical_figure() on a pipeline figure, it reports that suptitle as
-a critical failure."""
+a critical failure. In R a short labs(title = ...) panel identifier is allowed on the same terms."""
 
 [[figure_authority.conflict]]
 item = "the QA engine"
@@ -148,6 +150,16 @@ baseline, internal titles. qc.py does all of those plus effective dpi, content b
 asymmetry, edge clipping, grey-text regions, panel overlap, dead bands, and per-archetype
 element detection - and it leaves a report the S11 gate reads. A boolean return satisfies no
 gate. Run qc.py; do not run both."""
+
+[[figure_authority.conflict]]
+item = "rendering library"
+skill_says = "matplotlib (medfigure)"
+pipeline_says = "R/ggplot2 through tools/figures/R/medfig.R save_medpaper() by default (targets.figure_engine)"
+governs = "pipeline"
+resolution = """Take the grammar, required elements and palette from the skill, translate its
+matplotlib idioms into ggplot2 + patchwork, and render only through save_medpaper() (or
+style.save() when figure_engine = "python"). Either way the render writes the sidecar qc.py
+judges; a matplotlib or ggsave() render outside those functions leaves the gate nothing to read."""
 
 
 # ------------------------------------------------------------------------------
@@ -302,18 +314,20 @@ cannot go green.
 
 Use it as reading and as styling, not as the renderer. Concretely: take the archetype
 definition, the mandatory-element list, the forbidden-construct list and the palette from the
-skill; build the figure with tools/figures/style.py and tools/figures/recipes.py; judge it with
-tools/figures/qc.py. See [figure_authority] above for the six recorded conflicts, all of which
+skill; build the figure with tools/figures/R/medfig.R save_medpaper() (default) or
+tools/figures/style.py and tools/figures/recipes.py (figure_engine = python); judge it with
+tools/figures/qc.py. See [figure_authority] above for the seven recorded conflicts, all of which
 resolve to the pipeline. Do not call medfigure.qa.audit_medical_figure() on a pipeline figure -
 it flags the pipeline's own SubFigure panel titles as critical."""
 
 [[skill]]
 name = "check-reporting"
 verdict = "gated"
-use_at = "S12 reconcile, S19 polish"
-reason = """Genuinely fills a gap: the pipeline records which reporting guideline applies but
-never checks it item by item. Run it read-only against the manuscript and fix findings
-through the normal stage edits. Do not let it rewrite sections."""
+use_at = "S12 reconcile, S22 polish, S23 reporting checklist"
+reason = """Complements the reporting_checklist_complete gate: the pipeline checks every item of
+the protocol's guideline against 08_submission/reporting_checklist.md at S23-S25. Run it
+read-only to help fill that table and fix findings through the normal stage edits. Do not let
+it rewrite sections."""
 
 [[skill]]
 name = "verify-refs"

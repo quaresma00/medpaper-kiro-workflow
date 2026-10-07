@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import zipfile
 from pathlib import Path
@@ -15,11 +14,6 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 from wfcore import paths, registry  # noqa: E402
 from wfcore.reviewpackage import build, verify  # noqa: E402
-
-
-def _project() -> Path:
-    raw = os.environ.get("MEDPAPER_PROJECT")
-    return Path(raw).resolve() if raw else paths.project_dir().resolve()
 
 
 def _current_stage(project: Path) -> str:
@@ -34,7 +28,7 @@ def main() -> int:
     parser.add_argument("command", choices=["build", "verify"])
     parser.add_argument("--project", type=Path, default=None)
     args = parser.parse_args()
-    project = args.project.resolve() if args.project else _project()
+    project = paths.paper_from_cli(args.project)
     try:
         if args.command == "build":
             stage = _current_stage(project)

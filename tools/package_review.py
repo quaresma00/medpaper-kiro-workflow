@@ -20,9 +20,13 @@ def main() -> int:
         command.add_argument("--project", type=Path, default=None)
         command.add_argument("--freeze", type=Path)
     args = parser.parse_args()
-    project = wfpaths.resolve_paper_path(args.project or "project").resolve()
-    freeze = (wfpaths.resolve_paper_path(args.freeze).resolve() if args.freeze
-              else project / Path(FREEZE_REL))
+    project = wfpaths.paper_from_cli(args.project)
+    try:
+        freeze = (wfpaths.output_within(project, args.freeze) if args.freeze
+                  else project / Path(FREEZE_REL))
+    except ValueError as exc:
+        print(f"package review error: {exc}", file=sys.stderr)
+        return 2
     try:
         if args.command == "freeze":
             output = write_freeze(project, freeze)

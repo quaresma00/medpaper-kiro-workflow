@@ -51,18 +51,22 @@ stage card. Neither contains the workflow, so editing a stage never means editin
 
 ## Use
 
-One engine drives many papers:
+One engine drives many papers. The engine folder is maintenance-only; every paper lives under
+the papers root (`MEDPAPER_PAPERS_ROOT`, else `papers_root` in `~/.medpaper/config.toml`, else
+`<engine parent>/medpaper_papers`) and is opened as its own Kiro workspace:
 
 ```powershell
-python tools/wf.py new sarcopenia-mortality   # creates papers/<slug>/ and selects it
+python tools/wf.py new sarcopenia-mortality   # creates <papers root>/sarcopenia-mortality/ and selects it
 python tools/wf.py papers                     # list them and the stage each is at
-python tools/wf.py use other-paper            # switch
+python tools/wf.py use other-paper            # switch (user-level marker ~/.medpaper/active)
 ```
 
-Put your research idea file in `papers/<slug>/00_input/`, then in Kiro chat:
+`wf new` also writes the paper's own `.kiro/` steering and hooks, which call the engine by
+absolute path. Open the printed folder in Kiro, put your research idea file in its
+`00_input/`, then in Kiro chat:
 
 ```
-Start the medpaper pipeline. My research idea is in #papers/sarcopenia-mortality/00_input/idea.md
+Start the medpaper pipeline. My research idea is in #00_input/idea.md
 ```
 
 Use `#File` to attach the idea document, or drag it in. From then on the loop is always the

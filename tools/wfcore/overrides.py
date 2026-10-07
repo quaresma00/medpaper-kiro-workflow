@@ -8,7 +8,7 @@ leaves the next one running a shape that was designed for a different study.
 
 The overlay lives with the paper:
 
-    papers/<slug>/.wf/overrides.toml
+    <paper>/.wf/overrides.toml
 
 and is applied on top of the master at load time. The master file is never touched, so two
 papers can run different shapes side by side from one engine.
@@ -74,6 +74,9 @@ PROTECTED_CHECKS = frozenset({
     "variant_preserves_science",
     "paper_scripts_scoped",
     "decision_recorded",
+    "results_have_environment",
+    "analysis_reproduces",
+    "reporting_checklist_complete",
 })
 
 # Skipping any of these is refused: they are where a human or an independent reader looks.

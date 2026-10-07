@@ -14,12 +14,11 @@
 
 [meta]
 name = "medpaper"
-version = "1.4.0"
+version = "1.5.0"
 schema = 1
 description = "Medical/clinical research pipeline: idea -> feasibility -> data -> analysis -> artifacts -> manuscript -> submission package."
 
 [layout]
-project_dir = "project"
 state_dir = ".wf"
 temp_dir = "temp"
 
@@ -43,12 +42,13 @@ invariants = [
   "Discovery helpers may find literature, but formal metadata must be freshly re-fetched through tools/pubmed/verify.py. A verified=true boolean is never evidence by itself: every citable key must pass the hashed raw-PubMed XML receipt, exact library hash, PMID/DOI match and independent live S13 EFetch gate. Never hand-write or patch library.json, verified.json, refs.bib or refs.ris to satisfy a gate.",
   "A hash proves that bytes did not change, never that they are the right paper. Every downloaded or registered full text must identify itself as the requested article - a structured identifier in JATS/HTML metadata, the library DOI present in a PDF, or a title you read off page one and recorded with `fulltext.py verify --confirm-identity`. Absent that, it counts as unproven, not as fine. Identifiers are read only from an article's own metadata: a descendant XML search sweeps in every cited reference's ArticleIdList, which is how a bibliography entry's PMCID once replaced the article's own and five deep reads landed on different papers with clean receipts.",
   "Acquire the complete protocol-defined data universe whenever the source makes it available. Never silently use LIMIT/TOP, head(), sample(), first-N slices, fixed page counts, date narrowing, or preview caps to save time, tokens, download volume or compute. A schema pilot is non-analytic and must be followed by full acquisition; every source needs machine-countable total and received receipts plus terminal-pagination proof. Replacing a census with scientific sampling and accepting source-imposed partial access each require the user's explicit recorded authorization. This gate cannot be waived with --force.",
-  "Every number in the manuscript must already exist in 03_analysis/results/*.json, written there by executed code. Never compute a statistic in your head or in prose.",
+  "Every number in the manuscript must already exist in 03_analysis/results/*.json, written there by executed code through write_results() (Python tools/analysis/results.py, R tools/R/medresults.R), which records the environment; S06 re-executes every analysis script in a sandbox and requires identical results, and S17, S23 and S25 re-check that proof against the current files. Never compute a statistic in your head or in prose.",
   "Draft scientific sections only at their active stages; the optional supplementary Methods file belongs only to S08. S17 then assembles the canonical full_manuscript.md from the completed, gated sections.",
   "Language polishing may change wording only. Never a number, never a citation, never a figure/table reference. A snapshot is taken before the pass and the gate diffs against it.",
   "Do not create files outside the stage's declared `outputs`. Scratch work goes in project/temp/ and is deleted before `wf advance`.",
   "A paper may never customise itself by editing pipeline/, tools/, reference/ or .kiro/ - those are the shared engine and any edit changes every other paper. Numeric/string targets belong in the paper's .wf/config.toml via `wf config set`; a genuine workflow-shape difference belongs in .wf/overrides.toml via `wf override init`. Every effective override is reprinted by `wf status`, completed-stage overrides are fingerprinted and cannot be changed retrospectively, and integrity gates plus review/audit stages can never be relaxed or skipped.",
-  "`project/...` in a stage card is a logical alias for the paper printed by `wf status`, never permission to create <engine>/project. Run paper-authored Python with `wf run-script <paper-relative.py>`; inside it derive the root from MEDPAPER_PROJECT or wfcore.paths.project_dir(), never from Path('project') or a literal project/ output. Standalone engine tools resolve the selected paper automatically.",
+  "`project/...` in a stage card is a logical alias for the paper folder printed by `wf status`. Run paper-authored Python/R with `wf run-script <paper-relative script>`; inside it derive the root from MEDPAPER_PROJECT or wfcore.paths.project_dir(), never from Path('project') or a literal project/ output. Standalone engine tools resolve the selected paper automatically.",
+  "The engine directory is the mother workflow and never a paper. Papers live under the papers root (MEDPAPER_PAPERS_ROOT, ~/.medpaper/config.toml papers_root, default <engine parent>/medpaper_papers) and each is opened as its own Kiro workspace. Nothing resolves a paper inside the engine, no writer accepts an output inside it, `wf run-script` fails if a paper script touches it, and `wf doctor` reports any paper artifact found there as BROKEN.",
   "Figures are verified by looking at the rendered PNG, not by reading the plotting code. Deterministic QC (tools/figures/qc.py) runs every round in both modes and blocks at S11. The visual pass obeys visual_review_mode: inline = look at S10/S11; deferred = record DEFER there and discharge the entire backlog in ONE consolidated pass at S23 via the contact sheet, on final renders with the journal known. Deferring batches the look, it never cancels it - visual_debts_cleared is non-overridable, so no package ships unlooked-at. Never claim a visual check you did not perform.",
   "No explanatory prose inside figure panels. Explanation belongs in the figure legend.",
   "Do not draft or insert an AI-use disclosure unless the user explicitly requests that exact content; record journal requirements only as a user-controlled compliance item.",
@@ -69,6 +69,7 @@ always_allowed = [
   "**/README.md",
   "temp/**",
   ".wf/**",
+  ".kiro/**",
 ]
 
 # ------------------------------------------------------------------------------
@@ -91,6 +92,11 @@ main_figures_max = 6
 main_tables_max = 5
 column_width_mm_single = 90.0
 column_width_mm_double = 180.0
+column_width_mm_1_5 = 140.0
+# Which renderer S11 uses: "R" (default; tools/figures/R/medfig.R save_medpaper(), see
+# reference/language_policy.toml) or "python" (tools/figures/style.py save()). qc.py judges
+# both identically; a figure rendered with the other engine is a warning, not a failure.
+figure_engine = "R"
 figure_dpi_min = 300
 figure_font_pt_min = 6.0
 figure_line_pt_min = 0.5
@@ -185,12 +191,14 @@ min = 1
 [[stage.gate]]
 check = "json_keys"
 path = "03_analysis/results/dataset_summary.json"
-keys = ["n_rows", "n_cols", "variables", "missingness", "source_hash", "built_by", "acquisition_scope", "acquisition_status"]
+keys = ["n_rows", "n_cols", "variables", "missingness", "source_hash", "acquisition_scope", "acquisition_status"]
 [[stage.gate]]
 check = "data_acquisition_complete"
 [[stage.gate]]
+check = "results_have_environment"
+[[stage.gate]]
 check = "paper_scripts_scoped"
-patterns = ["02_data/acquisition/**/*.py", "02_data/acquisition/**/*.R", "02_data/acquisition/**/*.r"]
+patterns = ["02_data/acquisition/**/*.py", "02_data/acquisition/**/*.R", "02_data/acquisition/**/*.r", "03_analysis/code/*.py", "03_analysis/code/*.R", "03_analysis/code/*.r"]
 [[stage.gate]]
 check = "temp_clean"
 
@@ -228,17 +236,30 @@ headings = ["Introduction points", "Discussion points", "Limitations", "Surprise
 check = "paper_scripts_scoped"
 patterns = ["03_analysis/code/**/*.py", "03_analysis/code/**/*.R", "03_analysis/code/**/*.r"]
 [[stage.gate]]
+check = "results_have_environment"
+[[stage.gate]]
 check = "temp_clean"
 
 [[stage]]
 id = "S06_protocol_final"
 title = "Refine protocol from findings + publishability go/no-go #2"
 card = "stages/S06_protocol_final.md"
-outputs = ["01_protocol/protocol_final.md", "01_protocol/protocol_diff.md"]
+outputs = ["01_protocol/protocol_final.md", "01_protocol/protocol_diff.md", "03_analysis/reproducibility_report.json"]
 [[stage.gate]]
 check = "outputs_exist"
 [[stage.gate]]
 check = "data_acquisition_complete"
+[[stage.gate]]
+check = "results_have_environment"
+# S06 re-executes every analysis script in a sandbox (tools/reproduce.py run); the results
+# must be identical. Re-checked at S17, S23 and S25 against the current files.
+[[stage.gate]]
+check = "analysis_reproduces"
+# Early warning only: the guideline named in the protocol must be registered with its item list.
+[[stage.gate]]
+check = "reporting_checklist_complete"
+guideline_only = true
+severity = "warn"
 [[stage.gate]]
 check = "md_sections"
 path = "01_protocol/protocol_final.md"
@@ -500,6 +521,8 @@ optional = ["07_manuscript/statements.md"]
 [[stage.gate]]
 check = "data_acquisition_complete"
 [[stage.gate]]
+check = "analysis_reproduces"
+[[stage.gate]]
 check = "manuscript_structure"
 [[stage.gate]]
 check = "supplementary_methods_clean"
@@ -715,11 +738,15 @@ check = "variant_preserves_science"
 id = "S23_package"
 title = "Build and visually verify the journal-ready Word submission package"
 card = "stages/S23_package.md"
-outputs = ["08_submission/cover_letter.md", "08_submission/bundle/SUBMISSION_CHECKLIST.md", "08_submission/bundle/manifest.json", "08_submission/package_content_baseline.json", "08_submission/submission_qc.md"]
+outputs = ["08_submission/cover_letter.md", "08_submission/bundle/SUBMISSION_CHECKLIST.md", "08_submission/bundle/manifest.json", "08_submission/package_content_baseline.json", "08_submission/submission_qc.md", "08_submission/reporting_checklist.md"]
 [[stage.gate]]
 check = "outputs_exist"
 [[stage.gate]]
 check = "data_acquisition_complete"
+[[stage.gate]]
+check = "analysis_reproduces"
+[[stage.gate]]
+check = "reporting_checklist_complete"
 [[stage.gate]]
 check = "bundle_complete"
 [[stage.gate]]
@@ -803,6 +830,8 @@ check = "journal_variant_ready"
 [[stage.gate]]
 check = "variant_preserves_science"
 [[stage.gate]]
+check = "reporting_checklist_complete"
+[[stage.gate]]
 check = "decision_recorded"
 name = "submission_package_user_confirmed"
 allowed = ["OK"]
@@ -816,6 +845,10 @@ outputs = ["08_submission/independent_submission_audit.md"]
 check = "outputs_exist"
 [[stage.gate]]
 check = "data_acquisition_complete"
+[[stage.gate]]
+check = "analysis_reproduces"
+[[stage.gate]]
+check = "reporting_checklist_complete"
 [[stage.gate]]
 check = "md_sections"
 path = "08_submission/independent_submission_audit.md"
@@ -865,6 +898,7 @@ globs = [
   "03_analysis/code/*",
   "03_analysis/results/*.json",
   "03_analysis/results/number_allowlist.tsv",
+  "03_analysis/reproducibility.toml",
   "04_tables/main/*.xlsx",
   "04_tables/supplementary/*.xlsx",
   "05_figures/code/*",

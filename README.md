@@ -2,7 +2,15 @@
 
 一套面向医学与临床研究的 Kiro 工作流。它把“研究想法”推进为经过数据、文献、统计结果、图表、人工复核和期刊规则共同校验的投稿包，而不是只让 AI 一次性写出一篇看似完整的论文。
 
-当前版本：`1.4.0`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE
+当前版本：`1.5.0`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE + R 4.3+
+
+## 1.5.0 变化
+
+- **论文在引擎之外**：引擎目录是纯净的母版工作流，只用于维护，任何论文都不能放在其中、在其中被选中或向其中写文件。论文统一放在论文根目录（优先 `MEDPAPER_PAPERS_ROOT`，其次 `~/.medpaper/config.toml` 的 `papers_root`，默认 `<引擎上级目录>/medpaper_papers`）。`wf new <slug>` 在那里创建论文并写入该论文自己的 `.kiro/` 适配文件（以绝对路径调用引擎），之后把这个论文文件夹作为独立的 Kiro 工作区打开。解析顺序：`MEDPAPER_PROJECT` → 当前目录或其上级中已初始化的论文 → `wf use` 选中的论文（用户级标记 `~/.medpaper/active`）。在引擎目录中运行 `wf status` 只显示维护横幅，驱动论文的命令一律拒绝；`wf doctor` 把引擎中的任何论文产物报告为 BROKEN。
+- **Python/R 分工**：见 `reference/language_policy.toml`。Python 负责数据获取、清洗、三线表 xlsx、Word 和全部门禁；R 负责作图（默认，`tools/figures/R/medfig.R` 的 `save_medpaper()` 与 `recipes.R` 中的 KM、竞争风险、森林图、ROC、校准、DCA、火山图）以及生存分析、竞争风险、列线图/校准/DCA、多重插补、倾向性评分、复杂抽样、混合模型、Meta 分析和 Table 1 统计。`save_medpaper()` 按目标栏宽精确出图，自动统一外边距，并写出与 Python 相同格式的 QC 记录，`qc.py` 对两种引擎一视同仁。`wf config set figure_engine python` 可改回 matplotlib。
+- **分析复现门禁**：S06 运行 `python tools/reproduce.py run`，在沙箱中按文件名顺序重跑 `03_analysis/code/` 下的全部顶层脚本，要求结果 JSON 完全一致（仅忽略时间戳）；重跑结果保存在 `.wf/repro/rerun/` 作为证据。`analysis_reproduces` 在 S06、S17、S23、S25 复核，任何分析代码、原始数据或结果的后续修改都会使证明失效。
+- **环境回执**：结果 JSON 只能由 `write_results()`（Python `tools/analysis/results.py`，R `tools/R/medresults.R`）写出，自动附带语言与版本、程序包版本、随机种子、脚本及其 SHA-256。回执中的数字不计入数字溯源。
+- **报告规范清单**：S23 生成 `08_submission/reporting_checklist.md`，把方案中 `Guideline:` 行声明的报告规范（`reference/reporting_guidelines.toml`）逐条对应到期刊稿中真实存在的位置；`reporting_checklist_complete` 在 S23、S24、S25 阻断，未收录条目清单的规范（`verify = true`）不会被凭空编造。
 
 ## 这套工作流解决什么问题
 
@@ -59,7 +67,7 @@
 
 ## 母版、单篇定制与期刊稿分离
 
-`pipeline/`、`tools/`、`reference/` 和 `.kiro/` 是所有论文共用的母版。运行论文时不应修改这些目录；否则某篇研究的特殊需求会改变后续所有项目。每篇论文只在自己的 `papers/<slug>/` 内写文件。简单数值配置写入该论文的 `.wf/config.toml`：
+`pipeline/`、`tools/`、`reference/` 和 `.kiro/` 是所有论文共用的母版。运行论文时不应修改这些目录；否则某篇研究的特殊需求会改变后续所有项目。每篇论文只在论文根目录下自己的 `<slug>/` 文件夹内写文件。简单数值配置写入该论文的 `.wf/config.toml`：
 
 ```powershell
 python tools/wf.py config set intro_words_max 600
@@ -69,7 +77,7 @@ python tools/wf.py config set intro_words_max 600
 
 ```powershell
 python tools/wf.py override init
-# 编辑 papers/<slug>/.wf/overrides.toml
+# 编辑 <论文目录>/.wf/overrides.toml
 python tools/wf.py override validate
 python tools/wf.py override show
 ```
@@ -310,18 +318,18 @@ python bootstrap.py
 
 ### 日常使用
 
-把本目录作为工作区在 Kiro 里打开，然后：
+引擎目录只用于维护。新建论文后，把论文文件夹作为工作区在 Kiro 里打开：
 
 ```powershell
-python tools/wf.py new sarcopenia-mortality   # 建 papers/<slug>/ 并选中
+python tools/wf.py new sarcopenia-mortality   # 建 <论文根目录>/sarcopenia-mortality/ 并选中
 python tools/wf.py papers                     # 列出所有论文及各自阶段
-python tools/wf.py use other-paper            # 切换
+python tools/wf.py use other-paper            # 切换（用户级标记）
 ```
 
-把研究思路文件放进 `papers/<slug>/00_input/`，在 Kiro 对话里说：
+把研究思路文件放进该论文的 `00_input/`，在该论文工作区的 Kiro 对话里说：
 
 ```text
-启动 medpaper 流水线，我的研究思路在 #papers/sarcopenia-mortality/00_input/idea.md
+启动 medpaper 流水线，我的研究思路在 #00_input/idea.md
 ```
 
 用 `#File` 附加文件，或直接拖进对话框。
@@ -364,7 +372,7 @@ function wf { python "F:/workspace/medpaper_pipeline/tools/wf.py" @args }
 
 ## 新项目与已有项目如何处理
 
-- 新研究：把研究想法和用户提供的材料放到 `papers/<slug>/00_input/`，由 S01 开始。
+- 新研究：`wf new <slug>` 后把研究想法和用户提供的材料放到该论文的 `00_input/`，由 S01 开始。
 - 已有数据：先登记数据来源、变量说明和已有分析，再从仍未满足的最早阶段开始。
 - 已有论文：工作流会识别哪些证据链和检查缺失，不会仅因已有 Word 文件就跳过数字、文献和图表校验。
 - 中断后恢复：状态保存在项目磁盘中，重新运行 `wf.py status` 即可看到当前阶段、缺失文件和下一步。
@@ -384,6 +392,8 @@ python tools\wf.py tree -v
 
 ## 主要文件放在哪里
 
+阶段卡片中的 `project/` 是逻辑名称，指当前论文文件夹（在论文工作区根目录下显示时会自动去掉该前缀），不是引擎中的目录。
+
 ```text
 project/00_input/       用户提供的研究想法、原始材料和后期作者信息
 project/01_protocol/    可行性判断、研究方案、图表计划
@@ -396,7 +406,7 @@ project/07_manuscript/  各部分草稿、完整论文和审查记录
 project/08_submission/  期刊选择、指南快照、Word 文件和最终投稿包
 ```
 
-运行中的研究数据和生成结果不应提交到公共代码仓库。本仓库的忽略规则会排除 `project/` 中的项目内容、虚拟环境、密钥文件和临时产物。
+运行中的研究数据和生成结果永远不在引擎仓库中；每篇论文在论文根目录下单独存放（需要版本管理时在论文文件夹内单独 `git init`）。
 
 ## 文献、隐私与合规边界
 
@@ -435,14 +445,13 @@ tools/text/、tools/manuscript/              事实不变润色和确定性 Word
 tools/rework.py                            把修改意见路由到最早的归属阶段
 tools/hooks/skill_guard.py                 技能仲裁执行器
 tools/install_adapters.py                  接线 Kiro steering / hooks / skill
+tools/figures/R/                           R 作图：medfig.R（save_medpaper、主题、配色）与 recipes.R
+tools/R/medresults.R、tools/analysis/       R / Python 结果写出器（带环境回执）
+tools/reproduce.py                         S06 沙箱重跑与复现证明
 reference/                                 表图与 Methods 规范、图表原型、技能与能力仲裁策略
-papers/<slug>/                             每篇论文的输入与输出位置，状态在 .wf/
-```
-
-更具体的安装与故障排查见 `docs/INSTALL-KIRO.md`。机器读取的正式流程定义位于 `pipeline/pipeline.toml`；本 README 是给研究者和使用者阅读的说明，不作为流程引擎的配置文件。
-tools/install_adapters.py                  接线 Kiro steering / hooks / skill
-reference/                                 表图与 Methods 规范、图表原型、技能与能力仲裁策略
-papers/<slug>/                             每篇论文的输入与输出位置，状态在 .wf/
+reference/language_policy.toml             Python/R 分工与必需 R 包
+reference/reporting_guidelines.toml        报告规范条目清单
+<论文根目录>/<slug>/                        每篇论文（独立 Kiro 工作区），状态在 .wf/
 ```
 
 更具体的安装与故障排查见 `docs/INSTALL-KIRO.md`。机器读取的正式流程定义位于 `pipeline/pipeline.toml`；本 README 是给研究者和使用者阅读的说明，不作为流程引擎的配置文件。

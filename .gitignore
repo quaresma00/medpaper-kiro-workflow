@@ -4,22 +4,17 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 
-# Runtime state, temporary output and logs
-.wf/
-temp/
+# Logs
 *.log
 
-# Research inputs and generated project artifacts.
-# Papers carry patient-derived data and move at a different pace from the engine, so they are
-# never part of engine history. Version each paper in its own repo: git init inside
-# papers/<slug>/. To track one here deliberately, add e.g. !papers/my-paper/
-project/**
-!project/.gitkeep
-papers/**
-
-# The user's own research material, dropped into the workspace root. Unpublished topic work
-# and source data - not part of the engine, and not ours to publish.
-胆/
+# Papers never live in the engine (1.5.0+). Defensive only: `wf doctor` reports any of these
+# as BROKEN, and the selftest proves the driver cannot create them. A paper is versioned in
+# its own folder under the papers root, never here.
+/papers/
+/project/
+/.wf/
+/temp/
+/.review_stash/
 *.xlsx
 *.docx
 *.pdf
@@ -46,8 +41,3 @@ Desktop.ini
 .DS_Store
 .idea/
 .vscode/
-
-# Project content that landed in the engine root by mistake. Paper artifacts belong in
-# papers/<slug>/, which is already ignored; this keeps a stray one from being committed as if it
-# were engine code. If you find something here, move it into its paper rather than deleting it.
-.review_stash/

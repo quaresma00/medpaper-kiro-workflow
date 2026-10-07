@@ -51,7 +51,8 @@ def main() -> int:
             print(f"  {rel}")
         print(f"\n{len(freeze['files'])} file(s) frozen at {freeze['frozen_at']}.")
         print("Journal requirements are now applied to a copy, never to these files:")
-        print(f"  tools/manuscript/scientific_freeze.py open-variant --journal \"<name>\"")
+        print(wfpaths.localize_commands(
+            "  tools/manuscript/scientific_freeze.py open-variant --journal \"<name>\"", proj))
         _ = path
         return 0
 
@@ -65,7 +66,9 @@ def main() -> int:
             print(f"  {p}")
         print("\nA journal requirement is never a reason to edit these. Adapt the variant:")
         print(f"  {scifreeze.VARIANT_DIR}/")
-        print("A genuine scientific change routes through tools/rework.py to its owning stage.")
+        print(wfpaths.localize_commands(
+            "A genuine scientific change routes through tools/rework.py to its owning stage.",
+            proj))
         return 2
 
     if args.command == "reset-journal":
@@ -77,7 +80,9 @@ def main() -> int:
         if current != "S20_journal":
             raise SystemExit(
                 f"reset-journal is allowed only after looping to S20_journal (current={current or 'unknown'}).\n"
-                "Run: tools/wf.py loop --to S20_journal --why \"switching target journal\"")
+                + wfpaths.localize_commands(
+                    "Run: tools/wf.py loop --to S20_journal --why \"switching target journal\"",
+                    proj))
         old = scifreeze.variant_meta(proj).get("journal", "")
         if old and args.confirm_journal.strip() != old:
             raise SystemExit(
@@ -121,7 +126,9 @@ def main() -> int:
         print(f"\n{len(problems)} problem(s): content was dropped, not just tightened.")
         print("Dropping a result to fit a word cap is a scientific decision. Either restore it")
         print("and tighten prose instead, or get the user's explicit authorisation and record it:")
-        print('  tools/wf.py decide journal_trim_authorised YES --why "<what was dropped and why>"')
+        print(wfpaths.localize_commands(
+            '  tools/wf.py decide journal_trim_authorised YES --why "<what was dropped and why>"',
+            proj))
         return 2
 
     freeze = scifreeze.load_freeze(proj) if scifreeze.is_frozen(proj) else {}

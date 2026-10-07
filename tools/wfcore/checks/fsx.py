@@ -199,6 +199,8 @@ def _python_script_scope(text: str) -> tuple[bool, list[str]]:
         for node in ast.walk(tree))
     reads_env = any(
         isinstance(node, ast.Constant) and node.value == "MEDPAPER_PROJECT"
+        for node in ast.walk(tree)) or any(
+        isinstance(node, ast.ImportFrom) and node.module == "analysis.results"
         for node in ast.walk(tree))
     bad_literals = []
     for node in ast.walk(tree):
@@ -210,16 +212,40 @@ def _python_script_scope(text: str) -> tuple[bool, list[str]]:
     return bool(calls_project_dir or reads_env), bad_literals
 
 
+_R_HELPER_SOURCE = re.compile(
+    r"source\s*\(\s*file\.path\s*\(\s*Sys\.getenv\s*\(\s*['\"]MEDPAPER_ROOT['\"]\s*\)\s*,\s*"
+    r"['\"]tools/(?:figures/R/(?:medfig|recipes)|R/medresults)\.R['\"]")
+_R_JSON_WRITE = re.compile(
+    r"(?<![\w.])(?:jsonlite::|RJSONIO::|rjson::)?(?:toJSON|write_json)\s*\(")
+_ABS_PATH = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\[^\\\s]|~[\\/]|/(?:[^/\s\"']+/)+)")
+ENGINE_PACKAGES = ("analysis", "figures", "tables", "wfcore", "pubmed", "manuscript", "text",
+                   "hooks")
+SCRIPT_DIRS = ("02_data/acquisition", "03_analysis/code", "04_tables/code", "05_figures/code")
+_RERUN_DIRS = ("03_analysis/code/", "04_tables/code/", "05_figures/code/")
+
+
 def _r_script_scope(text: str) -> tuple[bool, list[str]]:
     code = re.sub(r"(?m)#.*$", "", text)
-    scoped = bool(re.search(r"Sys\.getenv\s*\(\s*['\"]MEDPAPER_PROJECT['\"]", code))
+    scoped = bool(re.search(r"Sys\.getenv\s*\(\s*['\"]MEDPAPER_PROJECT['\"]", code)
+                  or _R_HELPER_SOURCE.search(code))
     bad = re.findall(r"['\"]project(?:[/\\][^'\"]*)?['\"]", code, re.I)
     return scoped, bad
 
 
+def _absolute_literals(strings: list[str]) -> list[str]:
+    out = []
+    for s in strings:
+        v = s.strip()
+        if re.match(r"^[a-z][a-z0-9+.-]*://", v, re.I):
+            continue
+        if _ABS_PATH.match(v):
+            out.append(v)
+    return out
+
+
 @check("paper_scripts_scoped")
 def paper_scripts_scoped(ctx: Ctx) -> Result:
-    """Paper-authored code must resolve its own paper root, never write `engine/project/`.
+    """Paper-authored code must resolve its own paper root and never write into the engine.
 
     `wf run-script` exports MEDPAPER_PROJECT and puts tools/ on PYTHONPATH. Requiring the script
     to consume that root makes direct invocation fail closed rather than quietly writing into
@@ -231,18 +257,36 @@ def paper_scripts_scoped(ctx: Ctx) -> Result:
         "04_tables/code/**/*.py", "04_tables/code/**/*.R", "04_tables/code/**/*.r",
         "05_figures/code/**/*.py", "05_figures/code/**/*.R", "05_figures/code/**/*.r",
     ]
+    from ..codescan import scan_py, scan_r
     files = sorted({p for pattern in patterns for p in ctx.project.glob(pattern) if p.is_file()})
     problems = []
+    # A paper package or module named like an engine package sits on sys.path[0] and shadows it.
+    for sdir in SCRIPT_DIRS:
+        base = ctx.project / sdir
+        if not base.is_dir():
+            continue
+        for child in sorted(base.iterdir()):
+            stem = child.name if child.is_dir() else child.stem
+            if (child.is_dir() or child.suffix.casefold() == ".py") and \
+                    stem.casefold() in ENGINE_PACKAGES:
+                problems.append(f"{child.relative_to(ctx.project).as_posix()}: shadows the engine "
+                                f"package {stem.casefold()}; rename it")
     for path in files:
         text = path.read_text(encoding="utf-8", errors="replace")
-        if path.suffix.casefold() == ".py":
-            consumes_root, bad_literals = _python_script_scope(text)
-        elif path.suffix.casefold() == ".r":
-            consumes_root, bad_literals = _r_script_scope(text)
-        else:
-            problems.append(f"{path.relative_to(ctx.project).as_posix()}: unsupported script type")
-            continue
         rel = path.relative_to(ctx.project).as_posix()
+        suffix = path.suffix.casefold()
+        if suffix == ".py":
+            consumes_root, bad_literals = _python_script_scope(text)
+            _code, strings = scan_py(text)
+        elif suffix == ".r":
+            consumes_root, bad_literals = _r_script_scope(text)
+            code, strings = scan_r(text)
+            if _R_JSON_WRITE.search(code):
+                problems.append(f"{rel}: writes JSON directly (toJSON/write_json); use "
+                                "write_results() from tools/R/medresults.R")
+        else:
+            problems.append(f"{rel}: unsupported script type")
+            continue
         if not consumes_root:
             problems.append(
                 f"{rel}: never resolves the active paper (use MEDPAPER_PROJECT or "
@@ -251,29 +295,20 @@ def paper_scripts_scoped(ctx: Ctx) -> Result:
             problems.append(
                 f"{rel}: literal project/ path(s) are forbidden: "
                 + ", ".join(repr(x) for x in bad_literals[:3]))
+        if rel.startswith(_RERUN_DIRS):
+            absolute = _absolute_literals(strings)
+            if absolute:
+                problems.append(f"{rel}: absolute path literal(s) are forbidden: "
+                                + ", ".join(repr(x) for x in absolute[:3])
+                                + "; build paths from MEDPAPER_PROJECT / project_dir()")
     if problems:
-        origin = str(ctx.state.data.get("pipeline_origin_version", ""))
-        migrated_from_legacy = origin.startswith(("0.", "1.0", "1.1", "1.2", "1.3"))
-        if not origin:
-            migrated_from_legacy = any(
-                event.get("kind") == "pipeline_migration"
-                and re.search(r"\b1\.[0-3](?:\.|\b)", str(event.get("detail", "")))
-                for event in ctx.state.data.get("events", []))
         hints = ["Run paper code with: .venv/Scripts/python.exe tools/wf.py run-script "
                  "<paper-relative-script.py|.R>",
                  "Python: `from wfcore.paths import project_dir; PROJECT = project_dir()`",
-                 "R: `PROJECT <- Sys.getenv(\"MEDPAPER_PROJECT\")` and stop if it is empty.",
+                 "R: `PROJECT <- Sys.getenv(\"MEDPAPER_PROJECT\")` and stop if it is empty, or "
+                 "source tools/R/medresults.R / tools/figures/R/medfig.R via MEDPAPER_ROOT.",
                  "Never use a literal project/ path or assume the current working directory is the paper."]
-        if migrated_from_legacy:
-            hints.insert(0, "Legacy paper migration: update these existing scripts when this stage "
-                            "is next edited. `wf run-script` already runs with the paper as cwd, "
-                            "so the warning cannot write into the mother engine meanwhile.")
-        return Result(
-            False,
-            "paper_scripts_scoped",
-            "; ".join(problems[:8]),
-            hints,
-            severity="warn" if migrated_from_legacy else "fail",
-        )
+        return Result(False, "paper_scripts_scoped", "; ".join(problems[:8]), hints,
+                      severity="fail")
     return Result(True, "paper_scripts_scoped",
-                  f"{len(files)} paper-owned Python script(s) resolve the active paper root")
+                  f"{len(files)} paper-owned script(s) resolve the active paper root")

@@ -1,0 +1,155 @@
+# ==============================================================================
+# Python / R division of labour (single source; read by `wf doctor`, the selftest
+# and the S04/S05/S10/S11 cards).
+# ==============================================================================
+# Python owns data engineering and the engine itself. R owns figures (by default, via
+# tools/figures/R/medfig.R save_medpaper(); targets.figure_engine = "python" switches a paper
+# back to tools/figures/style.py) and the statistics where R is the more mature ecosystem.
+# Both write results only through write_results(): tools/analysis/results.py (Python) or
+# tools/R/medresults.R (R), which add the environment receipt.
+# `wf doctor` reports a missing or too-old [r.required] package as BROKEN.
+# ==============================================================================
+
+[meta]
+schema = 1
+version = "1.0.0"
+summary = "Python for data engineering and the engine; R for figures (default) and R-strong statistics."
+
+[python]
+owns = ["acquisition", "api_clients", "cleaning", "merging", "xlsx_three_line_tables",
+        "word_docx", "gates_and_qc"]
+required_modules = ["numpy", "pandas", "openpyxl", "docx", "matplotlib"]
+optional_modules = ["scipy"]
+
+[r]
+min_version = "4.3.0"
+owns = ["figures", "survival", "competing_risks", "nomogram_calibration_dca",
+        "multiple_imputation", "propensity_weighting", "complex_survey", "mixed_models",
+        "meta_analysis", "table1_statistics"]
+
+[r.required]            # package -> minimum version ("0" = any); doctor BROKEN if missing/older
+ggplot2 = "4.0.0"
+ragg = "1.3.0"
+systemfonts = "1.1.0"
+patchwork = "1.2.0"
+scales = "0"
+ggsci = "0"
+ggrepel = "0"
+jsonlite = "1.8.0"
+survival = "0"
+ggsurvfit = "1.0.0"
+tidycmprsk = "0"
+cmprsk = "0"
+rms = "0"
+pROC = "0"
+dcurves = "0"
+mice = "0"
+MatchIt = "0"
+WeightIt = "0"
+cobalt = "0"
+survey = "0"
+lme4 = "0"
+meta = "0"
+metafor = "0"
+tableone = "0"
+gtsummary = "0"
+
+[r.optional]
+forestploter = "0"
+survminer = "0"
+cowplot = "0"
+ggprism = "0"
+svglite = "0"
+"data.table" = "0"      # quoted: a bare data.table is a TOML dotted key ({data: {table: "0"}})
+haven = "0"
+readxl = "0"
+flextable = "0"
+officer = "0"
+renv = "0"
+
+[either]
+owns = ["descriptive_statistics", "ordinary_regression"]
+
+[[task]]
+id = "figures"
+language = "R"
+packages = ["ggplot2", "ragg", "patchwork", "systemfonts"]
+note = "Render with save_medpaper() (tools/figures/R/medfig.R) and the recipes in tools/figures/R/recipes.R; numbers come from results JSON. figure_engine = \"python\" uses tools/figures/style.py instead."
+
+[[task]]
+id = "survival"
+language = "R"
+packages = ["survival", "ggsurvfit"]
+note = "Cox models, KM estimates, log-rank tests."
+
+[[task]]
+id = "competing_risks"
+language = "R"
+packages = ["tidycmprsk", "cmprsk"]
+note = "Cumulative incidence, Gray's test, Fine-Gray models."
+
+[[task]]
+id = "nomogram_calibration_dca"
+language = "R"
+packages = ["rms", "dcurves"]
+note = "Nomograms, bootstrap calibration, decision curves; plot from the stored curves."
+
+[[task]]
+id = "multiple_imputation"
+language = "R"
+packages = ["mice"]
+note = "Multiple imputation with Rubin's rules; seed with medpaper_seed()."
+
+[[task]]
+id = "propensity_weighting"
+language = "R"
+packages = ["MatchIt", "WeightIt", "cobalt"]
+note = "Matching, weighting and balance diagnostics."
+
+[[task]]
+id = "complex_survey"
+language = "R"
+packages = ["survey"]
+note = "Design-based estimates (e.g. NHANES design weights)."
+
+[[task]]
+id = "mixed_models"
+language = "R"
+packages = ["lme4"]
+note = "Random-effects and repeated-measures models."
+
+[[task]]
+id = "meta_analysis"
+language = "R"
+packages = ["meta", "metafor"]
+note = "Pooled estimates, heterogeneity, funnel asymmetry tests."
+
+[[task]]
+id = "table1_statistics"
+language = "R"
+packages = ["tableone", "gtsummary"]
+note = "R computes the statistics in 03_analysis/code and writes them with write_results(); Python's tables/threeline.py still writes the xlsx at S10."
+
+[[task]]
+id = "acquisition"
+language = "python"
+packages = []
+note = "API clients and downloads; raw bodies saved verbatim."
+
+[[task]]
+id = "cleaning"
+language = "python"
+packages = []
+note = "Cleaning and merging into 02_data/derived from 02_data/raw."
+
+[[task]]
+id = "descriptive_statistics"
+language = "either"
+packages = []
+note = "Counts, means, simple tests."
+
+[[task]]
+id = "ordinary_regression"
+language = "either"
+packages = []
+note = "Linear/logistic regression without design or random effects."

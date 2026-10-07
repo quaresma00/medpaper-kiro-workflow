@@ -703,8 +703,8 @@ def main() -> int:
     p.add_argument("--style-config", type=Path, required=True)
     p.set_defaults(fn=audit_manifest)
     args = ap.parse_args()
-    # `project/...` in stage cards is a logical alias for the selected paper, not the physical
-    # <engine>/project directory. Map every CLI path before build/audit touches the filesystem.
+    # `project/...` in stage cards is a logical alias for the selected paper folder; the engine
+    # never holds paper files. Map every CLI path before build/audit touches the filesystem.
     for attr in ("style_config", "bibliography", "csl", "manifest"):
         value = getattr(args, attr, None)
         if value is not None:

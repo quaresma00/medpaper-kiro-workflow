@@ -42,18 +42,79 @@ def project_root() -> Path:
     return wfpaths.project_dir()
 
 
+def _say(msg: str) -> None:
+    """Print a hint with engine commands and the project/ alias valid from the agent's cwd."""
+    try:
+        proj = project_root()
+    except SystemExit:
+        proj = None
+    print(wfpaths.localize_commands(msg, proj))
+
+
+# The artist-audit sidecar schema shared by style.audit_figure (Python) and save_medpaper (R).
+SIDECAR_KEYS = ("figure", "archetype", "n_axes", "min_font_pt", "max_font_pt", "min_line_pt",
+                "text_clipped_at_edge", "axes_tightbbox_overlaps", "glyph_warnings",
+                "tick_label_collisions", "interior_voids", "elements", "figure_text")
+SIDECAR_OPTIONAL_KEYS = ("engine",)
+
+
 def targets() -> dict:
-    """Read [targets] from pipeline.toml, with project overrides."""
-    import tomllib
-    out = {}
-    for p in (repo_root() / "pipeline" / "pipeline.toml",
-              project_root() / ".wf" / "config.toml"):
-        if p.exists():
-            try:
-                out.update(tomllib.loads(p.read_text(encoding="utf-8")).get("targets", {}))
-            except tomllib.TOMLDecodeError:
-                pass
-    return out
+    """[targets] from pipeline.toml with the paper's .wf/config.toml overrides."""
+    from wfcore import registry
+    return registry.effective_targets(project_root())
+
+
+def width_mm(width_class: str, tgt: dict) -> float:
+    key = {"single": "column_width_mm_single", "double": "column_width_mm_double",
+           "1.5": "column_width_mm_1_5"}.get(width_class)
+    try:
+        return float(tgt.get(key, WIDTHS_MM.get(width_class, 90.0)))
+    except (TypeError, ValueError):
+        return WIDTHS_MM.get(width_class, 90.0)
+
+
+def _schema_problems(art: dict, png_stem: str) -> list[str]:
+    from figures import elements as el
+    problems = []
+    keys = set(art)
+    missing = [k for k in SIDECAR_KEYS if k not in keys]
+    extra = sorted(keys - set(SIDECAR_KEYS) - set(SIDECAR_OPTIONAL_KEYS))
+    if missing:
+        problems.append("missing key(s): " + ", ".join(missing))
+    if extra:
+        problems.append("unknown key(s): " + ", ".join(extra))
+    if "engine" in art and art["engine"] not in ("R", "python"):
+        problems.append(f"engine must be R or python, got {art['engine']!r}")
+    if art.get("figure") != png_stem:
+        problems.append(f"figure {art.get('figure')!r} != PNG stem {png_stem!r}")
+    if "archetype" in art and art["archetype"] is not None and not isinstance(art["archetype"], str):
+        problems.append("archetype must be a string or null")
+    n_axes = art.get("n_axes")
+    if not isinstance(n_axes, int) or isinstance(n_axes, bool) or n_axes < 0:
+        problems.append("n_axes must be an integer >= 0")
+    for k in ("min_font_pt", "max_font_pt", "min_line_pt"):
+        v = art.get(k)
+        if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float))):
+            problems.append(f"{k} must be a number or null")
+    for k in ("text_clipped_at_edge", "axes_tightbbox_overlaps", "glyph_warnings",
+              "tick_label_collisions", "interior_voids", "figure_text"):
+        if k in art and not isinstance(art[k], list):
+            problems.append(f"{k} must be a list")
+    elements = art.get("elements")
+    if not isinstance(elements, dict):
+        problems.append("elements must be an object")
+    else:
+        absent = [k for k in el.DETECTORS if k not in elements]
+        if absent:
+            problems.append("elements lacks detector(s): " + ", ".join(absent[:5]))
+        bad = [k for k, v in elements.items() if not (isinstance(v, dict)
+               and isinstance(v.get("found"), bool) and isinstance(v.get("evidence", ""), str))]
+        if bad:
+            problems.append("malformed element record(s): " + ", ".join(bad[:5]))
+    if isinstance(art.get("figure_text"), list) and not all(
+            isinstance(t, str) for t in art["figure_text"]):
+        problems.append("figure_text must hold strings")
+    return problems
 
 
 def load_plan() -> dict:
@@ -153,7 +214,7 @@ def qc_figure(entry: dict, tgt: dict, arch_reg: dict | None = None) -> dict:
     h_px, w_px = rgb.shape[:2]
 
     width_class = entry.get("width", "single")
-    target_mm = WIDTHS_MM.get(width_class, 90.0)
+    target_mm = width_mm(width_class, tgt)
     eff_dpi = w_px / (target_mm / MM_PER_IN)
     dpi_min = float(tgt.get("figure_dpi_min", 300))
     add("effective_dpi", eff_dpi >= dpi_min,
@@ -205,9 +266,22 @@ def qc_figure(entry: dict, tgt: dict, arch_reg: dict | None = None) -> dict:
 
     archetype = entry.get("archetype")
     elements_found: dict = {}
+    engine = None
     sidecar = project_root() / "05_figures" / "qc" / f"{Path(png_rel).stem}.artist.json"
     if sidecar.exists():
         art = json.loads(sidecar.read_text(encoding="utf-8"))
+        schema = _schema_problems(art, Path(png_rel).stem)
+        add("artist_audit_schema", not schema,
+            "; ".join(schema) if schema else "sidecar schema valid")
+        engine = art.get("engine", "python")
+        policy = str(tgt.get("figure_engine", "R")).strip()
+        if policy.casefold() not in ("r", "python"):
+            add("figure_engine_valid", False,
+                f"targets.figure_engine must be R or python, got {policy!r}")
+        elif policy.casefold() != str(engine).casefold():
+            add("engine_matches_policy", False,
+                f"rendered with {engine}, figure_engine = {policy} (mixing is allowed per "
+                "figure; confirm it is deliberate)", severity="warn")
         font_min = float(tgt.get("figure_font_pt_min", 6.0))
         line_min = float(tgt.get("figure_line_pt_min", 0.5))
         mf, ml = art.get("min_font_pt"), art.get("min_line_pt")
@@ -253,13 +327,15 @@ def qc_figure(entry: dict, tgt: dict, arch_reg: dict | None = None) -> dict:
     else:
         add("artist_audit_present", False,
             f"no sidecar at 05_figures/qc/{Path(png_rel).stem}.artist.json - "
-            "render through figures.style.save() so fonts, line widths, glyphs, tick "
+            "render through save_medpaper() (R, tools/figures/R/medfig.R) or "
+            "figures.style.save() (Python) so fonts, line widths, glyphs, tick "
             "collisions and archetype elements can be measured")
 
     blocking = [c for c in checks if not c["ok"] and c["severity"] == "fail"]
     return {
         "id": fid,
         "png": png_rel,
+        "engine": engine,
         "archetype": archetype,
         "width_class": width_class,
         "pixels": [w_px, h_px],
@@ -333,7 +409,7 @@ def crop(fid: str, rows: int, cols: int, cell: str) -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     mpimg.imsave(str(out), rgb[y0:y1, x0:x1])
     rel = out.relative_to(project_root()).as_posix()
-    print(f"cropped {fid} cell {cell.upper()} ({x1 - x0}x{y1 - y0} px) -> project/{rel}")
+    _say(f"cropped {fid} cell {cell.upper()} ({x1 - x0}x{y1 - y0} px) -> project/{rel}")
     print(f"now look at it:  read_file {out}")
     return 0
 
@@ -398,14 +474,14 @@ def contact_sheet(max_px: int = 1400) -> int:
     plt.close(fig)
 
     rel = out.relative_to(project_root()).as_posix()
-    print(f"contact sheet: {len(tiles)} figure(s) in a {rows}x{cols} grid -> project/{rel}")
+    _say(f"contact sheet: {len(tiles)} figure(s) in a {rows}x{cols} grid -> project/{rel}")
     if missing:
         print(f"  NOT RENDERED (absent from the sheet): {', '.join(missing)}")
     print(f"\nlook at it in one load:  read_file {out}")
     print("then, per figure you inspected:")
-    print('  tools/figures/qc.py --confirm "Figure 1" --note "<what you saw / what you changed>"')
+    _say('  tools/figures/qc.py --confirm "Figure 1" --note "<what you saw / what you changed>"')
     print("crop in at full resolution on anything the sheet makes you doubt:")
-    print('  tools/figures/qc.py --crop "Figure 1" --cols 2 --cell B')
+    _say('  tools/figures/qc.py --crop "Figure 1" --cols 2 --cell B')
     return 0
 
 
@@ -420,7 +496,9 @@ def confirm(fid: str, note: str) -> int:
         raise SystemExit("--note must say what you saw, in at least 20 characters")
     qc_path = project_root() / "05_figures" / "qc" / "qc_report.json"
     if not qc_path.exists():
-        raise SystemExit("no qc_report.json - run deterministic QC first: tools/figures/qc.py --all")
+        raise SystemExit(wfpaths.localize_commands(
+            "no qc_report.json - run deterministic QC first: tools/figures/qc.py --all",
+            project_root()))
     report = json.loads(qc_path.read_text(encoding="utf-8"))
     figs = report.get("figures", [])
     entry = next((f for f in figs if str(f.get("id")) == fid), None)
@@ -444,7 +522,7 @@ def confirm(fid: str, note: str) -> int:
     print(f"  still unlooked-at: {', '.join(pending) if pending else 'none'}")
     if not pending:
         print('\nall figures reviewed. Now record the stage decision:')
-        print('  tools/wf.py decide figures_visually_confirmed YES --why "<per figure: what you saw>"')
+        _say('  tools/wf.py decide figures_visually_confirmed YES --why "<per figure: what you saw>"')
     return 0
 
 
@@ -518,16 +596,16 @@ def main() -> int:
         if not res["ok"]:
             fails += 1
     print(f"\n{len(results) - fails}/{len(results)} figure(s) pass deterministic QC")
-    print(f"report: project/05_figures/qc/qc_report.json")
+    _say("report: project/05_figures/qc/qc_report.json")
     print("\nQC is not verification - it cannot judge colour semantics, legibility or clutter.")
     if str(tgt.get("visual_review_mode", "inline")).strip().lower() == "deferred":
         print("visual_review_mode = deferred: do not look yet. Get this green, then park the look:")
-        print('  tools/wf.py decide figures_visually_confirmed DEFER --why "QC green: <summary>"')
+        _say('  tools/wf.py decide figures_visually_confirmed DEFER --why "QC green: <summary>"')
         print("The whole backlog is discharged in one contact-sheet pass at S23, which")
         print("visual_debts_cleared (non-overridable) refuses to let you skip.")
     else:
         print("visual_review_mode = inline: open each PNG now, then record what you saw:")
-        print('  tools/figures/qc.py --confirm "Figure 1" --note "<what you saw>"')
+        _say('  tools/figures/qc.py --confirm "Figure 1" --note "<what you saw>"')
     return 0 if fails == 0 else 2
 
 

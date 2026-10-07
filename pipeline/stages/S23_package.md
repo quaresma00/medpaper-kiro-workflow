@@ -107,6 +107,29 @@ unlooked-at.
 10. Write `submission_qc.md` with `Rendered files inspected`, `Citation and cross-reference
    checks`, `Typography and hyperlinks`, `Tables and figures`, `Defects resolved`. Record
    `submission_files_visually_confirmed YES`, then clean temporary/orphaned files.
+11. Write `project/08_submission/reporting_checklist.md` against this journal variant, one
+   block per guideline named on the protocol's `Guideline:` lines, every item of
+   `reference/reporting_guidelines.toml` exactly once:
+```markdown
+# Reporting checklist
+
+Guideline: STROBE
+Manuscript: 08_submission/manuscript/full_manuscript.md
+
+| Item | Status | Location | Reason |
+|---|---|---|---|
+| 1a | Reported | Title; Abstract | |
+| 12e | Reported | Supplementary Methods > Sensitivity analyses | |
+| 14c | Not applicable | | Cross-sectional design; there is no follow-up time to summarise. |
+| 22 | Reported | Title page; Statements > Funding | |
+```
+   Status is `Reported` or `Not applicable` (with a reason of >= 20 characters). A location is
+   one or more `;`-separated tokens: a heading of the variant's `full_manuscript.md`, `Title`,
+   `<document> > <heading>` (`Supplementary Methods`, `Title page`, `Statements`), or a bare
+   document name. `reporting_checklist_complete` (non-overridable) resolves every token; a
+   "Reported" row pointing at text that does not exist is a fabricated compliance claim. The
+   `check-reporting` skill may assist read-only. `analysis_reproduces` is re-checked here too,
+   so the package is never built on numbers that no longer re-execute.
 
 ## Outputs
 - `08_submission/cover_letter.md`
@@ -114,6 +137,7 @@ unlooked-at.
 - `08_submission/bundle/manifest.json`
 - `08_submission/package_content_baseline.json`
 - `08_submission/submission_qc.md`
+- `08_submission/reporting_checklist.md`
 - the journal-required Word, figure, table and supplementary upload files
 
 ## Hard rules

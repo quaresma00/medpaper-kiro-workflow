@@ -72,7 +72,7 @@ def main() -> int:
     parser.add_argument("command", choices=["init", "sync", "verify"])
     parser.add_argument("--project", type=Path, default=None)
     args = parser.parse_args()
-    project = wfpaths.resolve_paper_path(args.project or "project").resolve()
+    project = wfpaths.paper_from_cli(args.project)
     manifest_path = project / dataproof.MANIFEST_REL
 
     if args.command == "init":

@@ -104,6 +104,19 @@ class Pipeline:
         return out
 
 
+def effective_targets(project: Path | None) -> dict:
+    """[targets] of pipeline.toml overlaid by [targets] of <paper>/.wf/config.toml."""
+    out = dict(tomllib.loads(paths.pipeline_file().read_text(encoding="utf-8")).get("targets", {}))
+    if project is not None:
+        cfg = Path(project) / ".wf" / "config.toml"
+        if cfg.is_file():
+            try:
+                out.update(tomllib.loads(cfg.read_text(encoding="utf-8")).get("targets", {}))
+            except tomllib.TOMLDecodeError:
+                pass
+    return out
+
+
 def load(config_overrides: dict | None = None,
          paper_overrides: dict | None = None) -> Pipeline:
     pf = paths.pipeline_file()

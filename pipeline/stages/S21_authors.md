@@ -48,6 +48,9 @@ requires local definitions, retain them only when `target_journal.json` records
 - `07_manuscript/title_page.md` -> written to `08_submission/manuscript/title_page.md`
 - `07_manuscript/statements.md` -> written to `08_submission/manuscript/statements.md`
 
+`00_input/author_info.json` is administrative and is not an analysis input, so writing it does
+not touch the S06 reproducibility proof.
+
 Both are journal facts: a title page's layout and which statements are mandatory come from the
 chosen journal's guide, not from the science. Write them into the variant that S20 opened. The
 gates resolve there on their own, so the paths above are the logical names, not the disk paths.

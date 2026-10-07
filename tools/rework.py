@@ -279,7 +279,9 @@ def _cmd_batch(args, project: Path, pipe, state: State, kinds: list[str]) -> int
     print(f"review return point: {review_stage}; earliest owner: {revision['earliest_stage']}")
     print(f"invalidated decisions: {', '.join(removed) if removed else 'none'}")
     print(f"current stage: {state.current}" + (" (rewound)" if rewound else " (unchanged)"))
-    print("run tools/rework.py status after context compaction; do not reread the full conversation")
+    print(paths.localize_commands(
+        "run tools/rework.py status after context compaction; do not reread the full "
+        "conversation", project))
     return 0
 
 
@@ -397,7 +399,7 @@ def main() -> int:
     parser.add_argument("--summary", help="resolution or round-completion summary")
     parser.add_argument("--project", type=Path, default=None)
     args = parser.parse_args()
-    project = args.project.resolve() if args.project else paths.project_dir().resolve()
+    project = paths.paper_from_cli(args.project)
     try:
         pipe = registry.load()
         state = State(project, pipe.layout.get("state_dir", ".wf")).load()

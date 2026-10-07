@@ -29,7 +29,7 @@ def main() -> int:
     parser.add_argument("--replace", action="store_true",
                         help="replace a prior baseline after a legitimate S23 rebuild")
     args = parser.parse_args()
-    project = wfpaths.resolve_paper_path(args.project or "project").resolve()
+    project = wfpaths.paper_from_cli(args.project)
     if args.command == "capture":
         stage = _current_stage(project)
         if stage and stage != "S23_package":

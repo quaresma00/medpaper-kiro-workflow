@@ -5,12 +5,15 @@ Render the planned tables as three-line xlsx files a reader and a reviewer can u
 Generated from result JSONs by code, never retyped.
 
 ## Procedure
-1. Write `project/04_tables/code/build_tables.py`. It reads
-   `03_analysis/results/*.json` and `01_protocol/artifact_plan.json`, and writes every
-   table with the shared helper so formatting cannot drift:
+1. Write `project/04_tables/code/build_tables.py` (Python writes the xlsx; run it with
+   `wf run-script 04_tables/code/build_tables.py`, which puts `tools/` on `PYTHONPATH`). It
+   reads `03_analysis/results/*.json` and `01_protocol/artifact_plan.json`, and writes every
+   table with the shared helper so formatting cannot drift. Table 1 statistics are computed
+   in `03_analysis/code/` at S05 (R per `reference/language_policy.toml`: tableone/gtsummary
+   via `write_results()`). If one must be added now, run `reproduce.py run` before leaving
+   S10; S17 re-checks the proof.
 
 ```python
-import sys; sys.path.insert(0, "tools")
 from wfcore.paths import project_dir
 from tables.threeline import write_table, write_workbook
 

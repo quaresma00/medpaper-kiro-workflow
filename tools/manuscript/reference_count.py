@@ -55,7 +55,7 @@ def main() -> int:
         "--add", action="store_true",
         help="with sync, add 'Number of references' when the title page lacks it; use only if required")
     args = parser.parse_args()
-    project = args.project.resolve() if args.project else project_root()
+    project = wfpaths.paper_from_cli(args.project)
     try:
         _, title_page, _, title_text, actual = load(project)
     except (FileNotFoundError, OSError) as exc:

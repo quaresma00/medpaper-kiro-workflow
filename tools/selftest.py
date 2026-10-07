@@ -320,7 +320,7 @@ def run_checks(proj: Path) -> None:
          "S19_polish": "S17_assemble", "S20_package": "S17_assemble"})
     record("legacy tail state migrates without resetting project artifacts",
            changed and legacy.current == "S17_assemble" and
-           legacy.data["pipeline_version"] == "1.4.0",
+           legacy.data["pipeline_version"] == pipe.meta["version"],
            f"current={legacy.current}; version={legacy.data['pipeline_version']}")
     shutil.rmtree(migration_root, ignore_errors=True)
 
@@ -1505,10 +1505,20 @@ globs = ["01_protocol/site_approvals/*.pdf"]
                      spec={"check": "paper_scripts_scoped",
                            "patterns": ["03_analysis/code/**/*.py"]})
     legacy_result = get("paper_scripts_scoped")(legacy_ctx)
-    record("legacy in-flight scripts get an explicit non-blocking migration warning",
-           not legacy_result.ok and legacy_result.severity == "warn"
-           and any("Legacy paper migration" in hint for hint in legacy_result.hints),
+    record("legacy origin does not soften paper_scripts_scoped",
+           not legacy_result.ok and legacy_result.severity == "fail"
+           and not any("Legacy paper migration" in hint for hint in legacy_result.hints),
            legacy_result.detail)
+    migrated = State(scoped / "legacy_state2", ".wf")
+    migrated.create(master.meta["name"], master.meta["version"], "S05_analysis")
+    migrated.data["events"] = [{"kind": "pipeline_migration", "detail": "1.2.0 -> 1.4.0"}]
+    migrated.data.pop("pipeline_origin_version", None)
+    mig_result = get("paper_scripts_scoped")(Ctx(pipeline=scoped_pipe, state=migrated,
+                                                 project=scoped,
+                                                 stage=scoped_pipe.stage("S05_analysis"),
+                                                 spec=legacy_ctx.spec))
+    record("a 1.2 migration event does not soften paper_scripts_scoped either",
+           not mig_result.ok and mig_result.severity == "fail", mig_result.detail[:100])
 
     bad_script.unlink()
     good_script = code_dir / "good_root.py"
@@ -1554,27 +1564,30 @@ globs = ["01_protocol/site_approvals/*.pdf"]
     record("engine helpers reject an explicit output outside the selected paper",
            absolute_output_rejected)
 
-    # Standalone engine tools (not launched through wf.py) follow the active pointer too. This
-    # is the second leak route: an active paper selected by `wf use` must be enough.
-    fake_root = scoped / "standalone_engine"
-    fake_paper = fake_root / "papers/selected"
+    # Standalone engine tools (not launched through wf.py) follow the user-level `wf use`
+    # marker. Since 1.5.0 the marker lives under MEDPAPER_HOME (here a temp dir), holds the
+    # paper's absolute path, and the papers root is outside the engine.
+    st_root = Path(os.environ["MEDPAPER_SELFTEST_ROOT"])
+    fake_paper = st_root / "papers2/selected"
     (fake_paper / ".wf").mkdir(parents=True)
     State(fake_paper, ".wf").create(master.meta["name"], master.meta["version"], master.first().id)
-    (fake_root / ".wf").mkdir(parents=True)
-    (fake_root / ".wf/active").write_text("selected\n", encoding="utf-8")
+    home2 = st_root / "home2"
+    home2.mkdir(parents=True)
+    (home2 / "active").write_text(str(fake_paper.resolve()) + "\n", encoding="utf-8")
     standalone_env = {k: v for k, v in env.items() if k != "MEDPAPER_PROJECT"}
-    standalone_env["MEDPAPER_ROOT"] = str(fake_root)
-    standalone_env["PYTHONPATH"] = str(ROOT / "tools")
+    standalone_env.update({"MEDPAPER_ROOT": str(ROOT), "PYTHONPATH": str(ROOT / "tools"),
+                           "MEDPAPER_HOME": str(home2),
+                           "MEDPAPER_PAPERS_ROOT": str(st_root / "papers2")})
     p = subprocess.run([sys.executable, "-c",
                         "from pubmed import eutils; print(eutils.project_root()); "
                         "print(eutils.cache_dir())"], capture_output=True, text=True,
-                       env=standalone_env, encoding="utf-8", errors="replace")
+                       env=standalone_env, cwd=st_root, encoding="utf-8", errors="replace")
     record("standalone PubMed tools follow the paper selected with wf use",
            p.returncode == 0 and str(fake_paper) in (p.stdout or "")
            and (fake_paper / "06_refs/cache").is_dir(),
            ((p.stdout or "") + (p.stderr or "")).strip()[-140:])
     p = subprocess.run([sys.executable, str(ROOT / "tools/data_manifest.py"), "init"],
-                       capture_output=True, text=True, env=standalone_env,
+                       capture_output=True, text=True, env=standalone_env, cwd=st_root,
                        encoding="utf-8", errors="replace")
     record("standalone data_manifest writes to the selected paper without --project",
            p.returncode == 0
@@ -1585,38 +1598,63 @@ globs = ["01_protocol/site_approvals/*.pdf"]
         "write_table('project/04_tables/main/Table1.xlsx','Table 1','Table 1. Test.',"
         "['Item','Value'],[['n','1']],['Data are counts.'])")
     p = subprocess.run([sys.executable, "-c", table_code], capture_output=True, text=True,
-                       env=standalone_env, encoding="utf-8", errors="replace")
+                       env=standalone_env, cwd=st_root, encoding="utf-8", errors="replace")
     record("the documented project/... alias maps table output into the selected paper",
            p.returncode == 0 and (fake_paper / "04_tables/main/Table1.xlsx").is_file(),
            ((p.stdout or "") + (p.stderr or "")).strip()[-120:])
-    record("standalone tools did not create the mother engine's project/ fallback",
-           not (fake_root / "project").exists(), str(fake_root / "project"))
-    (fake_root / ".wf/active").write_text("missing-paper\n", encoding="utf-8")
+    record("standalone tools did not create an engine project/ folder",
+           not (ROOT / "project").exists(), str(ROOT / "project"))
     p = subprocess.run([sys.executable, "-c",
                         "from pubmed import eutils; print(eutils.project_root())"],
-                       capture_output=True, text=True, env=standalone_env,
+                       capture_output=True, text=True, env=standalone_env, cwd=ROOT,
                        encoding="utf-8", errors="replace")
-    record("a stale active marker fails closed instead of falling back to engine/project",
-           p.returncode != 0 and "Refusing to fall back" in
-           ((p.stdout or "") + (p.stderr or "")) and not (fake_root / "project").exists(),
+    record("standalone tools refuse to resolve a paper from the engine cwd",
+           p.returncode != 0 and "ENGINE workspace" in ((p.stdout or "") + (p.stderr or "")),
+           ((p.stdout or "") + (p.stderr or "")).strip()[-120:])
+    (home2 / "active").write_text(str(st_root / "papers2/missing-paper") + "\n", encoding="utf-8")
+    p = subprocess.run([sys.executable, "-c",
+                        "from pubmed import eutils; print(eutils.project_root())"],
+                       capture_output=True, text=True, env=standalone_env, cwd=st_root,
+                       encoding="utf-8", errors="replace")
+    record("a stale active marker fails closed instead of guessing a paper",
+           p.returncode != 0 and "state is missing" in ((p.stdout or "") + (p.stderr or ""))
+           and not (ROOT / "project").exists(),
            ((p.stdout or "") + (p.stderr or "")).strip()[-150:])
 
-    # Doctor makes any future regression visible instead of letting a 1 MB/run drip accumulate.
-    fake_engine = scoped / "fake_engine"
-    (fake_engine / "papers/p").mkdir(parents=True)
-    (fake_engine / "project/06_refs/cache").mkdir(parents=True)
-    (fake_engine / "project/06_refs/cache/leak.xml").write_bytes(b"wrong root")
-    with patch.object(cli.paths, "repo_root", return_value=fake_engine):
-        rows = cli._engine_hygiene_rows()
-    record("doctor reports paper artifacts leaked into the engine project/",
-           any(name == "engine project/" and status == "BROKEN" for name, status, _ in rows),
-           str(rows))
-    (fake_engine / "project/06_refs/cache/leak.xml").unlink()
-    with patch.object(cli.paths, "repo_root", return_value=fake_engine):
-        rows = cli._engine_hygiene_rows()
-    record("doctor clears once the engine contains no paper artifacts",
-           any(name == "engine project/" and status == "ok" for name, status, _ in rows),
-           str(rows))
+    # Doctor hygiene: any paper artifact or unknown top-level entry in the engine is BROKEN.
+    fake_engine = st_root / "fake_engine"
+    fake_engine.mkdir(parents=True)
+    engine_files = {".gitignore", "bootstrap.py", "LICENSE", "README.md", "requirements.txt",
+                    "workflow.md"}
+    for name in sorted(cli.ENGINE_TOP_LEVEL):
+        if name in engine_files:
+            (fake_engine / name).write_text("x", encoding="utf-8")
+        else:
+            (fake_engine / name).mkdir(parents=True, exist_ok=True)
+
+    def hygiene() -> str:
+        with patch.object(cli.paths, "repo_root", return_value=fake_engine):
+            return cli._engine_hygiene_rows()[0][1]
+
+    record("doctor hygiene: a clean engine is ok", hygiene() == "ok", hygiene())
+    for rel, is_dir in (("papers", True), ("project", True), (".wf", True),
+                        (".review_stash/f", False), ("temp/f", False), ("temp/.gitkeep", False),
+                        ("foo.csv", False), ("stray_dir", True), ("tools/sub/.wf", True)):
+        target = fake_engine / rel
+        if is_dir:
+            target.mkdir(parents=True, exist_ok=True)
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("x", encoding="utf-8")
+        record(f"doctor hygiene: engine {rel} is BROKEN", hygiene() == "BROKEN")
+        top = fake_engine / rel.split("/")[0] if rel.split("/")[0] not in ("tools",) else target
+        shutil.rmtree(top, ignore_errors=True) if top.is_dir() else top.unlink(missing_ok=True)
+    for cache in (".ruff_cache", ".mypy_cache", ".vscode", ".idea", "__pycache__"):
+        (fake_engine / cache).mkdir(exist_ok=True)
+    record("doctor hygiene: local tool caches are tolerated", hygiene() == "ok", hygiene())
+    shutil.rmtree(fake_engine, ignore_errors=True)
+    shutil.rmtree(st_root / "papers2", ignore_errors=True)
+    shutil.rmtree(home2, ignore_errors=True)
 
     after = engine_snapshot()
     record("a full paper-local customisation cycle leaves every engine file byte-identical",
@@ -2037,8 +2075,8 @@ def run_codex_integration() -> None:
                f"card must name `{agent}` so the work is not done in the main context")
 
     record("pipeline and skill versions agree",
-           pipe["meta"]["version"] == "1.4.0" and 'version: "2.0.0"' in skill,
-           f'pipeline={pipe["meta"]["version"]}, skill=2.0.0 (Kiro adapter revision)')
+           pipe["meta"]["version"] == "1.5.0" and 'version: "2.1.0"' in skill,
+           f'pipeline={pipe["meta"]["version"]}, skill=2.1.0 (Kiro adapter revision)')
     record("all 25 stage cards exist",
            len(pipe["stage"]) == 25 and
            all((ROOT / "pipeline" / s["card"]).is_file() for s in pipe["stage"]),
@@ -3404,6 +3442,1164 @@ def run_online(proj: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# 1.5.0: engine purity, Python/R split, R figures, receipts, re-execution, checklists
+# ---------------------------------------------------------------------------
+WF = ROOT / "tools/wf.py"
+
+
+def _env(**extra) -> dict:
+    env = {k: v for k, v in os.environ.items() if k != "MEDPAPER_PROJECT"}
+    env.pop("MEDPAPER_ROOT", None)
+    env["PYTHONIOENCODING"] = "utf-8"
+    for k, v in extra.items():
+        if v is None:
+            env.pop(k, None)
+        else:
+            env[k] = str(v)
+    return env
+
+
+def _run(cmd, env=None, cwd=None, timeout=600) -> subprocess.CompletedProcess:
+    return subprocess.run([str(c) for c in cmd], capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", env=env or _env(),
+                          cwd=str(cwd) if cwd else None, timeout=timeout)
+
+
+def _out(p) -> str:
+    return (p.stdout or "") + (p.stderr or "")
+
+
+def _wf(*args, env=None, cwd=None) -> subprocess.CompletedProcess:
+    return _run([sys.executable, WF, *args], env=env, cwd=cwd)
+
+
+def _sha(path: Path) -> str:
+    import hashlib
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _new_paper(path: Path) -> Path:
+    from wfcore import registry
+    from wfcore.state import State
+    pipe = registry.load()
+    path.mkdir(parents=True, exist_ok=True)
+    State(path, ".wf").create(pipe.meta["name"], pipe.meta["version"], pipe.first().id)
+    return path
+
+
+def run_engine_purity(tmp: Path) -> None:
+    import json as _json
+    from unittest.mock import patch
+
+    from wfcore import adapters, cli, paths, runner
+
+    section("engine purity: papers live outside the engine")
+    papers = Path(os.environ["MEDPAPER_PAPERS_ROOT"])
+    home = Path(os.environ["MEDPAPER_HOME"])
+    for name in ("project", "papers", "temp", ".wf"):
+        if (ROOT / name).exists():
+            record(f"precondition: engine has no {name}/", False, str(ROOT / name))
+    p = _wf("new", "demo", cwd=tmp)
+    demo = papers / "demo"
+    marker = home / "active"
+    record("wf new creates the paper under the papers root with paper-local adapters",
+           p.returncode == 0 and (demo / ".wf/state.json").is_file()
+           and (demo / ".kiro/steering/medpaper-pipeline.md").is_file()
+           and (demo / ".kiro/hooks/medpaper-status.json").is_file()
+           and (demo / ".kiro/hooks/medpaper-skill-guard.json").is_file(), _out(p)[-160:])
+    record("the user-level marker holds the paper's absolute path",
+           marker.is_file() and Path(marker.read_text(encoding="utf-8").strip()) == demo.resolve(),
+           marker.read_text(encoding="utf-8").strip() if marker.is_file() else "no marker")
+    eng = ROOT.as_posix()
+    steering = (demo / ".kiro/steering/medpaper-pipeline.md").read_text(encoding="utf-8")
+    hooks = [_json.loads((demo / f".kiro/hooks/{n}").read_text(encoding="utf-8"))
+             for n in ("medpaper-status.json", "medpaper-skill-guard.json")]
+    record("paper adapters call the engine by absolute path",
+           f'python "{eng}/tools/wf.py" status' in steering
+           and hooks[0]["hooks"][0]["action"]["command"] == f'python "{eng}/tools/wf.py" status --brief'
+           and hooks[1]["hooks"][0]["action"]["command"] == f'python "{eng}/tools/hooks/skill_guard.py"'
+           and "delegated subagent" in steering and "do not advance a stage" in steering,
+           hooks[0]["hooks"][0]["action"]["command"])
+
+    p = _wf("new", "x", "--root", ROOT / "papers", cwd=tmp)
+    record("wf new --root inside the engine is refused and creates nothing",
+           p.returncode != 0 and not (ROOT / "papers").exists(), _out(p)[-120:])
+    p = _wf("new", "x", env=_env(MEDPAPER_PAPERS_ROOT=ROOT / "papers"), cwd=tmp)
+    record("a papers root inside the engine is refused",
+           p.returncode != 0 and not (ROOT / "papers").exists(), _out(p)[-120:])
+    p = _wf("status", env=_env(MEDPAPER_PROJECT=ROOT / "project"), cwd=tmp)
+    record("MEDPAPER_PROJECT pointing into the engine is refused",
+           p.returncode != 0 and not (ROOT / "project").exists(), _out(p)[-120:])
+    p = _wf("init", cwd=ROOT)
+    record("wf init in the engine is refused", p.returncode != 0
+           and not (ROOT / ".wf").exists() and not (ROOT / "00_input").exists(), _out(p)[-120:])
+    standalone = tmp / "standalone"
+    standalone.mkdir()
+    p = _wf("init", cwd=standalone)
+    record("wf init outside the engine creates state and adapters",
+           p.returncode == 0 and (standalone / ".wf/state.json").is_file()
+           and (standalone / ".kiro/steering/medpaper-pipeline.md").is_file(), _out(p)[-120:])
+
+    p = _wf("status", cwd=ROOT)
+    record("wf status in the engine prints the maintenance banner and exits 0",
+           p.returncode == 0 and "ENGINE WORKSPACE" in p.stdout and "papers root" in p.stdout
+           and "open its folder" in p.stdout, p.stdout[:120])
+    p = _wf("status", "--json", cwd=ROOT)
+    try:
+        js = _json.loads(p.stdout)
+    except ValueError:
+        js = {}
+    record("wf status --json in the engine reports engine_workspace", js.get("engine_workspace") is True)
+    p = _wf("check", cwd=ROOT)
+    record("paper-driving commands exit 2 in the engine", p.returncode == 2
+           and "ENGINE workspace" in p.stdout, _out(p)[-100:])
+    p = _wf("card", "S05", cwd=ROOT)
+    card = (ROOT / "pipeline/stages/S05_analysis.md").read_text(encoding="utf-8").rstrip()
+    record("wf card <stage> in the engine prints the master card unchanged",
+           p.returncode == 0 and p.stdout.rstrip("\n") == card)
+    p = _wf("card", cwd=ROOT)
+    record("wf card without a stage needs a paper", p.returncode == 2)
+    p = _wf("status", "--brief", cwd=demo)
+    record("wf status from the paper resolves it from the working directory",
+           p.returncode == 0 and "found at or above" in p.stdout, p.stdout[:160])
+
+    marker.unlink()
+    p = _wf("use", "demo", cwd=ROOT)
+    record("wf use from the engine writes only the user-level marker",
+           p.returncode == 0 and marker.is_file() and not (ROOT / ".wf").exists(), _out(p)[-100:])
+    p = _wf("papers", cwd=tmp)
+    record("wf papers lists the selected paper and the root source",
+           "* demo" in p.stdout and "MEDPAPER_PAPERS_ROOT" in p.stdout, p.stdout[:160])
+    marker.write_text(str(papers / "gone") + "\n", encoding="utf-8")
+    p = _wf("status", cwd=tmp)
+    record("a stale marker fails closed", p.returncode != 0 and "state is missing" in _out(p))
+    marker.write_text(str(demo.resolve()) + "\n", encoding="utf-8")
+
+    with patch.dict(os.environ, {"MEDPAPER_PROJECT": str(demo)}):
+        refused = []
+        for target in (ROOT / "tools/x.png", ROOT / "x"):
+            try:
+                paths.paper_output_path(target)
+                refused.append(False)
+            except ValueError:
+                refused.append(True)
+        from tables.threeline import write_table
+        try:
+            write_table(ROOT / "x.xlsx", "Table 1", "Table 1. X.", ["a", "b"], [["1", "2"]],
+                        ["Abbreviations: none."])
+            refused.append(False)
+        except ValueError:
+            refused.append(True)
+    record("writers refuse every output inside the engine",
+           all(refused) and not (ROOT / "x.xlsx").exists(), str(refused))
+    checks_ = []
+    for cand in (ROOT, ROOT / "tools", ROOT.parent):
+        try:
+            paths.check_paper_location(cand, "test")
+            checks_.append(False)
+        except paths.PaperLocationError:
+            checks_.append(True)
+    record("check_paper_location refuses the engine, a child and a parent", all(checks_))
+
+    fake = tmp / "fake_engine_snap"
+    for d in ("tools", ".venv", ".git", "tools/__pycache__"):
+        (fake / d).mkdir(parents=True, exist_ok=True)
+    with patch.object(paths, "engine_roots", return_value=(fake,)):
+        before = runner.engine_snapshot()
+        (fake / "new_top.txt").write_text("x", encoding="utf-8")
+        (fake / ".venv/x").write_text("x", encoding="utf-8")
+        (fake / ".git/x").write_text("x", encoding="utf-8")
+        (fake / "tools/__pycache__/x.pyc").write_text("x", encoding="utf-8")
+        changes = runner.diff_snapshots(before, runner.engine_snapshot())
+    record("runner tripwire covers the whole engine tree but ignores .venv/.git/caches",
+           len(changes) == 1 and changes[0].endswith("new_top.txt"), str(changes))
+
+    # localisation of card text and hints
+    old = Path.cwd()
+    try:
+        os.chdir(tmp)
+        a = paths.localize_commands(".\\.venv\\Scripts\\python.exe tools/wf.py check")
+        b = paths.localize_commands("python tools/rework.py status")
+        c = paths.localize_commands("Run `tools/text/polish.py lint` and read reference/figure-standards.md")
+        os.chdir(demo)
+        d = paths.localize_commands("`project/05_figures/out/Figure1.png`", demo)
+        keep = [paths.localize_commands(s, demo) for s in
+                ("G:/t/project/07_x.md", "subproject/x", "--project project")]
+        os.chdir(ROOT)
+        ident = paths.localize_commands(".\\.venv\\Scripts\\python.exe tools/wf.py check")
+    finally:
+        os.chdir(old)
+    record("localize_commands makes engine commands absolute outside the engine",
+           f"{eng}/.venv/Scripts/python.exe {eng}/tools/wf.py check" in a
+           and f'python "{eng}/tools/rework.py" status' in b
+           and f'python "{eng}/tools/text/polish.py" lint' in c
+           and f"{eng}/reference/figure-standards.md" in c, a + " | " + c)
+    record("localize_commands strips the project/ alias at the paper root only",
+           d == "`05_figures/out/Figure1.png`"
+           and keep == ["G:/t/project/07_x.md", "subproject/x", "--project project"], str(keep))
+    record("localize_commands is the identity in the engine without a paper",
+           ident == ".\\.venv\\Scripts\\python.exe tools/wf.py check")
+    import re as _re
+    bare = _re.compile(r'(?<![\w/\\.\-"])tools[/\\]\S+\.py')
+    bad_cards = []
+    for stage in sorted((ROOT / "pipeline/stages").glob("S*.md")):
+        p = _wf("card", stage.stem.split("_")[0], cwd=demo)
+        text = p.stdout.replace(f"{eng}/tools/", "")
+        if bare.search(text) or _re.search(r"(?<![\w/\\.\-])project/", p.stdout):
+            bad_cards.append(stage.stem)
+    record("every stage card rendered in a paper has absolute engine commands and no project/",
+           not bad_cards, ", ".join(bad_cards[:6]))
+    p = _wf("invariants", cwd=demo)
+    record("wf invariants rendered in a paper has no bare tools/*.py",
+           not bare.search(p.stdout.replace(f"{eng}/tools/", "")))
+    p = _wf("card", "S08", cwd=demo)
+    q = _wf("card", "S08", cwd=demo / "03_analysis")
+    record("cards address paper files relative to the paper root, absolute from a subfolder",
+           "07_manuscript/methods.md" in p.stdout and "project/07_manuscript" not in p.stdout
+           and f"{demo.resolve().as_posix()}/07_manuscript/methods.md" in q.stdout)
+    eng_env = _env(MEDPAPER_PROJECT=demo)
+    p = _wf("card", "S08", env=eng_env, cwd=ROOT)
+    s = _wf("status", env=eng_env, cwd=ROOT)
+    record("driving a paper from the engine cwd rewrites project/ to the absolute paper path",
+           f"{demo.resolve().as_posix()}/07_manuscript/methods.md" in p.stdout
+           and not _re.search(r"(?<![\w/\\.\-])project/07_manuscript", p.stdout)
+           and "!! driving paper" in s.stdout.splitlines()[0]
+           and not _re.search(r"(?<![\w/\\.\-])project/", s.stdout.split("DECLARED OUTPUTS")[-1].split("STAGE CARD")[0]),
+           s.stdout.splitlines()[0][:120] if s.stdout else _out(s)[-100:])
+    s = _wf("status", "--brief", cwd=demo)
+    block = s.stdout.split("DECLARED OUTPUTS")[-1]
+    record("wf status from the paper root prints DECLARED OUTPUTS without project/",
+           "project/" not in block and "01_protocol/idea.json" in block, block[:120])
+
+    p = _run([sys.executable, ROOT / "tools/install_adapters.py", "--check"], cwd=ROOT)
+    record("engine adapters are in sync with adapters.engine_adapters()", p.returncode == 0, _out(p)[-100:])
+    nonpaper = tmp / "not_a_paper"
+    nonpaper.mkdir()
+    p = _run([sys.executable, ROOT / "tools/install_adapters.py", "--paper", nonpaper], cwd=tmp)
+    record("install_adapters --paper refuses a folder that is not a paper",
+           p.returncode != 0 and not (nonpaper / ".kiro").exists(), _out(p)[-100:])
+    p = _wf("clean", cwd=demo)
+    record("no_orphans/wf clean never report the paper's .kiro/", ".kiro" not in p.stdout, p.stdout[-120:])
+
+    bad_project = ROOT / "project"
+    clis = [
+        [ROOT / "tools/rework.py", "status", "--project", bad_project],
+        [ROOT / "tools/data_manifest.py", "verify", "--project", bad_project],
+        [ROOT / "tools/package_content.py", "verify", "--project", bad_project],
+        [ROOT / "tools/package_review.py", "verify", "--project", bad_project],
+        [ROOT / "tools/manuscript/reference_count.py", "show", "--project", bad_project],
+        [ROOT / "tools/manuscript/review_package.py", "build", "--project", bad_project],
+        [ROOT / "tools/reproduce.py", "run", "--project", bad_project],
+    ]
+    refused = [_run([sys.executable, *c], cwd=tmp).returncode != 0 for c in clis]
+    p = _run([sys.executable, ROOT / "tools/manuscript/review_package.py", "build"],
+             env=_env(MEDPAPER_PROJECT=bad_project), cwd=tmp)
+    refused.append(p.returncode != 0)
+    record("every --project CLI refuses a paper inside the engine",
+           all(refused) and not bad_project.exists(), str(refused))
+    with patch.dict(os.environ, {"MEDPAPER_PROJECT": str(demo)}):
+        ok_ = (paths.paper_from_cli(None) == paths.project_dir()
+               and paths.paper_from_cli("project") == demo.resolve()
+               and paths.paper_from_cli("project/03_analysis") == demo.resolve()
+               and paths.paper_from_cli(str(standalone)) == standalone.resolve())
+        try:
+            paths.paper_from_cli(str(nonpaper))
+            ok_ = False
+        except SystemExit:
+            pass
+    record("paper_from_cli accepts the alias and real papers, refuses non-papers", ok_)
+
+    p = _wf("use", "demo", env=_env(MEDPAPER_HOME=ROOT / "h"), cwd=ROOT)
+    q = _wf("use", "demo", env=_env(MEDPAPER_HOME=ROOT.parent), cwd=tmp)
+    record("MEDPAPER_HOME inside or over the engine is refused",
+           p.returncode != 0 and q.returncode != 0 and not (ROOT / "h").exists())
+    fake_eng = tmp / "fake_engine_root"
+    fake_eng.mkdir()
+    p = _wf("status", env=_env(MEDPAPER_ROOT=fake_eng, MEDPAPER_PROJECT=ROOT / "project"), cwd=tmp)
+    with patch.dict(os.environ, {"MEDPAPER_ROOT": str(fake_eng)}):
+        still = paths.in_engine(ROOT / "tools")
+    record("redirecting MEDPAPER_ROOT never unprotects the physical engine",
+           p.returncode != 0 and still and not (ROOT / "project").exists(), _out(p)[-100:])
+    p = _wf("papers", env=_env(MEDPAPER_PAPERS_ROOT=ROOT.parent), cwd=tmp)
+    q = _wf("new", ROOT.name, "--root", ROOT.parent, cwd=tmp)
+    record("a papers root containing the engine is refused", p.returncode != 0 and q.returncode != 0)
+    p = _wf("new", "demo2", "--root", "rel/dir", cwd=tmp)
+    record("wf new --root resolves a relative root against the cwd",
+           p.returncode == 0 and (tmp / "rel/dir/demo2/.wf/state.json").is_file(), _out(p)[-100:])
+    marker.write_text(str(demo.resolve()) + "\n", encoding="utf-8")
+
+    p = _run([sys.executable, ROOT / "tools/package_review.py", "freeze", "--project", demo,
+              "--freeze", ROOT / "x.json"], cwd=tmp)
+    q = _run([sys.executable, ROOT / "tools/package_review.py", "freeze", "--project", demo,
+              "--freeze", tmp / "elsewhere.json"], cwd=tmp)
+    try:
+        inside = paths.output_within(demo, "project/08_submission/f.json") == \
+            (demo / "08_submission/f.json").resolve()
+        for bad in (ROOT / "x", tmp / "y"):
+            try:
+                paths.output_within(demo, bad)
+                inside = False
+            except ValueError:
+                pass
+    except ValueError:
+        inside = False
+    record("package_review --freeze stays inside its paper",
+           p.returncode != 0 and q.returncode != 0 and not (ROOT / "x.json").exists() and inside)
+    p = _run([sys.executable, ROOT / "tools/selftest.py", "--workdir", ROOT / "temp/st"], cwd=ROOT)
+    record("selftest --workdir inside the engine is refused before any mkdir",
+           p.returncode == 1 and "inside the engine" in _out(p) and not (ROOT / "temp").exists(),
+           _out(p)[-100:])
+
+    nested = [_wf("init", cwd=demo / "03_analysis").returncode,
+              _wf("init", cwd=papers).returncode,
+              _wf("init", cwd=tmp).returncode,
+              _wf("new", "inner", "--root", demo, cwd=tmp).returncode,
+              _wf("init", "--force", cwd=demo / "03_analysis").returncode]
+    record("papers cannot be nested (inside a paper, the papers root, or around one)",
+           all(c == 2 for c in nested) and not (demo / "03_analysis/.wf").exists()
+           and not (demo / "inner").exists(), str(nested))
+
+    (demo / "project").mkdir()
+    p = _wf("doctor", cwd=demo)
+    (demo / "project").rmdir()
+    q = _wf("doctor", cwd=demo)
+    record("doctor reports a literal project/ inside a paper as BROKEN",
+           "paper layout" in p.stdout and "BROKEN" in p.stdout.split("paper layout")[1][:30]
+           and "paper layout" in q.stdout and " ok " in q.stdout.split("paper layout")[1][:30])
+    p = _wf("doctor", cwd=ROOT)
+    record("wf doctor on the pure engine is OK", p.returncode == 0 and "papers root" in p.stdout
+           and "doctor: OK" in p.stdout, p.stdout[-200:])
+
+
+def run_language_policy() -> None:
+    import tomllib
+    from wfcore import cli, registry
+    section("Python/R language policy")
+    data = tomllib.loads((ROOT / "reference/language_policy.toml").read_text(encoding="utf-8"))
+    probs = cli.validate_language_policy(data)
+    record("language_policy.toml parses and validates", not probs, "; ".join(probs[:3]))
+    record('"data.table" is a quoted key of [r.optional]',
+           "data.table" in data["r"]["optional"] and "data" not in data["r"]["optional"])
+    bad = tomllib.loads('[r]\nmin_version = "4.3.0"\n[r.optional]\ndata.table = "0"\n')
+    record("an unquoted dotted package name is reported",
+           any("must be quoted" in p for p in cli.validate_language_policy(bad)))
+    cards = [ROOT / f"pipeline/stages/{c}.md" for c in ("S04_data", "S05_analysis", "S10_tables",
+                                                        "S11_figures")]
+    cards.append(ROOT / ".kiro/skills/medpaper-pipeline/SKILL.md")
+    missing = [c.name for c in cards if "reference/language_policy.toml" not in c.read_text(encoding="utf-8")]
+    record("S04/S05/S10/S11 and SKILL.md point at the language policy", not missing, str(missing))
+    record("figures default to R", str(registry.load().targets.get("figure_engine")) == "R")
+
+
+def run_no_plot_calls_r() -> None:
+    from wfcore.checks.text import plot_calls
+    section("no_plot_calls covers R and Python")
+    flagged = ["plot(x)", "hist(x)", "graphics::barplot(x)", "boxplot(y ~ g)", 'png("a.png")',
+               'pdf("a.pdf")', "dev.off()", "ggplot(df)", 'ggsave("a.png")',
+               "survminer::ggsurvplot(fit)", "ggsurvfit(fit)", "metafor::forest(m)",
+               "lines(x, y)", "abline(h = 0)", "par(mfrow = c(1, 2))", "pheatmap::pheatmap(m)",
+               "pROC::ggroc(r)", "grid::grid.draw(g)", "qplot(x)", "cobalt::love.plot(w)",
+               "densityplot(imp)", "funnel(m)", "plot.roc(r)"]
+    missed = [s for s in flagged if not plot_calls("a.R", s + "\n")]
+    missed += [s for s in ("df.plot()\n", "import seaborn\n", "kmf.plot_survival_function()\n")
+               if not plot_calls("a.py", s)]
+    record("R and Python plotting calls are flagged", not missed, str(missed))
+    clean_r = ["plot_data <- df", "my.plot(x)", "my.lines(x)", "outlines(x)",
+               "plot_layout(ncol = 2)", "df$points", "randomForest(y ~ .)",
+               "survfit(Surv(t, e) ~ 1)", "readLines(f)", "library(ggplot2)", "# plot(x)",
+               'msg <- "plot(x)"', "forest_df <- 1"]
+    clean_py = ["plot_data = 1", "# plt.plot", 'x = "matplotlib"', "progress.bar(1)",
+                'print(f"wrote plt.png")']
+    wrong = [s for s in clean_r if plot_calls("a.R", s + "\n")]
+    wrong += [s for s in clean_py if plot_calls("a.py", s + "\n")]
+    record("non-plot code, comments and strings are not flagged", not wrong, str(wrong))
+
+
+def _gate(name: str, proj: Path, stage: str = "S05_analysis", **spec):
+    from wfcore import registry
+    from wfcore.checks import Ctx, get, load_all
+    from wfcore.state import State
+    load_all()
+    pipe = registry.load()
+    st = State(proj, ".wf").load()
+    return get(name)(Ctx(pipeline=pipe, state=st, project=proj, stage=pipe.stage(stage),
+                         spec={"check": name, **spec}))
+
+
+R_HELPER = 'source(file.path(Sys.getenv("MEDPAPER_ROOT"), "tools/R/medresults.R"))\n'
+
+
+def run_results_environment(tmp: Path) -> None:
+    import json as _json
+    section("environment receipts in results JSON")
+    if not shutil.which("Rscript"):
+        record("results environment: Rscript available", False, "Rscript missing")
+        return
+    P = _new_paper(tmp / "envpaper")
+    code = P / "03_analysis/code"
+    code.mkdir(parents=True)
+    env = _env(MEDPAPER_PROJECT=P)
+    (code / "01_py.py").write_text(
+        "import numpy\nfrom analysis.results import set_seed, write_results\n"
+        "set_seed(20240917)\nwrite_results('py_primary', {'hr': 1.87432198765, 'n': 1284, "
+        "'draw': float(numpy.random.random())})\n", encoding="utf-8")
+    (code / "02_r.R").write_text(
+        R_HELPER + "medpaper_seed(42)\n"
+        'write_results(list(hr = 1.87432198765, n = 1284L, covariates = I("age")), "r_primary")\n',
+        encoding="utf-8")
+    p1 = _wf("run-script", "03_analysis/code/01_py.py", env=env, cwd=tmp)
+    p2 = _wf("run-script", "03_analysis/code/02_r.R", env=env, cwd=tmp)
+    res = P / "03_analysis/results"
+    py = _json.loads((res / "py_primary.json").read_text(encoding="utf-8")) if (res / "py_primary.json").is_file() else {}
+    rr = _json.loads((res / "r_primary.json").read_text(encoding="utf-8")) if (res / "r_primary.json").is_file() else {}
+    pe, re_ = py.get("environment", {}), rr.get("environment", {})
+    record("Python write_results keeps full precision and records the environment",
+           p1.returncode == 0 and py.get("hr") == 1.87432198765 and pe.get("language") == "python"
+           and pe.get("seed") == 20240917 and "numpy" in pe.get("packages", {})
+           and pe.get("script") == "03_analysis/code/01_py.py"
+           and pe.get("script_sha256") == _sha(code / "01_py.py"), _out(p1)[-160:])
+    record("R write_results keeps 1.87432198765 (digits = NA) and I() arrays",
+           p2.returncode == 0 and rr.get("hr") == 1.87432198765 and rr.get("n") == 1284
+           and rr.get("covariates") == ["age"] and re_.get("language") == "R"
+           and re_.get("version") == "4.5.2" and "jsonlite" in re_.get("packages", {})
+           and re_.get("seed") == 42, _out(p2)[-200:])
+    record("no .tmp file is left beside the results", not list(res.glob("*.tmp")))
+    g = _gate("results_have_environment", P)
+    record("results_have_environment passes real receipts", g.ok, g.detail[:120])
+
+    bare = res / "hand.json"
+    bare.write_text('{"hr": 2.5}', encoding="utf-8")
+    g = _gate("results_have_environment", P)
+    record("N: a results file without a receipt fails", not g.ok and "hand.json" in g.detail)
+    bare.unlink()
+    orig = (code / "01_py.py").read_text(encoding="utf-8")
+    (code / "01_py.py").write_text(orig + "# edited\n", encoding="utf-8")
+    g = _gate("results_have_environment", P)
+    record("N: editing the script after it wrote results fails", not g.ok and "changed" in g.detail)
+    (code / "01_py.py").write_text(orig, encoding="utf-8")
+    fake = dict(py)
+    fake["environment"] = dict(pe, script="04_tables/code/x.py")
+    (P / "04_tables/code").mkdir(parents=True)
+    (P / "04_tables/code/x.py").write_text("x = 1\n", encoding="utf-8")
+    fake["environment"]["script_sha256"] = _sha(P / "04_tables/code/x.py")
+    (res / "fake.json").write_text(_json.dumps(fake), encoding="utf-8")
+    g = _gate("results_have_environment", P)
+    record("N: a receipt naming a non-analysis script fails", not g.ok and "fake.json" in g.detail)
+    sub = dict(py)
+    (code / "sub").mkdir()
+    (code / "sub/run.py").write_text("x = 1\n", encoding="utf-8")
+    sub["environment"] = dict(pe, script="03_analysis/code/sub/run.py", script_sha256=_sha(code / "sub/run.py"))
+    (res / "fake.json").write_text(_json.dumps(sub), encoding="utf-8")
+    g = _gate("results_have_environment", P)
+    record("N: a receipt naming a subdirectory script fails", not g.ok and "top-level" in g.detail)
+    (res / "fake.json").unlink()
+    shutil.rmtree(code / "sub")
+
+    cases = {
+        "03_analysis/code/03_envkey.py": "from analysis.results import write_results\nwrite_results('k', {'environment': 1})\n",
+        "03_analysis/code/04_nan.py": "from analysis.results import write_results\nwrite_results('nan', {'x': float('nan')})\n",
+        "03_analysis/code/05_nan.R": R_HELPER + 'write_results(list(x = NaN), "nanr")\n',
+        "05_figures/code/fig.R": R_HELPER + 'write_results(list(x = 1), "fromfig")\n',
+        "02_data/acquisition/a.py": "from analysis.results import write_results\nwrite_results('other', {'x': 1})\n",
+        "02_data/acquisition/a.R": R_HELPER + 'write_results(list(x = 1), "other")\n',
+        "03_analysis/code/sub/run2.py": "from analysis.results import write_results\nwrite_results('subpy', {'x': 1})\n",
+        "03_analysis/code/sub/run2.R": R_HELPER + 'write_results(list(x = 1), "subr")\n',
+        "03_analysis/code/06_env.R": R_HELPER + 'write_results(list(x = 1, e = new.env()), "unser")\n',
+    }
+    for rel, text in cases.items():
+        (P / rel).parent.mkdir(parents=True, exist_ok=True)
+        (P / rel).write_text(text, encoding="utf-8")
+    codes = {rel: _wf("run-script", rel, env=env, cwd=tmp) for rel in cases}
+    written = [n for n in ("k", "nan", "nanr", "fromfig", "other", "subpy", "subr", "unser")
+               if (res / f"{n}.json").exists() or (res / f"{n}.json.tmp").exists()]
+    record("writers refuse a top-level environment key, NaN, wrong directories and acquisition names",
+           all(c.returncode != 0 for c in codes.values()) and not written,
+           f"rc={[c.returncode for c in codes.values()]} written={written}")
+    record("the acquisition refusal names the rule",
+           "acquisition writes raw files verbatim" in _out(codes["02_data/acquisition/a.py"])
+           and "acquisition writes raw files verbatim" in _out(codes["02_data/acquisition/a.R"]))
+    record("subdirectory scripts are refused with 'only top-level'",
+           "only top-level" in _out(codes["03_analysis/code/sub/run2.py"])
+           and "only top-level" in _out(codes["03_analysis/code/sub/run2.R"]))
+    a1 = _wf("run-script", "03_analysis/code/01_py.py", "extra", env=env, cwd=tmp)
+    a2 = _wf("run-script", "03_analysis/code/02_r.R", "extra", env=env, cwd=tmp)
+    record("analysis scripts run with arguments are refused",
+           a1.returncode != 0 and a2.returncode != 0 and "without arguments" in _out(a1)
+           and "without arguments" in _out(a2))
+    for rel in cases:
+        (P / rel).unlink()
+    shutil.rmtree(code / "sub", ignore_errors=True)
+    (P / "02_data/acquisition/s.py").write_text(
+        "from analysis.results import write_results\nwrite_results('dataset_summary', {'n_rows': 3})\n",
+        encoding="utf-8")
+    ok_acq = _wf("run-script", "02_data/acquisition/s.py", env=env, cwd=tmp)
+    record("acquisition may write dataset_summary", ok_acq.returncode == 0
+           and (res / "dataset_summary.json").is_file(), _out(ok_acq)[-100:])
+    (res / "dataset_summary.json").unlink()
+    (code / "lib").mkdir()
+    (code / "lib/h.py").write_text(
+        "from analysis.results import write_results\ndef go():\n    write_results('viahelper', {'x': 2})\n",
+        encoding="utf-8")
+    (code / "07_main.py").write_text(
+        "import sys, os\nsys.path.insert(0, os.path.dirname(__file__))\nfrom lib.h import go\ngo()\n",
+        encoding="utf-8")
+    h = _wf("run-script", "03_analysis/code/07_main.py", env=env, cwd=tmp)
+    record("a helper module called from a top-level script may write results",
+           h.returncode == 0 and (res / "viahelper.json").is_file(), _out(h)[-120:])
+    (code / "07_main.py").unlink()
+    (res / "viahelper.json").unlink()
+    shutil.rmtree(code / "lib")
+
+    def scoped(rel: str, text: str, patterns=None):
+        (P / rel).parent.mkdir(parents=True, exist_ok=True)
+        (P / rel).write_text(text, encoding="utf-8")
+        r = _gate("paper_scripts_scoped", P, patterns=patterns or [
+            "02_data/acquisition/**/*.py", "02_data/acquisition/**/*.R",
+            "03_analysis/code/**/*.py", "03_analysis/code/**/*.R",
+            "05_figures/code/**/*.R"])
+        (P / rel).unlink()
+        return r
+    r1 = scoped("03_analysis/code/w1.R", R_HELPER + 'jsonlite::write_json(x, "a.json")\n')
+    r2 = scoped("03_analysis/code/w2.R", R_HELPER + "y <- toJSON(x)\n")
+    r3 = scoped("03_analysis/code/w3.R", R_HELPER + "# toJSON(x)\ny <- jsonlite::fromJSON('a.json')\n")
+    record("R scripts may not write JSON directly; comments and fromJSON are fine",
+           not r1.ok and not r2.ok and "writes JSON directly" in r1.detail and r3.ok, r3.detail[:100])
+    r4 = scoped("05_figures/code/f.R", 'source(file.path(Sys.getenv("MEDPAPER_ROOT"), "tools/figures/R/medfig.R"))\n')
+    r5 = scoped("03_analysis/code/analysis.py", "from wfcore.paths import project_dir\np = project_dir()\n")
+    record("sourcing medfig.R scopes an R script; analysis.py shadows the engine package",
+           r4.ok and not r5.ok and "shadows the engine package" in r5.detail, r4.detail[:80])
+    (code / "analysis").mkdir()
+    (code / "analysis/__init__.py").write_text("", encoding="utf-8")
+    r6 = _gate("paper_scripts_scoped", P, patterns=["03_analysis/code/*.py"])
+    shutil.rmtree(code / "analysis")
+    (P / "05_figures/code/Figures").mkdir(parents=True)
+    (P / "05_figures/code/Figures/a.txt").write_text("x", encoding="utf-8")
+    r7 = _gate("paper_scripts_scoped", P, patterns=["03_analysis/code/*.py"])
+    shutil.rmtree(P / "05_figures/code/Figures")
+    (code / "lib").mkdir()
+    r8 = _gate("paper_scripts_scoped", P, patterns=["03_analysis/code/*.py"])
+    (code / "lib").rmdir()
+    record("package directories shadowing engine packages fail; lib/ passes",
+           not r6.ok and not r7.ok and "shadows" in r7.detail and r8.ok, r8.detail[:80])
+    absolute = [scoped("03_analysis/code/a1.R", R_HELPER + 'd <- read.csv("C:/data/x.csv")\n'),
+                scoped("03_analysis/code/a2.py", "from wfcore.paths import project_dir\np = project_dir()\nopen(r'\\\\server\\share\\x')\n"),
+                scoped("03_analysis/code/a3.py", "from wfcore.paths import project_dir\np = project_dir()\nx = '/home/u/x.csv'\n"),
+                scoped("03_analysis/code/a4.py", "from wfcore.paths import project_dir\np = project_dir()\nimport pandas as pd\nname = 'x'\npd.read_csv(f'C:/data/{name}.csv')\n")]
+    fine = [scoped("03_analysis/code/b1.R", R_HELPER + 'p <- paste0(a, "/", b)\nq <- gsub("/+$", "", p)\nu <- "https://example.org/a/b"\n# "C:/data/x.csv"\n'),
+            scoped("02_data/acquisition/b2.py", "from wfcore.paths import project_dir\np = project_dir()\nu = '/esearch.fcgi/x/'\n")]
+    record("absolute path literals in re-executed code are refused (f-strings included)",
+           all(not r.ok and "absolute path literal" in r.detail for r in absolute)
+           and all(r.ok for r in fine), " | ".join(r.detail[:60] for r in absolute + fine))
+
+    from wfcore.state import State
+    st = State(P, ".wf").load()
+    st.data["pipeline_origin_version"] = "1.3.0"
+    st.save()
+    r9 = scoped("03_analysis/code/w9.R", R_HELPER + 'jsonlite::write_json(x, "a.json")\n')
+    record("legacy origin 1.3.0 does not soften the R JSON rule", not r9.ok and r9.severity == "fail")
+
+    (P / "07_manuscript").mkdir(exist_ok=True)
+    (P / "07_manuscript/x.md").write_text("# Results\n\nWe enrolled 20240917 participants using version 4.5.\n", encoding="utf-8")
+    n1 = _gate("numbers_have_provenance", P, stage="S09_results", path="07_manuscript/x.md")
+    (P / "07_manuscript/x.md").write_text("# Results\n\nThe HR was 1.87 in 1284 participants.\n", encoding="utf-8")
+    n2 = _gate("numbers_have_provenance", P, stage="S09_results", path="07_manuscript/x.md")
+    record("the environment receipt never counts as number provenance; the payload does",
+           not n1.ok and n2.ok, n1.detail[:80] + " | " + n2.detail[:60])
+
+
+def run_reproduce(tmp: Path) -> None:
+    import json as _json
+    section("analysis re-execution (reproduce.py, analysis_reproduces)")
+    if not shutil.which("Rscript"):
+        record("reproduce: Rscript available", False, "Rscript missing")
+        return
+    P = _new_paper(tmp / "repro")
+    (P / "02_data/raw").mkdir(parents=True)
+    (P / "02_data/raw/data.csv").write_text("x,y\n1,2\n2,4\n3,7\n", encoding="utf-8")
+    acq = P / "02_data/acquisition/fetch.py"
+    acq.parent.mkdir(parents=True)
+    acq.write_text("from pathlib import Path\nPath('ACQ_RAN').write_text('x')\nraise SystemExit(9)\n",
+                   encoding="utf-8")
+    code = P / "03_analysis/code"
+    (code / "lib").mkdir(parents=True)
+    (code / "lib/helper.py").write_text("def slope(xs, ys):\n    return sum(ys) / sum(xs)\n", encoding="utf-8")
+    (code / "01_clean.py").write_text(
+        "from wfcore.paths import project_dir\nP = project_dir()\n"
+        "(P / '02_data/derived').mkdir(parents=True, exist_ok=True)\n"
+        "(P / '02_data/derived/clean.csv').write_text((P / '02_data/raw/data.csv').read_text())\n",
+        encoding="utf-8")
+    model = ("import sys, os, random\nsys.path.insert(0, os.path.dirname(__file__))\n"
+             "from lib.helper import slope\nfrom wfcore.paths import project_dir\n"
+             "from analysis.results import set_seed, write_results\nset_seed(7)\n"
+             "rows = (project_dir() / '02_data/derived/clean.csv').read_text().split()[1:]\n"
+             "xs = [int(r.split(',')[0]) for r in rows]; ys = [int(r.split(',')[1]) for r in rows]\n"
+             "write_results('primary', {'slope': slope(xs, ys), 'n': len(xs), 'draw': random.random(), "
+             "'meta': {'timestamp': 'fixed'}})\n")
+    (code / "02_model.py").write_text(model, encoding="utf-8")
+    (code / "03_r.R").write_text(R_HELPER + "medpaper_seed(3)\nwrite_results(list(u = runif(1)), \"r_res\")\n",
+                                 encoding="utf-8")
+    env = _env(MEDPAPER_PROJECT=P)
+    for s in ("01_clean.py", "02_model.py", "03_r.R"):
+        _wf("run-script", f"03_analysis/code/{s}", env=env, cwd=tmp)
+    # acquisition-written dataset_summary with a real receipt
+    ds = {"n_rows": 3, "environment": {"schema": 1, "language": "python", "version": "3.13",
+          "packages": {}, "seed": None, "script": "02_data/acquisition/fetch.py",
+          "script_sha256": _sha(acq), "written_at": "2026-01-01T00:00:00Z",
+          "writer": "tools/analysis/results.py"}}
+    (P / "03_analysis/results/dataset_summary.json").write_text(_json.dumps(ds), encoding="utf-8")
+    (P / "03_analysis/notes.md").write_text("notes\n", encoding="utf-8")
+    RP = [sys.executable, ROOT / "tools/reproduce.py"]
+
+    def snapshot():
+        return {p.relative_to(P).as_posix(): _sha(p) for p in P.rglob("*") if p.is_file()
+                and not p.relative_to(P).as_posix().startswith((".wf/", "03_analysis/reproducibility_report"))}
+    before = snapshot()
+    r = _run([*RP, "run", "--project", P], cwd=tmp)
+    report = P / "03_analysis/reproducibility_report.json"
+    rep = _json.loads(report.read_text(encoding="utf-8")) if report.is_file() else {}
+    statuses = {e["file"]: e["status"] for e in rep.get("results", [])}
+    record("reproduce.py run re-executes and matches", r.returncode == 0 and rep.get("all_match") is True
+           and len(rep.get("scripts", [])) == 3
+           and statuses.get("03_analysis/results/dataset_summary.json") == "not_rerun_acquisition"
+           and not (P / "ACQ_RAN").exists(), _out(r)[-200:])
+    record("the run changed nothing in the paper except the report and .wf/repro",
+           snapshot() == before and "do not edit the paper" in r.stdout)
+    rerun = P / ".wf/repro/rerun"
+    record("re-run evidence is retained with matching hashes",
+           all(e.get("rerun_sha256") == _sha(rerun / Path(e["file"]).name)
+               for e in rep.get("results", []) if e.get("rerun_sha256")) and rerun.is_dir())
+    inputs = [i["path"] for i in rep.get("inputs", [])]
+    record("inputs include helpers and raw data, never derived/ or caches",
+           "03_analysis/code/lib/helper.py" in inputs and "02_data/raw/data.csv" in inputs
+           and not any(i.startswith("02_data/derived") or "__pycache__" in i for i in inputs))
+    g = _gate("analysis_reproduces", P, stage="S06_protocol_final")
+    record("analysis_reproduces passes after a clean run", g.ok, g.detail[:120])
+    (P / "03_analysis/notes.md").write_text("notes edited\n", encoding="utf-8")
+    (P / "00_input").mkdir(exist_ok=True)
+    (P / "00_input/author_info.json").write_text("{}", encoding="utf-8")
+    g2 = _gate("analysis_reproduces", P, stage="S06_protocol_final")
+    record("prose and 00_input edits do not invalidate the proof", g2.ok, g2.detail[:100])
+
+    helper = code / "lib/helper.py"
+    old = helper.read_text(encoding="utf-8")
+    helper.write_text(old + "# edit\n", encoding="utf-8")
+    g = _gate("analysis_reproduces", P, stage="S06_protocol_final")
+    record("N: editing a helper invalidates the proof",
+           not g.ok and "input changed since the proof: 03_analysis/code/lib/helper.py" in g.detail)
+    helper.write_text(old, encoding="utf-8")
+    m = code / "02_model.py"
+    m.write_text(model + "# comment\n", encoding="utf-8")
+    g = _gate("analysis_reproduces", P, stage="S06_protocol_final")
+    record("N: editing an analysis script invalidates the proof", not g.ok)
+    m.write_text(model, encoding="utf-8")
+    pj = P / "03_analysis/results/primary.json"
+    orig = pj.read_text(encoding="utf-8")
+    pj.write_text(orig.replace('"n": 3', '"n": 4'), encoding="utf-8")
+    g = _gate("analysis_reproduces", P, stage="S06_protocol_final")
+    record("N: editing a results value invalidates the proof", not g.ok)
+    pj.write_text(orig, encoding="utf-8")
+    ret = rerun / "primary.json"
+    rorig = ret.read_text(encoding="utf-8")
+    ret.write_text(rorig.replace('"n": 3', '"n": 5'), encoding="utf-8")
+    g = _gate("analysis_reproduces", P, stage="S06_protocol_final")
+    record("N: editing the retained re-run evidence fails",
+           not g.ok and "retained re-run evidence missing or edited" in g.detail)
+    ret.write_text(rorig, encoding="utf-8")
+
+    # cwd outside the paper and inside a subfolder both write the paper's own report
+    report.unlink()
+    r2 = _run([*RP, "run", "--project", P], cwd=P / "03_analysis")
+    record("the report is anchored to --project, whatever the cwd",
+           r2.returncode == 0 and report.is_file()
+           and not (P / "03_analysis/03_analysis").exists(), _out(r2)[-100:])
+
+    bad = [_run([*RP, "run", "--timeout", t, "--project", P], cwd=tmp).returncode
+           for t in ("0", "-5", "nan", "90000")]
+    record("invalid --timeout values are refused", all(c == 1 for c in bad), str(bad))
+
+    unseeded = model.replace("set_seed(7)\n", "random.seed()\n")
+    m.write_text(unseeded, encoding="utf-8")
+    _wf("run-script", "03_analysis/code/02_model.py", env=env, cwd=tmp)
+    r3 = _run([*RP, "run", "--project", P], cwd=tmp)
+    rep3 = _json.loads(report.read_text(encoding="utf-8"))
+    prim = next(e for e in rep3["results"] if e["file"].endswith("primary.json"))
+    record("N: an unseeded script is reported as a mismatch at its JSON path",
+           r3.returncode == 2 and prim["status"] == "mismatch" and prim["first_difference"] == "$.draw",
+           str(prim.get("first_difference")))
+    for e in rep3["results"]:
+        e["status"] = "match" if e["status"] == "mismatch" else e["status"]
+        e["first_difference"] = None
+    rep3["all_match"] = True
+    report.write_text(_json.dumps(rep3), encoding="utf-8")
+    g = _gate("analysis_reproduces", P, stage="S06_protocol_final")
+    record("N: a forged report cannot turn a mismatch into a pass",
+           not g.ok and "report claims match" in g.detail and "$.draw" in g.detail, g.detail[:160])
+    m.write_text(model, encoding="utf-8")
+    _wf("run-script", "03_analysis/code/02_model.py", env=env, cwd=tmp)
+
+    tol = P / "03_analysis/reproducibility.toml"
+    tol.write_text('schema = 1\n[[tolerance]]\nfile = "03_analysis/results/primary.json"\nabs = 1e-8\nrel = 0.0\nreason = "too short"\n', encoding="utf-8")
+    r4 = _run([*RP, "run", "--project", P], cwd=tmp)
+    tol.write_text('schema = 1\n[[tolerance]]\nfile = "03_analysis/results/primary.json"\nabs = 1e-3\nrel = 0.0\nreason = "bootstrap reduction order varies between runs on this machine"\n', encoding="utf-8")
+    r5 = _run([*RP, "run", "--project", P], cwd=tmp)
+    record("N: a short reason or a tolerance above 1e-6 is refused", r4.returncode == 1 and
+           r5.returncode == 1 and "above 1e-6" in r5.stdout, r5.stdout[-100:])
+    tol.unlink()
+
+    escape = code / "04_escape.py"
+    escape.write_text("import os\nfrom pathlib import Path\nfrom wfcore.paths import project_dir\n"
+                      "Path(os.environ['ORIG_PAPER'], 'x.txt').write_text('x')\n", encoding="utf-8")
+    r6 = _run([*RP, "run", "--project", P], env=_env(ORIG_PAPER=P), cwd=tmp)
+    rep6 = _json.loads(report.read_text(encoding="utf-8"))
+    record("N: a script writing into the original paper is caught",
+           r6.returncode == 2 and rep6.get("paper_changes") == ["x.txt"], str(rep6.get("paper_changes")))
+    escape.unlink()
+    (P / "x.txt").unlink(missing_ok=True)
+    failing = code / "05_fail.py"
+    failing.write_text("raise SystemExit(1)\n", encoding="utf-8")
+    r7 = _run([*RP, "run", "--project", P], cwd=tmp)
+    rep7 = _json.loads(report.read_text(encoding="utf-8"))
+    g = _gate("analysis_reproduces", P, stage="S06_protocol_final")
+    record("N: a failing script is recorded and the gate fails",
+           r7.returncode == 2 and rep7.get("failed_script") == "03_analysis/code/05_fail.py" and not g.ok)
+    failing.unlink()
+    r8 = _run([*RP, "run", "--project", P], cwd=tmp)
+    g = _gate("analysis_reproduces", P, stage="S23_package")
+    record("the gate passes again after a clean re-run (S23 declaration)", r8.returncode == 0 and g.ok,
+           g.detail[:100])
+    report.unlink()
+    g = _gate("analysis_reproduces", P, stage="S06_protocol_final")
+    record("N: a missing report fails", not g.ok)
+
+
+def _r_script(path: Path, body: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        'source(file.path(Sys.getenv("MEDPAPER_ROOT"), "tools/figures/R/medfig.R"))\n'
+        'source(file.path(Sys.getenv("MEDPAPER_ROOT"), "tools/figures/R/recipes.R"))\n'
+        "suppressPackageStartupMessages(library(patchwork))\n" + body, encoding="utf-8")
+
+
+def run_r_figures(tmp: Path) -> None:
+    import json as _json
+    import struct
+    import zlib
+    section("R figures: save_medpaper renders what qc.py judges")
+    if not shutil.which("Rscript"):
+        record("R figures: Rscript available", False, "Rscript missing; R is the default figure engine")
+        return
+    from figures import qc
+    P = _new_paper(tmp / "figpaper")
+    (P / "03_analysis/results").mkdir(parents=True)
+    (P / "03_analysis/results/primary.json").write_text(_json.dumps(
+        {"hr": 1.87, "hr_low": 1.20, "hr_high": 2.91, "p": 0.00021}), encoding="utf-8")
+    plan = {"main_figures": [
+        {"id": "Figure 1", "archetype": "km_survival", "width": "single",
+         "file": "05_figures/out/Figure1.png", "tiff": "05_figures/out/Figure1.tiff"},
+        {"id": "Figure 2", "archetype": "forest_plot", "width": "double",
+         "file": "05_figures/out/Figure2.png", "tiff": "05_figures/out/Figure2.tiff"},
+        {"id": "Figure 3", "archetype": "box_jitter", "width": "double",
+         "file": "05_figures/out/Figure3.png", "tiff": "05_figures/out/Figure3.tiff"}],
+        "supp_figures": []}
+    (P / "01_protocol").mkdir(exist_ok=True)
+    (P / "01_protocol/artifact_plan.json").write_text(_json.dumps(plan), encoding="utf-8")
+    _r_script(P / "05_figures/code/fig_r.R", r'''
+res <- jsonlite::fromJSON(medpaper_path("03_analysis/results/primary.json"), simplifyVector = FALSE)
+set.seed(1)
+dat <- data.frame(time = rexp(150, 0.05), status = rbinom(150, 1, 0.7), arm = sample(c("A", "B"), 150, TRUE))
+p1 <- recipe_km(dat, "time", "status", "arm", times = c(0, 10, 20, 30), hr = res$hr, hr_ci = c(res$hr_low, res$hr_high), p = res$p)
+save_medpaper(p1, "05_figures/out/Figure1", width = "single")
+rows <- data.frame(label = c("Overall", "Age < 65", "Age >= 65", "Women"), estimate = c(res$hr, 1.5, 2.1, 1.7),
+                   ci_low = c(res$hr_low, 0.9, 1.3, 1.0), ci_high = c(res$hr_high, 2.5, 3.4, 2.9))
+save_medpaper(recipe_forest(rows), "05_figures/out/Figure2", width = "double", height_mm = 60)
+fa <- ggplot(mtcars, aes(wt, mpg)) + geom_point() + facet_wrap(~cyl) + labs(x = "Weight", y = "MPG") + theme_medpaper()
+fb <- ggplot(mtcars, aes(factor(cyl), mpg)) + geom_boxplot() + geom_jitter(width = 0.1) + labs(x = "Cylinders", y = "MPG") + theme_medpaper()
+save_medpaper(fa + fb + plot_layout(widths = c(3, 1)) + plot_annotation(tag_levels = "A"), "05_figures/out/Figure3", width = "double", height_mm = 70, archetype = "box_jitter")
+q <- ggplot(mtcars, aes(wt, mpg, colour = factor(cyl))) + geom_point() + labs(x = "Weight", y = "MPG", colour = "Cylinders") + theme_medpaper() + theme(legend.position = "top")
+save_medpaper(q, "05_figures/out/Single", width = "single")
+library(survival)
+fit <- ggsurvfit::survfit2(Surv(time, status) ~ arm, data = dat)
+raw <- ggsurvfit::ggsurvfit(fit) + ggsurvfit::add_censor_mark() + ggsurvfit::add_risktable() + theme_medpaper()
+save_medpaper(raw, "05_figures/out/RawKM", width = "single", archetype = "km_survival")
+d2 <- data.frame(time = rexp(150, 0.05), status = factor(sample(c("censor", "event", "death"), 150, TRUE), levels = c("censor", "event", "death")), arm = sample(c("A", "B"), 150, TRUE))
+save_medpaper(recipe_cif(d2, "time", "status", "arm", times = c(0, 10, 20, 30)), "05_figures/out/CIF", width = "single")
+w <- tryCatch({ medpaper_palette("nejm"); "none" }, warning = function(w) conditionMessage(w))
+w2 <- tryCatch({ medpaper_palette("okabe_ito"); "none" }, warning = function(w) conditionMessage(w))
+same <- identical(suppressWarnings(medpaper_palette("nature")), suppressWarnings(medpaper_palette("npg")))
+cat("PALETTE_WARN", grepl("red/green", w), "OKABE_WARN", w2 != "none", "NATURE_NPG", same, "\n")
+cat("RISKY", paste(sort(.MF_RISKY), collapse = ","), "\n")
+cat("TMPPNG", length(list.files(tempdir(), "\\.png$")), "\n")
+t <- medpaper_targets(); cat("TARGETS", t$column_width_mm_single, t$column_width_mm_double, t$column_width_mm_1_5, "\n")
+''')
+    env = _env(MEDPAPER_PROJECT=P)
+    p = _wf("run-script", "05_figures/code/fig_r.R", env=env, cwd=tmp)
+    out_dir = P / "05_figures/out"
+    record("a real Rscript render through wf run-script succeeds", p.returncode == 0, _out(p)[-300:])
+
+    def png_size(path: Path):
+        b = path.read_bytes()
+        return struct.unpack(">II", b[16:24])
+    def png_pixels(path: Path) -> bytes:
+        b = path.read_bytes(); i = 8; data = b""; ihdr = b""
+        while i < len(b):
+            n = struct.unpack(">I", b[i:i + 4])[0]; kind = b[i + 4:i + 8]
+            if kind == b"IHDR":
+                ihdr = b[i + 8:i + 8 + n]
+            if kind == b"IDAT":
+                data += b[i + 8:i + 8 + n]
+            i += 12 + n
+        return ihdr + zlib.decompress(data)
+    def tiff_info(path: Path):
+        b = path.read_bytes()
+        end = "<" if b[:2] == b"II" else ">"
+        off = struct.unpack(end + "I", b[4:8])[0]
+        n = struct.unpack(end + "H", b[off:off + 2])[0]
+        tags = {}
+        for k in range(n):
+            e = b[off + 2 + 12 * k: off + 14 + 12 * k]
+            tag, typ, cnt = struct.unpack(end + "HHI", e[:8])
+            val = struct.unpack(end + ("H" if typ == 3 else "I"), e[8:10] if typ == 3 else e[8:12])[0]
+            tags[tag] = val
+        return tags
+
+    if p.returncode == 0:
+        w1, _ = png_size(out_dir / "Figure1.png")
+        w2, _ = png_size(out_dir / "Figure2.png")
+        record("PNG width is the physical column width at 600 dpi (within 1 px)",
+               abs(w1 - 90 / 25.4 * 600) < 1 and abs(w2 - 180 / 25.4 * 600) < 1, f"{w1}, {w2}")
+        tags = tiff_info(out_dir / "Figure1.tiff")
+        record("TIFF master exists, same width, LZW compressed",
+               tags.get(256) == w1 and tags.get(259) == 5, str({k: tags.get(k) for k in (256, 259)}))
+    side = {n: _json.loads((P / f"05_figures/qc/{n}.artist.json").read_text(encoding="utf-8"))
+            for n in ("Figure1", "Figure2", "Figure3", "Single", "RawKM", "CIF")
+            if (P / f"05_figures/qc/{n}.artist.json").is_file()}
+    record("sidecar keys are qc.SIDECAR_KEYS plus engine = R, at 05_figures/qc/<stem>.artist.json",
+           len(side) == 6 and all(set(s) == set(qc.SIDECAR_KEYS) | {"engine"} and s["engine"] == "R"
+                                  and s["figure"] == n for n, s in side.items())
+           and not (P / "05_figures/qc/05_figures").exists(), str(list(side)))
+    from figures import elements as el
+    record("every sidecar carries all 25 detector keys",
+           all(set(el.DETECTORS) <= set(s["elements"]) for s in side.values()))
+    n_axes = {n: s["n_axes"] for n, s in side.items()}
+    record("n_axes is measured from the grob tree (single 1, facet+box 4, recipe_km 2, raw ggsurvfit 3)",
+           n_axes.get("Single") == 1 and n_axes.get("Figure3") == 4 and n_axes.get("Figure1") == 2
+           and n_axes.get("RawKM") == 3, str(n_axes))
+    record("no positive R fixture reports a panel overlap",
+           not any(s["axes_tightbbox_overlaps"] for s in side.values()),
+           str({n: s["axes_tightbbox_overlaps"][:1] for n, s in side.items() if s["axes_tightbbox_overlaps"]}))
+    e1, er, ec = side.get("Figure1", {}).get("elements", {}), side.get("RawKM", {}).get("elements", {}), side.get("CIF", {}).get("elements", {})
+    record("KM elements are detected for recipe_km and raw ggsurvfit + add_risktable",
+           all(e1.get(k, {}).get("found") for k in ("step_curve", "censoring_marks", "risk_table", "legend_present", "figure_statistics"))
+           and all(er.get(k, {}).get("found") for k in ("step_curve", "censoring_marks", "risk_table")),
+           str({k: er.get(k, {}).get("found") for k in ("step_curve", "censoring_marks", "risk_table")}))
+    record("recipe_cif finds its step curve and risk table",
+           ec.get("step_curve", {}).get("found") and ec.get("risk_table", {}).get("found"))
+    record("palettes: nejm warns, okabe_ito does not, nature == npg, risky set parity",
+           "PALETTE_WARN TRUE OKABE_WARN FALSE NATURE_NPG TRUE" in p.stdout
+           and f"RISKY {','.join(sorted(__import__('figures.style', fromlist=['x']).RISKY_PAIRS | {'npg'}))}" in p.stdout,
+           [l for l in p.stdout.splitlines() if l.startswith(("PALETTE", "RISKY"))].__str__())
+    record("the audit device leaves no PNG in R's tempdir", "TMPPNG 0" in p.stdout)
+
+    q = _run([sys.executable, ROOT / "tools/figures/qc.py", "--all"], env=env, cwd=P)
+    rep = _json.loads((P / "05_figures/qc/qc_report.json").read_text(encoding="utf-8")) if (P / "05_figures/qc/qc_report.json").is_file() else {"figures": []}
+    figs = {f["id"]: {c["name"]: c for c in f["checks"]} for f in rep["figures"]}
+    wanted = ("not_clipped", "no_excess_whitespace", "margins_symmetric", "artist_audit_schema",
+              "min_font_size", "min_line_width", "no_panel_overlap", "no_text_clipped",
+              "no_missing_glyphs", "no_tick_label_collision", "no_interior_void")
+    bad = {fid: [n for n in wanted if not c.get(n, {}).get("ok")] for fid, c in figs.items()}
+    bad = {k: v for k, v in bad.items() if v}
+    record("qc.py --all passes every R figure (pixel margins included)",
+           q.returncode == 0 and len(figs) == 3 and not bad, str(bad)[:300] + _out(q)[-200:] if bad or q.returncode else "")
+    record("element:figure_statistics passes for recipe_km and recipe_forest",
+           figs.get("Figure 1", {}).get("element:figure_statistics", {}).get("ok")
+           and figs.get("Figure 2", {}).get("element:figure_statistics", {}).get("ok")
+           and figs.get("Figure 2", {}).get("element:null_line", {}).get("ok")
+           and figs.get("Figure 2", {}).get("element:error_bars", {}).get("ok"))
+    record("element checks for km_survival all pass",
+           all(figs.get("Figure 1", {}).get(f"element:{k}", {}).get("ok") for k in
+               ("step_curve", "censoring_marks", "risk_table", "legend_present", "figure_statistics")))
+
+    # determinism and width parity
+    _r_script(P / "05_figures/code/again.R", 'p <- ggplot(mtcars, aes(wt, mpg)) + geom_point() + labs(x = "W", y = "M") + theme_medpaper()\n'
+              'save_medpaper(p, "05_figures/out/Det1", width = "single")\nsave_medpaper(p, "05_figures/out/Det2", width = "single")\n')
+    _wf("config", "set", "column_width_mm_single", "85", env=env, cwd=tmp)
+    pa = _wf("run-script", "05_figures/code/again.R", env=env, cwd=tmp)
+    if pa.returncode == 0:
+        record("rendering the same plot twice gives identical pixels",
+               png_pixels(out_dir / "Det1.png") == png_pixels(out_dir / "Det2.png"))
+        wd, _ = png_size(out_dir / "Det1.png")
+        record("width parity: column_width_mm_single = 85 renders 85 mm at 600 dpi",
+               abs(wd - 85 / 25.4 * 600) < 1, str(wd))
+        with __import__("unittest.mock", fromlist=["patch"]).patch.dict(os.environ, {"MEDPAPER_PROJECT": str(P)}):
+            from wfcore import registry
+            tg = registry.effective_targets(P)
+            res_e = qc.qc_figure({"id": "D", "file": "05_figures/out/Det1.png", "width": "single",
+                                  "tiff": "05_figures/out/Det1.tiff"}, tg, qc.load_archetypes())
+        record("qc's effective dpi uses the paper's column width (~600, not ~567)",
+               abs(res_e["effective_dpi"] - 600) < 2, str(res_e["effective_dpi"]))
+    else:
+        record("determinism render", False, _out(pa)[-200:])
+    _wf("config", "set", "column_width_mm_single", "90", env=env, cwd=tmp)
+
+    # known-defect negatives, one Rscript run
+    _r_script(P / "05_figures/code/defects.R", r'''
+base <- ggplot(mtcars, aes(wt, mpg)) + geom_point() + labs(x = "Weight", y = "MPG")
+save_medpaper(base + theme_medpaper() + theme(axis.text = element_text(size = 4)), "05_figures/out/Font", width = "single")
+save_medpaper(base + theme_medpaper() + theme(axis.line = element_line(linewidth = pt_to_linewidth(0.2))), "05_figures/out/Line", width = "single")
+save_medpaper(base + theme_medpaper() + coord_cartesian(clip = "off") + annotate("text", x = 30, y = 20, hjust = 0, label = "far outside label"), "05_figures/out/Clip", width = "single")
+bars <- data.frame(g = c("a", "b", "c"), v = c(70, 80, 90))
+save_medpaper(ggplot(bars, aes(g, v)) + geom_col() + coord_cartesian(ylim = c(50, 100)) + labs(x = "G", y = "V") + theme_medpaper(), "05_figures/out/Base", width = "single")
+save_medpaper(base + theme_medpaper() + annotate("text", x = 3, y = 30, label = "\u4e2d"), "05_figures/out/Glyph", width = "single")
+lab <- data.frame(g = paste("a very long category label", 1:30), v = 1:30)
+save_medpaper(ggplot(lab, aes(g, v)) + geom_point() + labs(x = "G", y = "V") + theme_medpaper(), "05_figures/out/Tick", width = "single")
+save_medpaper(base + theme_medpaper() + inset_element(base + theme_medpaper(), 0.3, 0.3, 0.9, 0.9), "05_figures/out/Inset", width = "single")
+save_medpaper(ggplot(data.frame(t = c(0, 1, 2, 3), s = c(1, 0.8, 0.6, 0.5)), aes(t, s)) + geom_step() + labs(x = "T", y = "S") + theme_medpaper(), "05_figures/out/NoRisk", width = "single", archetype = "km_survival")
+nums <- ggplot(mtcars, aes(wt, mpg)) + geom_point() + labs(x = "Weight", y = "Miles") + theme_medpaper()
+save_medpaper(nums, "05_figures/out/TicksOnly", width = "single")
+''')
+    pd_ = _wf("run-script", "05_figures/code/defects.R", env=env, cwd=tmp)
+    expected = {"Font": "min_font_size", "Line": "min_line_width", "Clip": "no_text_clipped",
+                "Base": "bar_baseline_zero", "Glyph": "no_missing_glyphs",
+                "Tick": "no_tick_label_collision", "Inset": "no_panel_overlap",
+                "NoRisk": "element:risk_table"}
+    missed = []
+    with __import__("unittest.mock", fromlist=["patch"]).patch.dict(os.environ, {"MEDPAPER_PROJECT": str(P)}):
+        from wfcore import registry
+        tg = registry.effective_targets(P)
+        arch = qc.load_archetypes()
+        for stem, check in expected.items():
+            entry = {"id": stem, "file": f"05_figures/out/{stem}.png", "width": "single",
+                     "tiff": f"05_figures/out/{stem}.tiff",
+                     "archetype": "km_survival" if stem == "NoRisk" else None}
+            r = qc.qc_figure(entry, tg, arch)
+            c = {x["name"]: x for x in r["checks"]}
+            if c.get(check, {}).get("ok", True):
+                missed.append(stem)
+    record("known R defects are each caught by qc.py (font, line, clipping, baseline, glyph, ticks, overlap, risk table)",
+           pd_.returncode == 0 and not missed, f"missed={missed} " + _out(pd_)[-200:])
+    ticks_only = _json.loads((P / "05_figures/qc/TicksOnly.artist.json").read_text(encoding="utf-8")) if (P / "05_figures/qc/TicksOnly.artist.json").is_file() else {}
+    record("tick labels never count as figure statistics",
+           ticks_only.get("elements", {}).get("figure_statistics", {}).get("found") is False)
+
+    # the normaliser is what makes margins pass: a raw agg_png render fails margins_symmetric
+    raw = P / "05_figures/code/raw.R"
+    raw.write_text('library(ggplot2)\nPROJECT <- Sys.getenv("MEDPAPER_PROJECT")\n'
+                   'p <- ggplot(mtcars, aes(wt, mpg)) + geom_point() + theme_classic(7) + theme(plot.margin = margin(1.3, 1.3, 1.3, 1.3, "mm"))\n'
+                   'ragg::agg_png(file.path(PROJECT, "05_figures/out/Raw.png"), width = 90, height = 64.8, units = "mm", res = 600, background = "white")\n'
+                   'print(p)\ninvisible(dev.off())\n', encoding="utf-8")
+    pr = _wf("run-script", "05_figures/code/raw.R", env=env, cwd=tmp)
+    if (P / "05_figures/qc/Single.artist.json").is_file():
+        hand = dict(side.get("Single", {}))
+        hand["figure"] = "Raw"
+        (P / "05_figures/qc/Raw.artist.json").write_text(_json.dumps(hand), encoding="utf-8")
+    with __import__("unittest.mock", fromlist=["patch"]).patch.dict(os.environ, {"MEDPAPER_PROJECT": str(P)}):
+        r = qc.qc_figure({"id": "Raw", "file": "05_figures/out/Raw.png", "width": "single"}, tg, arch)
+    c = {x["name"]: x for x in r["checks"]}
+    record("N: the same plot rendered without save_medpaper fails margins_symmetric",
+           pr.returncode == 0 and c.get("margins_symmetric", {}).get("ok") is False,
+           c.get("margins_symmetric", {}).get("detail", _out(pr)[-100:]))
+
+    # refusals: nothing written
+    refusals = {
+        "outside": 'save_medpaper(ggplot(), "../outside/X")\n',
+        "engine": f'save_medpaper(ggplot(), "{ROOT.as_posix()}/tools/X")\n',
+        "alias": 'save_medpaper(ggplot(), "project/05_figures/out/X")\n',
+        "character": 'recipe_km(data.frame(time = 1:5, status = 1, arm = "a"), "time", "status", "arm", times = 0:4, hr = "1.87")\n',
+        "gtable": 'save_medpaper(ggplotGrob(ggplot()), "05_figures/out/G")\n',
+        "palette": 'medpaper_palette("rainbow")\n',
+    }
+    rc = {}
+    for k, body in refusals.items():
+        _r_script(P / f"05_figures/code/ref_{k}.R", body)
+        rc[k] = _wf("run-script", f"05_figures/code/ref_{k}.R", env=env, cwd=tmp).returncode
+    _r_script(P / "05_figures/code/ref_unset.R", 'save_medpaper(ggplot(), "05_figures/out/U")\n')
+    unset = _run(["Rscript", P / "05_figures/code/ref_unset.R"],
+                 env=_env(MEDPAPER_ROOT=ROOT, MEDPAPER_PROJECT=None), cwd=tmp)
+    rc["unset"] = unset.returncode
+    _r_script(P / "05_figures/code/ref_inengine.R", 'save_medpaper(ggplot(), "05_figures/out/E")\n')
+    ie = _run(["Rscript", P / "05_figures/code/ref_inengine.R"],
+              env=_env(MEDPAPER_ROOT=ROOT, MEDPAPER_PROJECT=ROOT / "project"), cwd=tmp)
+    rc["MEDPAPER_PROJECT in engine"] = ie.returncode
+    fake = tmp / "fake_r_engine"
+    (fake / "pipeline").mkdir(parents=True)
+    (fake / "pipeline/pipeline.toml").write_text("[targets]\n", encoding="utf-8")
+    only_recipes = P / "05_figures/code/ref_recipes.R"
+    only_recipes.write_text(f'source("{ROOT.as_posix()}/tools/figures/R/recipes.R")\n'
+                            'save_medpaper(ggplot(), "05_figures/out/F")\n', encoding="utf-8")
+    fr = _run(["Rscript", only_recipes], env=_env(MEDPAPER_ROOT=fake, MEDPAPER_PROJECT=ROOT / "x"), cwd=tmp)
+    rc["recipes.R with fake MEDPAPER_ROOT"] = fr.returncode
+    mr = P / "05_figures/code/ref_results.R"
+    mr.write_text(f'source("{ROOT.as_posix()}/tools/R/medresults.R")\nwrite_results(list(a = 1), "z")\n', encoding="utf-8")
+    rc["write_results into engine"] = _run(["Rscript", mr], env=_env(MEDPAPER_ROOT=fake, MEDPAPER_PROJECT=ROOT / "x"), cwd=tmp).returncode
+    stray = [n for n in ("X", "G", "U", "E", "F") if (out_dir / f"{n}.png").exists()]
+    record("save_medpaper/recipes/write_results refuse bad stems, the engine, strings, gtables, unknown palettes",
+           all(v != 0 for v in rc.values()) and not stray and not (ROOT / "project").exists()
+           and not (ROOT / "x").exists() and not (P / "05_figures/outside").exists()
+           and not (tmp / "figpaper/../outside").exists(), f"{rc} stray={stray}")
+    record("no Rplots.pdf is left in the paper or the cwd",
+           not (P / "Rplots.pdf").exists() and not (tmp / "Rplots.pdf").exists())
+
+    # Python sidecar schema and engine policy
+    with __import__("unittest.mock", fromlist=["patch"]).patch.dict(os.environ, {"MEDPAPER_PROJECT": str(P)}):
+        legacy = dict(side.get("Single", {}))
+        legacy.pop("engine", None)
+        legacy["figure"] = "Single"
+        (P / "05_figures/qc/Single.artist.json").write_text(_json.dumps(legacy), encoding="utf-8")
+        r = qc.qc_figure({"id": "S", "file": "05_figures/out/Single.png", "width": "single"}, tg, arch)
+        c = {x["name"]: x for x in r["checks"]}
+        legacy_ok = c.get("artist_audit_schema", {}).get("ok") and c.get("engine_matches_policy", {}).get("severity") == "warn"
+        broken = dict(legacy); broken.pop("interior_voids")
+        (P / "05_figures/qc/Single.artist.json").write_text(_json.dumps(broken), encoding="utf-8")
+        r = qc.qc_figure({"id": "S", "file": "05_figures/out/Single.png", "width": "single"}, tg, arch)
+        miss = not {x["name"]: x for x in r["checks"]}["artist_audit_schema"]["ok"]
+        extra = dict(legacy); extra["surprise"] = 1
+        (P / "05_figures/qc/Single.artist.json").write_text(_json.dumps(extra), encoding="utf-8")
+        r = qc.qc_figure({"id": "S", "file": "05_figures/out/Single.png", "width": "single"}, tg, arch)
+        ext = not {x["name"]: x for x in r["checks"]}["artist_audit_schema"]["ok"]
+    record("a legacy sidecar without engine passes the schema and only warns on engine policy", bool(legacy_ok))
+    record("N: a sidecar missing a key or with an extra key fails artist_audit_schema", miss and ext)
+
+
+def run_reporting_checklist(tmp: Path) -> None:
+    from wfcore import scifreeze
+    from wfcore.checks import reporting as rp
+    section("reporting-guideline checklist")
+    reg = rp.load_registry()
+    counts = {g: len(reg[g]["items"]) for g in ("STROBE", "CONSORT", "STARD", "TRIPOD", "PRISMA",
+                                                  "SPIRIT", "CARE", "CHEERS")}
+    record("registry structure is valid and item counts match the official lists",
+           not rp.registry_problems(reg) and counts == {"STROBE": 34, "CONSORT": 37, "STARD": 34,
+           "TRIPOD": 37, "PRISMA": 42, "SPIRIT": 51, "CARE": 30, "CHEERS": 28}, str(counts))
+    det = {s: rp.detect_guidelines(s, reg) for s in (
+        "CONSORT 2025", "TRIPOD+AI", "STROBE-MR", "standard care", "CARE",
+        "in the spirit of the original trial", "SPIRIT 2013", "three cheers", "a squire",
+        "CHEERS 2022")}
+    record("alias detection: longest first, boundaries, case-sensitive English words",
+           det == {"CONSORT 2025": ["CONSORT-2025"], "TRIPOD+AI": ["TRIPOD+AI"], "STROBE-MR": [],
+                   "standard care": [], "CARE": ["CARE"], "in the spirit of the original trial": [],
+                   "SPIRIT 2013": ["SPIRIT"], "three cheers": [], "a squire": [],
+                   "CHEERS 2022": ["CHEERS"]}, str(det))
+    P = _new_paper(tmp / "checkpaper")
+    (P / "01_protocol").mkdir(exist_ok=True)
+    (P / "08_submission/manuscript").mkdir(parents=True)
+
+    def protocol(body: str):
+        (P / "01_protocol/protocol_final.md").write_text(f"# Protocol\n\n## Reporting guideline\n{body}\n\n## Ethics\nx\n", encoding="utf-8")
+    heads = ["Introduction", "2.1 Study design", "Methods", "Results", "Discussion"]
+    (P / "08_submission/manuscript/full_manuscript.md").write_text(
+        "# A cohort study title\n\n" + "".join(f"## {h}\ntext\n\n" for h in heads), encoding="utf-8")
+    items = [i["id"] for i in reg["STROBE"]["items"]]
+
+    def checklist(rows=None, guideline="STROBE"):
+        rows = rows if rows is not None else [(i, "Reported", "Methods", "") for i in items]
+        body = "\n".join(f"| {a} | {b} | {c} | {d} |" for a, b, c, d in rows)
+        (P / "08_submission/reporting_checklist.md").write_text(
+            f"# Reporting checklist\n\nGuideline: {guideline}\n\n| Item | Status | Location | Reason |\n|---|---|---|---|\n{body}\n",
+            encoding="utf-8")
+
+    def gate(**spec):
+        return _gate("reporting_checklist_complete", P, stage="S23_package", **spec)
+    protocol("Guideline: STROBE")
+    checklist()
+    g = gate()
+    record("a complete checklist against the variant passes", g.ok, g.detail[:120])
+    base = [(i, "Reported", "Methods", "") for i in items]
+    negs = {
+        "missing item": base[1:],
+        "duplicate": base + [base[0]],
+        "unknown id": base + [("99z", "Reported", "Methods", "")],
+        "absent heading": [(items[0], "Reported", "Methods 2", "")] + base[1:],
+        "short reason": [(items[0], "Not applicable", "", "too short")] + base[1:],
+        "bad status": [(items[0], "Partly", "Methods", "")] + base[1:],
+    }
+    failed = {}
+    for k, rows in negs.items():
+        checklist(rows)
+        failed[k] = not gate().ok
+    record("N: missing, duplicate, unknown, unresolved, short-reason and bad-status rows fail",
+           all(failed.values()), str(failed))
+    checklist(guideline="CONSORT")
+    record("N: a checklist for another guideline fails", not gate().ok)
+    protocol("Guideline: TRIPOD+AI")
+    g = gate()
+    w = _gate("reporting_checklist_complete", P, stage="S06_protocol_final", guideline_only=True, severity="warn")
+    record("N: an unverified guideline fails, and the S06 variant only warns",
+           not g.ok and "verify = true" in g.detail and not w.ok and w.severity == "warn")
+    protocol("Guideline: PRISMA-ScR")
+    record("N: an unregistered Guideline: line fails", "unregistered guideline on a Guideline: line" in gate().detail)
+    protocol("We follow PRISMA-ScR.")
+    record("N: a protocol naming no registered guideline fails", "names no registered guideline" in gate().detail)
+    protocol("Guideline: STROBE\n\nCONSORT does not apply as this is not a trial.")
+    checklist()
+    ok1 = gate().ok
+    protocol("STROBE applies. CONSORT does not apply as this is not a trial.")
+    g2 = gate()
+    record("explicit Guideline: lines win over prose; prose fallback detects both",
+           ok1 and not g2.ok and "do not match the protocol" in g2.detail)
+    protocol("Guideline: STROBE")
+    rows = [(items[0], "Reported", "Title", ""), (items[1], "Reported", "Study design", "")] + base[2:]
+    checklist(rows)
+    record("Title resolves to the H1 and numbered headings match without their numbers", gate().ok)
+    sup = P / "08_submission/manuscript/supplementary_methods.md"
+    rows = [(items[0], "Reported", "Supplementary Methods > Sensitivity analyses", ""),
+            (items[1], "Reported", "Title page; Statements > Funding", "")] + base[2:]
+    checklist(rows)
+    absent = not gate().ok
+    sup.write_text("# Supplementary Methods\n## Sensitivity analyses\nx\n", encoding="utf-8")
+    (P / "08_submission/manuscript/title_page.md").write_text("# Title page\nx\n", encoding="utf-8")
+    (P / "08_submission/manuscript/statements.md").write_text("# Statements\n## Funding\nnone\n", encoding="utf-8")
+    present = gate().ok
+    checklist([(items[0], "Reported", "Nonexistent doc > X", "")] + base[1:])
+    record("locations resolve across the variant's documents",
+           absent and present and not gate().ok)
+    record("the checklist is journal-downstream (cleared on a journal switch)",
+           "08_submission/reporting_checklist.md" in scifreeze.JOURNAL_DOWNSTREAM)
+
+
+def run_new_wiring() -> None:
+    import tomllib
+    from wfcore import cli, overrides, registry
+    from wfcore.checks import known
+    section("1.5.0 gate wiring")
+    names = {"results_have_environment", "analysis_reproduces", "reporting_checklist_complete"}
+    pipe = tomllib.loads((ROOT / "pipeline/pipeline.toml").read_text(encoding="utf-8"))
+    used = {g["check"] for s in pipe["stage"] for g in s.get("gate", [])}
+    record("the three new gates are registered and used", names <= set(known()) and names <= used)
+    record("they are non-overridable and protected; PROTECTED >= NON_OVERRIDABLE",
+           names <= cli.NON_OVERRIDABLE_GATES and names <= overrides.PROTECTED_CHECKS
+           and cli.NON_OVERRIDABLE_GATES <= overrides.PROTECTED_CHECKS)
+    pairs = {(s["id"], g["check"]) for s in pipe["stage"] for g in s.get("gate", []) if g["check"] in names}
+    expected = {("S04_data", "results_have_environment"), ("S05_analysis", "results_have_environment"),
+                ("S06_protocol_final", "results_have_environment"), ("S06_protocol_final", "analysis_reproduces"),
+                ("S17_assemble", "analysis_reproduces"), ("S23_package", "analysis_reproduces"),
+                ("S25_submission_audit", "analysis_reproduces"),
+                ("S06_protocol_final", "reporting_checklist_complete"),
+                ("S23_package", "reporting_checklist_complete"),
+                ("S24_package_human_review", "reporting_checklist_complete"),
+                ("S25_submission_audit", "reporting_checklist_complete")}
+    record("declarations match the specification", pairs == expected, str(sorted(pairs ^ expected)))
+    stages = registry.load().stages
+    reason = "This paper genuinely needs a different shape for this stage, explained here at length."
+    relax_refused = all(overrides.validate({"schema": 1, "stage_override": [
+        {"stage": sid, "reason": reason, "relax_gate": [chk]}]}, stages) for sid, chk in expected)
+    skip_refused = all(overrides.validate({"schema": 1, "stage_override": [
+        {"stage": sid, "reason": reason, "skip": True}]}, stages)
+        for sid in ("S04_data", "S05_analysis", "S06_protocol_final", "S17_assemble", "S23_package",
+                    "S24_package_human_review", "S25_submission_audit"))
+    record("overrides cannot relax the new gates or skip their stages", relax_refused and skip_refused)
+    s06 = next(s for s in pipe["stage"] if s["id"] == "S06_protocol_final")
+    s23 = next(s for s in pipe["stage"] if s["id"] == "S23_package")
+    record("S06 declares the reproducibility report, S23 the checklist, [freeform] the tolerance file",
+           "03_analysis/reproducibility_report.json" in s06["outputs"]
+           and "08_submission/reporting_checklist.md" in s23["outputs"]
+           and "03_analysis/reproducibility.toml" in pipe["freeform"]["globs"])
+    warn = next(g for g in s06["gate"] if g["check"] == "reporting_checklist_complete")
+    record("the S06 checklist gate is the guideline_only warn variant",
+           warn.get("guideline_only") is True and warn.get("severity") == "warn")
+
+
+
+# ---------------------------------------------------------------------------
 def main() -> int:
     ap = argparse.ArgumentParser(description="self test for the medpaper toolchain")
     ap.add_argument("--keep", action="store_true", help="do not delete the temp project")
@@ -3421,15 +4617,35 @@ def main() -> int:
                   f"  uv pip install --python .venv/Scripts/python.exe {mod}")
             return 1
 
+    from wfcore import paths as _paths
     if args.workdir:
         tmp = args.workdir.resolve()
+        if _paths.in_engine(tmp):
+            print(f"cannot run: --workdir is inside the engine: {tmp}")
+            return 1
         tmp.mkdir(parents=True, exist_ok=True)
         if any(tmp.iterdir()):
             print(f"cannot run: --workdir must be empty: {tmp}")
             return 1
     else:
+        if _paths.in_engine(Path(tempfile.gettempdir()).resolve()):
+            print("cannot run: the system temp directory is inside the engine")
+            return 1
         tmp = Path(tempfile.mkdtemp(prefix="medpaper_selftest_"))
     proj = tmp / "project"
+    # Isolation: no test may touch the real papers root or the user's ~/.medpaper.
+    real_root = ROOT.parent / "medpaper_papers"
+    real_home = Path.home() / ".medpaper"
+
+    def _listing(d: Path):
+        if not d.exists():
+            return None
+        return sorted((x.relative_to(d).as_posix(), x.stat().st_mtime_ns)
+                      for x in d.rglob("*"))
+    real_before = (_listing(real_root), _listing(real_home))
+    os.environ["MEDPAPER_HOME"] = str(tmp / "home")
+    os.environ["MEDPAPER_PAPERS_ROOT"] = str(tmp / "papers")
+    engine_top_before = sorted(x.name for x in ROOT.iterdir())
     os.environ["MEDPAPER_PROJECT"] = str(proj)
     os.environ["MEDPAPER_ROOT"] = str(ROOT)
     os.environ["MEDPAPER_SELFTEST_ROOT"] = str(tmp)
@@ -3455,6 +4671,23 @@ def main() -> int:
         run_journal_eligibility(proj)
         run_manuscript_docx(proj)
         run_polish(proj)
+        purity = tmp / "purity"
+        purity.mkdir()
+        run_engine_purity(purity)
+        run_language_policy()
+        run_no_plot_calls_r()
+        run_results_environment(tmp / "receipts_root")
+        run_reproduce(tmp / "repro_root")
+        run_r_figures(tmp / "rfig_root")
+        run_reporting_checklist(tmp / "checklist_root")
+        run_new_wiring()
+        section("isolation")
+        record("selftest did not touch the real papers root or user home",
+               (_listing(real_root), _listing(real_home)) == real_before)
+        record("selftest left the engine's top level unchanged",
+               sorted(x.name for x in ROOT.iterdir()) == engine_top_before
+               and not any((ROOT / n).exists() for n in ("project", "papers", "temp", ".wf", "Rplots.pdf")),
+               str(sorted(set(x.name for x in ROOT.iterdir()) ^ set(engine_top_before))))
         if args.online:
             run_online(proj)
     finally:

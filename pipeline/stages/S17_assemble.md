@@ -42,6 +42,8 @@ source for review, user editing, polishing and packaging.
    keywords or legend file and re-run the assembler; do not hand-splice the first build.
    The S17 gate runs `assemble.py --check`, so omissions or manual divergence fail even
    when the visible heading structure still looks valid.
+6. `analysis_reproduces` is re-checked here: any analysis code, raw data or results edit since
+   the S06 proof needs a new `tools/reproduce.py run` before S17 can close.
 
 ## Outputs
 - `07_manuscript/title.md`

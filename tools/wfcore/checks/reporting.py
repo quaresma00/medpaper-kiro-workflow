@@ -1,0 +1,306 @@
+"""Reporting-guideline checklist gate (S06 early warning; S23/S24/S25 blocking)."""
+from __future__ import annotations
+
+import re
+import tomllib
+from pathlib import Path
+
+from . import Ctx, Result, check
+from .. import paths
+
+REGISTRY_REL = "reporting_guidelines.toml"
+CHECKLIST_REL = "08_submission/reporting_checklist.md"
+MANUSCRIPT_REL = "08_submission/manuscript/full_manuscript.md"
+DEFAULT_DOCUMENTS = {
+    "Supplementary Methods": "08_submission/manuscript/supplementary_methods.md",
+    "Title page": "08_submission/manuscript/title_page.md",
+    "Statements": "08_submission/manuscript/statements.md",
+}
+_B_LEFT = r"(?<![A-Za-z0-9+\-])"
+_B_RIGHT = r"(?![A-Za-z0-9+\-])"
+_HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
+_GUIDELINE_LINE = re.compile(r"^\s*[-*]?\s*Guideline:\s*(.+?)\s*$", re.I)
+
+
+def load_registry(path: Path | None = None) -> dict:
+    p = path or (paths.reference_dir() / REGISTRY_REL)
+    return tomllib.loads(p.read_text(encoding="utf-8")).get("guideline", {})
+
+
+def registry_problems(reg: dict) -> list[str]:
+    problems, seen = [], {}
+    for gid, g in reg.items():
+        aliases = g.get("aliases") or []
+        if not aliases:
+            problems.append(f"{gid}: aliases empty")
+        for a in aliases:
+            k = a.casefold()
+            if k in seen and seen[k] != gid:
+                problems.append(f"alias {a} used by {seen[k]} and {gid}")
+            seen[k] = gid
+        items = g.get("items", [])
+        if g.get("verify") is True and items:
+            problems.append(f"{gid}: verify = true must ship no items")
+        if g.get("verify") is False and not items:
+            problems.append(f"{gid}: verify = false needs items")
+        ids = [i.get("id") for i in items]
+        if len(ids) != len(set(ids)):
+            problems.append(f"{gid}: duplicate item ids")
+    return problems
+
+
+def _alias_re(alias: str) -> str:
+    return re.escape(alias).replace(r"\ ", r"[\s-]+")
+
+
+def detect_guidelines(text: str, reg: dict | None = None) -> list[str]:
+    reg = reg if reg is not None else load_registry()
+    found: list[tuple[int, str]] = []
+    for sensitive in (False, True):
+        pairs = [(a, gid) for gid, g in reg.items() if bool(g.get("case_sensitive")) == sensitive
+                 for a in g.get("aliases", [])]
+        if not pairs:
+            continue
+        pairs.sort(key=lambda p: -len(p[0]))
+        lookup = {(a if sensitive else a.casefold()): gid for a, gid in pairs}
+        rx = re.compile(_B_LEFT + "(" + "|".join(_alias_re(a) for a, _ in pairs) + ")" + _B_RIGHT,
+                        0 if sensitive else re.I)
+        for m in rx.finditer(text):
+            key = re.sub(r"[\s-]+", " ", m.group(1))
+            gid = None
+            for a, g in pairs:
+                if re.fullmatch(_alias_re(a), m.group(1), 0 if sensitive else re.I):
+                    gid = g
+                    break
+            if gid is None:
+                gid = lookup.get(key if sensitive else key.casefold())
+            if gid:
+                found.append((m.start(), gid))
+    out: list[str] = []
+    for _, gid in sorted(found):
+        if gid not in out:
+            out.append(gid)
+    return out
+
+
+def resolve_alias(value: str, reg: dict) -> str | None:
+    v = re.sub(r"\s+", " ", value.strip()).casefold()
+    for gid, g in reg.items():
+        if v == gid.casefold() or any(v == re.sub(r"\s+", " ", a).casefold()
+                                      for a in g.get("aliases", [])):
+            return gid
+    return None
+
+
+def normalise_heading(h: str) -> str:
+    h = re.sub(r"[*_`]", "", h)
+    h = re.sub(r"^\s*\d+(?:\.\d+)*\.?\s+", "", h)
+    h = re.sub(r"\s+", " ", h).strip().rstrip(":").strip()
+    return h.casefold()
+
+
+def headings(text: str) -> tuple[list[str], str | None]:
+    out, title = [], None
+    in_fence = False
+    for line in text.splitlines():
+        if line.strip().startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        m = _HEADING.match(line)
+        if m:
+            if title is None and len(m.group(1)) == 1:
+                title = m.group(2)
+            out.append(normalise_heading(m.group(2)))
+    return out, title
+
+
+def protocol_section(text: str) -> str | None:
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        m = _HEADING.match(line)
+        if m and "reporting guideline" in m.group(2).casefold():
+            level = len(m.group(1))
+            body = []
+            for nxt in lines[i + 1:]:
+                n = _HEADING.match(nxt)
+                if n and len(n.group(1)) <= level:
+                    break
+                body.append(nxt)
+            return "\n".join(body)
+    return None
+
+
+def protocol_guidelines(section: str, reg: dict) -> tuple[list[str], list[str]]:
+    """-> (guideline ids, problems). Explicit `Guideline:` lines win over prose detection."""
+    explicit = [m.group(1) for m in (_GUIDELINE_LINE.match(l) for l in section.splitlines()) if m]
+    if explicit:
+        ids, problems = [], []
+        for v in explicit:
+            gid = resolve_alias(v, reg)
+            if gid is None:
+                problems.append(f"unregistered guideline on a Guideline: line: {v}")
+            elif gid not in ids:
+                ids.append(gid)
+        return ids, problems
+    return detect_guidelines(section, reg), []
+
+
+def parse_checklist(text: str) -> tuple[dict[str, list[dict]], list[str]]:
+    blocks: dict[str, list[dict]] = {}
+    problems: list[str] = []
+    current = None
+    header_ok: dict[str, bool] = {}
+    for line in text.splitlines():
+        m = _GUIDELINE_LINE.match(line)
+        if m:
+            current = m.group(1).strip()
+            blocks.setdefault(current, [])
+            header_ok[current] = False
+            continue
+        if current is None or not line.strip().startswith("|"):
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if not header_ok[current]:
+            if [c.casefold() for c in cells[:4]] == ["item", "status", "location", "reason"]:
+                header_ok[current] = True
+            else:
+                problems.append(f"{current}: table header must be Item | Status | Location | Reason")
+                header_ok[current] = True
+            continue
+        if all(re.fullmatch(r":?-+:?", c) for c in cells if c):
+            continue
+        cells += [""] * (4 - len(cells))
+        blocks[current].append({"item": cells[0], "status": cells[1], "location": cells[2],
+                                "reason": cells[3]})
+    return blocks, problems
+
+
+@check("reporting_checklist_complete")
+def reporting_checklist_complete(ctx: Ctx) -> Result:
+    name = "reporting_checklist_complete"
+    sev = ctx.spec.get("severity", "fail")
+    try:
+        reg = load_registry()
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        return Result(False, name, f"reference/{REGISTRY_REL} unreadable: {exc}", severity=sev)
+    proto_rel = "01_protocol/protocol_final.md"
+    if not ctx.p(proto_rel).is_file():
+        return Result(False, name, f"{proto_rel} missing", severity=sev)
+    section = protocol_section(ctx.read(proto_rel))
+    if section is None:
+        return Result(False, name, f"{proto_rel} has no 'Reporting guideline' section",
+                      severity=sev)
+    ids, problems = protocol_guidelines(section, reg)
+    if problems:
+        return Result(False, name, "; ".join(problems), severity=sev)
+    if not ids:
+        snippet = " ".join(section.split())[:80]
+        return Result(False, name, f"protocol names no registered guideline: {snippet}; register "
+                      "it in reference/reporting_guidelines.toml from the engine workspace",
+                      severity=sev)
+    unverified = [g for g in ids if reg[g].get("verify")]
+    if unverified:
+        return Result(False, name, "; ".join(
+            f"item list for {g} is not shipped (verify = true); populate it from "
+            f"{reg[g].get('source', 'the official checklist')} in the engine workspace and set "
+            "verify = false" for g in unverified), severity=sev)
+    if ctx.spec.get("guideline_only"):
+        return Result(True, name, f"protocol declares {', '.join(ids)} (registered, item lists "
+                                  "shipped)")
+
+    rel = ctx.spec.get("path", CHECKLIST_REL)
+    if not ctx.p(rel).is_file():
+        return Result(False, name, f"{rel} missing", ["Write it at S23 against the journal "
+                      "variant: one `Guideline: <name>` line and an Item | Status | Location | "
+                      "Reason table per guideline."], severity=sev)
+    man_rel = ctx.spec.get("manuscript", MANUSCRIPT_REL)
+    if not ctx.p(man_rel).is_file():
+        return Result(False, name, f"{man_rel} missing (open the journal variant first)",
+                      severity=sev)
+    documents = dict(ctx.spec.get("documents", DEFAULT_DOCUMENTS))
+    doc_heads: dict[str, list[str] | None] = {}
+    problems = []
+    names_cf = [n.casefold() for n in documents]
+    if len(set(names_cf)) != len(names_cf) or "title" in names_cf:
+        return Result(False, name, "documents spec: names must be unique and not 'Title'",
+                      severity=sev)
+    for dname, drel in documents.items():
+        p = (ctx.project / drel).resolve()
+        if not paths.within(p, ctx.project):
+            return Result(False, name, f"documents spec: {drel} escapes the paper", severity=sev)
+        text = p.read_text(encoding="utf-8") if p.is_file() else ""
+        doc_heads[dname.casefold()] = headings(text)[0] if text.strip() else None
+    main_heads, title = headings(ctx.read(man_rel))
+
+    def resolves(token: str) -> bool:
+        t = token.strip()
+        if not t:
+            return False
+        if t.casefold() == "title":
+            return title is not None
+        if ">" in t:
+            doc, head = (x.strip() for x in t.split(">", 1))
+            hs = doc_heads.get(doc.casefold())
+            return bool(hs) and normalise_heading(head) in hs
+        if normalise_heading(t) in main_heads:
+            return True
+        return doc_heads.get(t.casefold()) is not None
+
+    blocks, problems = parse_checklist(ctx.read(rel))
+    block_ids = {}
+    for label in blocks:
+        gid = resolve_alias(label, reg)
+        if gid is None:
+            problems.append(f"checklist names an unregistered guideline: {label}")
+        else:
+            block_ids[gid] = label
+    if set(block_ids) != set(ids):
+        problems.append(f"checklist blocks do not match the protocol: checklist "
+                        f"{sorted(block_ids)}, protocol {sorted(ids)}")
+    unresolved_all = []
+    for gid, label in block_ids.items():
+        if gid not in ids:
+            continue
+        want = [i["id"] for i in reg[gid].get("items", [])]
+        rows = blocks[label]
+        got = [r["item"] for r in rows]
+        missing = [i for i in want if i not in got]
+        dup = sorted({i for i in got if got.count(i) > 1})
+        unknown = [i for i in got if i not in want]
+        if missing:
+            problems.append(f"{gid}: missing item(s) {', '.join(missing[:12])}")
+        if dup:
+            problems.append(f"{gid}: duplicated item(s) {', '.join(dup)}")
+        if unknown:
+            problems.append(f"{gid}: unknown item id(s) {', '.join(unknown[:8])}")
+        for r in rows:
+            status = r["status"].casefold()
+            if status == "reported":
+                tokens = [t for t in r["location"].split(";")]
+                if not r["location"].strip():
+                    problems.append(f"{gid} {r['item']}: Reported needs a location")
+                for t in tokens:
+                    if not resolves(t):
+                        unresolved_all.append(f"{gid} {r['item']}: '{t.strip()}'")
+            elif status == "not applicable":
+                if len(r["reason"].strip()) < 20:
+                    problems.append(f"{gid} {r['item']}: Not applicable needs a reason of >= 20 "
+                                    "characters")
+            else:
+                problems.append(f"{gid} {r['item']}: status must be Reported or Not applicable, "
+                                f"got '{r['status']}'")
+    if unresolved_all:
+        avail = [f"main manuscript: {', '.join(main_heads[:20])}"]
+        for dname, hs in doc_heads.items():
+            avail.append(f"{dname}: " + ("(absent)" if hs is None else ", ".join(hs[:20])))
+        problems.append("unresolved location(s) " + "; ".join(unresolved_all[:6])
+                        + " | available headings - " + " | ".join(avail))
+    if problems:
+        return Result(False, name, "; ".join(problems[:8]),
+                      ["Locations: a main-manuscript heading, `Title`, `<Document> > <heading>` "
+                       "(Supplementary Methods, Title page, Statements) or a bare document name."],
+                      severity=sev)
+    return Result(True, name, f"{', '.join(ids)}: every item reported or justified, every "
+                              "location exists")

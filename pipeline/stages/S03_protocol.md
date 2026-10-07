@@ -7,7 +7,11 @@ pre-specified rather than fitted to whatever happened to be significant.
 ## Procedure
 1. Pick the reporting guideline that governs this design (STROBE, CONSORT, STARD,
    TRIPOD+AI, PRISMA, CARE...). State it explicitly; it dictates what the Methods must
-   contain and what the artifact plan must include (e.g. a flow diagram).
+   contain and what the artifact plan must include (e.g. a flow diagram). The
+   `Reporting guideline` section holds one `Guideline: <name>` line per applicable guideline
+   (e.g. `Guideline: STROBE`); S23's checklist gate reads that line, and prose mentions
+   ("CONSORT does not apply") are ignored once it exists. Registered names:
+   `reference/reporting_guidelines.toml`.
 2. Write `project/01_protocol/protocol_v1.md` with exactly these headings:
    `Objective`, `Design`, `Population and eligibility`, `Variables`,
    `Statistical analysis plan`, `Sample size / power`, `Reporting guideline`, `Ethics`.

@@ -19,33 +19,37 @@ half-finish it and move on.
 ```
    Write `project/03_analysis/method_scan.md`: for each candidate method, what it is,
    which retrieved papers use it, and whether it fits our data. Cite with `[@key]`.
-2. **Analyse.** Every analysis lives in a script under `project/03_analysis/code/`.
-   Scripts must be re-runnable from a clean checkout, must set a seed where relevant, and must
-   resolve the selected paper rather than assuming that the current directory contains a
-   physical `project/` folder:
+2. **Analyse.** Choose the language per `reference/language_policy.toml`: Python for cleaning,
+   merging and ordinary statistics; R for survival, competing risks, nomogram/calibration/DCA,
+   multiple imputation, propensity weighting, complex surveys, mixed models, meta-analysis and
+   Table 1 statistics. Every analysis lives in a **top-level** script under
+   `project/03_analysis/code/`, named `01_*`, `02_*` ... because S06 re-runs them in filename
+   order, from raw data, without arguments, and they must rebuild `02_data/derived/`. Helpers
+   go in subdirectories (`03_analysis/code/lib/`) and are imported or sourced. Analysis code
+   must not read `00_input/` or `01_protocol/` (neither exists in the S06 sandbox), must not
+   contain absolute paths, and must seed every random step:
 ```python
-from wfcore.paths import project_dir
-PROJECT = project_dir()
-RESULTS = PROJECT / "03_analysis" / "results"
+from analysis.results import set_seed, write_results
+set_seed(20240917)
+# ... analysis reading project_dir() / "02_data/..." ...
+write_results("primary", {"analysis": "primary_model", "n_analysed": 1284,
+                          "estimates": [{"term": "exposure", "estimate": 1.87, "ci_low": 1.34,
+                                         "ci_high": 2.61, "p": 0.00021, "scale": "HR"}]})
 ```
-   Run each with `python tools/wf.py run-script 03_analysis/code/<script>.py`. The wrapper
+```r
+source(file.path(Sys.getenv("MEDPAPER_ROOT"), "tools/R/medresults.R"))
+medpaper_seed(20240917)
+fit <- survival::coxph(survival::Surv(time, status) ~ exposure, data = dat)
+write_results(list(analysis = "primary_model", hr = unname(exp(coef(fit))[1]),
+                   covariates = I("age")), "primary")   # I() keeps a length-1 vector an array
+```
+   Run each with `python tools/wf.py run-script 03_analysis/code/<script>`. The wrapper
    exports the selected paper and adds `tools/` to `PYTHONPATH`; direct execution without a
-   paper root should fail closed rather than write into the shared engine.
-3. **Dump results as JSON.** Each script writes to `project/03_analysis/results/*.json`.
-   One file per analysis block. Structure them so a human can find a value:
-```json
-{
-  "analysis": "primary_model",
-  "script": "03_analysis/code/03_primary.py",
-  "run_at": "",
-  "n_analysed": 0, "n_excluded": 0,
-  "estimates": [
-    {"term": "", "estimate": 0.0, "ci_low": 0.0, "ci_high": 0.0, "p": 0.0, "scale": "OR|HR|beta"}
-  ],
-  "model": {"family": "", "covariates": [], "software": ""},
-  "diagnostics": {}
-}
-```
+   paper root fails closed. R scripts never call `toJSON()`/`write_json()` themselves.
+3. **Results JSON.** `write_results()` writes `project/03_analysis/results/<name>.json`, one
+   file per analysis block, plus an `environment` receipt (language and version, packages,
+   seed, script and its sha256, written_at). `results_have_environment` checks every receipt;
+   the receipt's own numbers never count as provenance for manuscript numbers.
    **Every number that will ever appear in the manuscript, a table, or an abstract must
    be in one of these files.** The gates at S08-S16 reject numbers that are not.
 4. **Keep the log.** Append to `project/03_analysis/analysis_log.md` as you go: what you
@@ -62,9 +66,10 @@ RESULTS = PROJECT / "03_analysis" / "results"
 - (plus scripts in `03_analysis/code/` and result JSONs in `03_analysis/results/`)
 
 ## Hard rules
-- **No plotting.** No matplotlib, seaborn, plotly, ggplot, savefig. The gate greps for
-  them. Look at numbers and tabular console output. Figures are S11, built from an
-  approved plan.
+- **No plotting.** Python: no matplotlib/seaborn/plotly imports, `plt.`, `.plot()`, `.hist()`,
+  `.savefig()`. R: no `plot()`, `hist()`, `ggplot()`, `ggsave()`, `png()`/`pdf()`, `dev.off()`,
+  `ggsurvplot()`, `forest()`, `love.plot()`, `densityplot()` and friends. The gate scans the code
+  (comments and strings excluded). Figures are S11, built from an approved plan.
 - No p-value computed in prose. If it is not in a JSON file, it does not exist.
 - Do not silently switch the primary analysis. If it changes, that is a protocol
   deviation and it gets recorded at S06.

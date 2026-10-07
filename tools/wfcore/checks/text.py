@@ -174,20 +174,49 @@ def no_ai_boilerplate(ctx: Ctx) -> Result:
     return Result(True, "no_ai_boilerplate", f"{rel}: no placeholders, no stock phrasing")
 
 
+_PY_PLOT_RES = (
+    re.compile(r"\b(?:import|from)\s+(matplotlib|seaborn|plotly|altair|bokeh|plotnine)\b"),
+    re.compile(r"\b(plt)\."),
+    re.compile(r"\.(savefig)\s*\("),
+    re.compile(r"\.(plot)\s*\("),
+    re.compile(r"\.(hist)\s*\("),
+    re.compile(r"\.(plot_\w+)\s*\("),
+)
+_R_PLOT_RE = re.compile(
+    r"(?<![\w.])(?:[A-Za-z][\w.]*::)?(love\.plot|bal\.plot|plot\.roc|densityplot|xyplot|bwplot|"
+    r"stripplot|dotplot|funnel|qqnorm|qqline|ggforest|ggcoxzph|plot|hist|barplot|boxplot|lines|"
+    r"points|abline|segments|polygon|par|layout|image|heatmap|pheatmap|matplot|curve|pairs|"
+    r"coplot|stripchart|dotchart|qplot|ggroc|forestplot|forest|grid\.draw|grid\.newpage|png|pdf|"
+    r"tiff|jpeg|bmp|svg|svglite|agg_\w+|dev\.off|dev\.new|ggsurvplot|ggsurvfit|ggsave|ggplot)"
+    r"\s*\(")
+_LEGACY_BANNED = ["matplotlib", "seaborn", "plotly", "savefig", "plt.", "ggplot",
+                  "ggsave", "pyplot", "altair", "bokeh"]
+
+
+def plot_calls(name: str, text: str) -> list[str]:
+    """Plotting calls in one exploratory script (comments and string contents ignored)."""
+    from ..codescan import scan_py, scan_r
+    suffix = name.rsplit(".", 1)[-1].casefold() if "." in name else ""
+    if suffix == "py":
+        code, _ = scan_py(text)
+        return sorted({m.group(1) for rx in _PY_PLOT_RES for m in rx.finditer(code)})
+    if suffix in ("r", "rmd", "qmd"):
+        code, _ = scan_r(text)
+        return sorted({m.group(1) for m in _R_PLOT_RE.finditer(code)})
+    low = text.lower()
+    return sorted({b for b in _LEGACY_BANNED if b in low})
+
+
 @check("no_plot_calls")
 def no_plot_calls(ctx: Ctx) -> Result:
     """Exploratory analysis must not produce figures."""
-    banned = [
-        "matplotlib", "seaborn", "plotly", "savefig", "plt.", "ggplot",
-        "ggsave", "pyplot", "altair", "bokeh",
-    ]
     hits = []
     for p in ctx.glob(ctx.spec["glob"]):
         try:
-            src = p.read_text(encoding="utf-8", errors="replace").lower()
+            src = p.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        found = sorted({b for b in banned if b in src})
+        found = plot_calls(p.name, src)
         if found:
             hits.append(f"{p.name}: {', '.join(found)}")
     if hits:

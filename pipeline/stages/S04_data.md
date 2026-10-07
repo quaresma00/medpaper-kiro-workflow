@@ -7,8 +7,11 @@ Get the real data in place with an auditable trail, and describe it before analy
 1. Execute the full retrieval from `02_data/acquisition_plan.md`. Retrieval scripts and exact
    queries live under `project/02_data/acquisition/`; raw payloads and source count/page
    receipts land in `project/02_data/raw/` and are then treated as read-only. Never edit a
-   raw file. Here and throughout the cards, `project/` is a logical name for the paper printed
-   by `wf status`, not the physical `<engine>/project` directory.
+   raw file. Here and throughout the cards, `project/` is a logical name for the paper folder
+   printed by `wf status`; the engine never holds paper files.
+   - Language: acquisition, API clients and cleaning are Python
+     (`reference/language_policy.toml`). Save raw API bodies verbatim (never via `toJSON()`/
+     `write_json()` or a re-serialising writer).
    - Every acquisition script must resolve that root explicitly:
 ```python
 from wfcore.paths import project_dir
@@ -65,21 +68,25 @@ PROJECT = project_dir()
 ```
    Then use status `source_limited_user_authorized` and still acquire the entire accessible
    subset. Time, tokens, context, download size, compute or convenience are not source limits.
-6. Dump the machine-readable summary from executed code to
-   `project/03_analysis/results/dataset_summary.json`:
-```json
-{
+6. Dump the machine-readable summary from executed code: `03_analysis/code/00_dataset_summary.py`
+   (or `.R`) calls `write_results("dataset_summary", {...})` and is run with
+   `python tools/wf.py run-script 03_analysis/code/00_dataset_summary.py`. It is re-run in the
+   S06 sandbox from `02_data/raw/`, so its counts are re-proved like any other result. The
+   writer adds the `environment` receipt (script, sha256, packages, written_at):
+```python
+from analysis.results import write_results
+write_results("dataset_summary", {
   "n_rows": 0, "n_cols": 0,
   "variables": [{"name": "", "role": "", "type": "", "missing_pct": 0.0}],
   "missingness": {"any_missing_rows_pct": 0.0},
-  "study_period": {"start": null, "end": null},
+  "study_period": {"start": None, "end": None},
   "source_hash": "exact raw_bundle_sha256 printed by tools/data_manifest.py sync",
   "acquisition_scope": "full_protocol_defined_universe",
   "acquisition_status": "complete",
-  "built_by": "03_analysis/code/<script>",
-  "built_at": ""
-}
+})
 ```
+   Only a summary that truly needs the network may be written from `02_data/acquisition/`
+   (the one carve-out: `write_results` there accepts only `dataset_summary`).
    Include the study period here even if it is just calendar years: every number that
    later appears in the manuscript must exist in a results JSON, dates included.
    Reconcile its `n_rows` against records received and explicit post-acquisition exclusions

@@ -11,7 +11,7 @@
 # Detection lives in tools/figures/elements.py. Only put something in `requires`
 # if the detector is genuinely reliable - a gate that cries wolf gets ignored.
 #
-# The archetype taxonomy (5 domains, 17 types) and the per-type mandatory elements
+# The archetype taxonomy (5 domains, 19 types) and the per-type mandatory elements
 # are adapted from quaresma00/medical-sci-figure-skill (MIT), which in turn draws on
 # SciencePlots, ggsci and ggprism conventions. Content was rephrased and the
 # element lists were reduced to what is mechanically verifiable here.
@@ -71,7 +71,17 @@ forbids = []
 notes = """A KM curve without a number-at-risk table is incomplete, and censoring ticks are
 not optional. Report median survival with 95% CI, and the HR with its 95% CI and the
 log-rank p. Stop the curve where the risk set is too small to interpret.
-Use lifelines for the estimator - do not hand-roll a product-limit calculation."""
+Use survival/ggsurvfit (R, recipe_km) or lifelines (Python) for the estimator - do not
+hand-roll a product-limit calculation."""
+
+[archetype.cumulative_incidence]
+label = "Cumulative incidence curve under competing risks, with number-at-risk table"
+domain = "Survival"
+use_for = "Competing-risks endpoints (cause-specific events with death as a competing event)"
+requires = ["step_curve", "risk_table", "legend_present", "figure_statistics"]
+advisory = ["gray_test_p", "subdistribution_hr_with_ci"]
+notes = """Use tidycmprsk/cmprsk (R, recipe_cif). 1 - KM overstates incidence when competing
+events exist; report Gray's test and the Fine-Gray subdistribution HR with its 95% CI."""
 
 [archetype.longitudinal_trajectory]
 label = "Longitudinal trajectory or growth curve"
@@ -120,6 +130,14 @@ use_for = "Prognostic scoring systems, model calibration"
 requires = ["reference_diagonal"]
 advisory = ["bootstrap_corrected_curve", "predicted_risk_distribution", "brier_or_slope"]
 notes = "Calibration needs the 45-degree ideal line, the bootstrap-corrected curve, and the distribution of predicted risk beneath."
+
+[archetype.decision_curve]
+label = "Decision curve analysis (net benefit)"
+domain = "Trials and evidence"
+use_for = "Clinical utility of a prediction model across threshold probabilities"
+requires = ["reference_lines_horizontal", "legend_present"]
+advisory = ["treat_all_and_treat_none", "clinically_relevant_threshold_range"]
+notes = "Compute net benefit in 03_analysis (dcurves) and plot it with recipe_dca(); show treat-all and treat-none and restrict the x range to plausible thresholds."
 
 [archetype.bland_altman]
 label = "Bland-Altman agreement plot"

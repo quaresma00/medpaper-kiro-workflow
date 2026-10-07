@@ -91,6 +91,8 @@ JOURNAL_DOWNSTREAM = (
     "08_submission/package_review_freeze.json",
     "08_submission/independent_submission_audit.md",
     "08_submission/build_receipts",
+    # Checklist locations point at headings of one journal variant.
+    "08_submission/reporting_checklist.md",
 )
 
 # Fact classes that must survive journal adaptation. Prose may be tightened to fit a word cap;

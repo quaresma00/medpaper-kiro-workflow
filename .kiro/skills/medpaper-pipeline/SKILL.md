@@ -1,9 +1,9 @@
 ---
 name: medpaper-pipeline
 description: Drives a gated, resumable medical/clinical research paper pipeline from a research idea through feasibility, data acquisition, exploratory analysis, figure and table production, IMRAD writing, independent review, journal selection, de-AI polish and a Word submission package. Use whenever the task involves a medical research idea, a clinical manuscript, a research protocol, literature retrieval via PubMed, publication-grade figures or three-line tables, journal selection, a submission package, or a revision round on any of these. Do not follow the workflow from memory - run `python tools/wf.py status` and obey the stage card it prints.
-compatibility: Requires Python 3.11+ for the driver. Figures, tables and Word output additionally need matplotlib, numpy, openpyxl and python-docx. Network access is required for PubMed, Crossref and Unpaywall. Set NCBI_API_KEY to raise the E-utilities rate limit.
+compatibility: Requires Python 3.11+ for the driver. Tables and Word output additionally need numpy, pandas, openpyxl and python-docx (matplotlib for the Python figure path). R 4.3+ with the packages in reference/language_policy.toml (figures default to R). Network access is required for PubMed, Crossref and Unpaywall. Set NCBI_API_KEY to raise the E-utilities rate limit.
 metadata:
-  version: "2.0.0"
+  version: "2.1.0"
   stages: "25"
   entrypoint: "python tools/wf.py status"
 ---
@@ -38,16 +38,38 @@ remember doing. Ask the CLI.
 ## One engine, many papers
 
 ```
-python tools/wf.py new sarcopenia-mortality   # creates papers/<slug>/ and selects it
+python tools/wf.py new sarcopenia-mortality   # creates <papers root>/<slug>/ and selects it
 python tools/wf.py papers                     # list them and the stage each is at
-python tools/wf.py use other-paper            # switch
+python tools/wf.py use other-paper            # switch (user-level marker ~/.medpaper/active)
 ```
 
-`status` prints which paper it resolved and why, so a wrong-paper mistake is visible in one
-line. Resolution order: `MEDPAPER_PROJECT`, then an initialised paper at or above the working
-directory, then the paper selected with `wf use`; `<engine>/project` is used only when no
-initialised papers exist at all. If papers exist but selection is missing or stale, resolution
-fails closed instead of writing into the mother engine.
+The engine is the mother workflow and maintenance-only: no paper lives in it, is resolved in
+it or writes into it. Papers live under the papers root (`MEDPAPER_PAPERS_ROOT`, else
+`papers_root` in `~/.medpaper/config.toml`, else `<engine parent>/medpaper_papers`), and each
+paper is opened as its own Kiro workspace; `wf new` writes its `.kiro/` adapters, which call
+the engine by absolute path. `status` prints which paper it resolved and why. Resolution order:
+`MEDPAPER_PROJECT`, then an initialised paper at or above the working directory, then the
+paper selected with `wf use`. From the engine folder itself, paper-driving commands are
+refused and `wf status` prints a maintenance banner. A stale selection fails closed.
+
+## Python and R
+
+`reference/language_policy.toml` is the division of labour: Python for acquisition, cleaning,
+xlsx tables, Word and the gates; R for figures (default, `tools/figures/R/medfig.R`
+`save_medpaper()`, recipes in `tools/figures/R/recipes.R`) and for survival, competing risks,
+nomograms/calibration/DCA, imputation, propensity weighting, surveys, mixed models,
+meta-analysis and Table 1 statistics. `targets.figure_engine = "python"` switches a paper's
+figures back to `tools/figures/style.py`. `qc.py` judges both renderers identically.
+
+## Reproducibility and environment receipts
+
+Results JSON are written only through `write_results()` (Python `tools/analysis/results.py`,
+R `tools/R/medresults.R`), which appends an `environment` receipt: language and version,
+packages, seed, script and its sha256. Those receipt numbers never count as provenance. At S06
+`python tools/reproduce.py run` re-executes every top-level `03_analysis/code` script in a
+sandbox and requires identical results; `analysis_reproduces` re-checks that proof at S17,
+S23 and S25. At S23 `08_submission/reporting_checklist.md` maps every item of the protocol's
+reporting guideline (`reference/reporting_guidelines.toml`) to a location that exists.
 
 ## Customise one paper without changing the engine
 
@@ -139,7 +161,7 @@ the work.
 | `wf clean [--apply]` | Report scratch and undeclared files; delete scratch |
 | `wf config set KEY VALUE` | Override a target for this paper (`.wf/config.toml`) |
 | `wf override init/show/validate` | Change this paper's workflow shape without editing the mother workflow |
-| `wf run-script 03_analysis/code/analysis.py` | Run a paper script with its root exported; prevents writes to `<engine>/project` |
+| `wf run-script 03_analysis/code/01_primary.py` | Run a paper script with its root exported; fails if it touches the engine |
 | `wf invariants` | Reprint the non-negotiable rules |
 
 ## The absolute rules
@@ -206,8 +228,8 @@ red with nothing that can satisfy it:
 | `find-journal`, `sync-submission` | S20, S23 |
 | `write-protocol`, `analyze-stats` | S03/S06, S05 |
 
-Complementary and worth using inside a stage: `check-reporting` (guideline compliance item by
-item, which the pipeline does not do), `self-review` / `peer-review` / `revise` (post
+Complementary and worth using inside a stage: `check-reporting` (read-only help filling the
+S23 reporting checklist that `reporting_checklist_complete` verifies), `self-review` / `peer-review` / `revise` (post
 submission), `deidentify` / `generate-codebook` / `clean-data` at S04, `calc-sample-size` /
 `design-study` / `define-variables` at S03, and the imaging/ML skills, which are a different
 domain entirely.
@@ -230,13 +252,19 @@ tools/pubmed/                PubMed / Crossref / Unpaywall clients, library buil
 tools/data_manifest.py       records the acquired data universe; blocks silent truncation
 tools/tables/threeline.py    three-line xlsx writer
 tools/figures/               journal style, archetype recipes, element detection, QC
+tools/figures/R/             medfig.R (save_medpaper, theme, palettes) and recipes.R (R default)
+tools/R/medresults.R         R results writer with environment receipt
+tools/analysis/results.py    Python results writer with environment receipt
+tools/reproduce.py           S06 sandbox re-execution and its proof
 tools/manuscript/            assemble, build_docx, reference_count, review_package
 tools/text/polish.py         de-AI + academic-English linter, fact-preservation diff
 tools/rework.py              routes a revision to the earliest owning stage
 tools/package_*.py           submission package build, content check, review freeze
 tools/hooks/skill_guard.py   refuses skills that would replace a stage
 reference/                   figure, table and Methods standards; archetypes; skill policy
-papers/<slug>/               the paper being written; folder per phase; state in .wf/
+reference/language_policy.toml      Python/R division of labour and required R packages
+reference/reporting_guidelines.toml reporting-guideline item lists for the S23 checklist
+<papers root>/<slug>/        the paper being written (its own Kiro workspace); state in .wf/
 ```
 
 ## Handoff discipline

@@ -73,6 +73,10 @@ def _pool(ctx: Ctx) -> tuple[set[float], set[str], list[str]]:
         except (OSError, json.JSONDecodeError):
             continue
         sources.append(p.name)
+        if isinstance(data, dict) and "environment" in data:
+            # The environment receipt (package versions, seed, timestamps) is provenance of the
+            # run, never of a manuscript number. Only the writers' top-level key is dropped.
+            data = {k: v for k, v in data.items() if k != "environment"}
         _walk(data, strings)
     floats: set[float] = set()
     for s in strings:

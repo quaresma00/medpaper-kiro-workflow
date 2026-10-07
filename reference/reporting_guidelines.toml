@@ -1,0 +1,417 @@
+# ==============================================================================
+# Reporting-guideline item registry, read by the reporting_checklist_complete gate
+# (S06 early warning, S23/S24/S25 blocking) and by the S23 card.
+# ==============================================================================
+# Item IDs and short neutral topic titles only - use the official checklist for the wording.
+# verify = true means the item list is NOT shipped (never invented): a protocol naming that
+# guideline fails until the list is populated from `source` in the engine workspace.
+# case_sensitive = true: the guideline's aliases are ordinary English words, so prose
+# detection matches only the given case (explicit `Guideline:` lines are always casefolded).
+# ==============================================================================
+
+[meta]
+schema = 1
+note = "Item IDs and short neutral topic titles only. Use the official checklist for wording."
+
+[guideline.STROBE]
+full_name = "Strengthening the Reporting of Observational Studies in Epidemiology"
+version = "2007"
+aliases = ["STROBE"]
+source = "https://www.strobe-statement.org/checklists/"
+verify = false
+notes = "RECORD (routinely collected health data) extends STROBE. RECORD items are not shipped: report STROBE here and address RECORD items in the text."
+items = [
+  { id = "1a", title = "Title/abstract: design named" },
+  { id = "1b", title = "Abstract: informative summary" },
+  { id = "2", title = "Background/rationale" },
+  { id = "3", title = "Objectives" },
+  { id = "4", title = "Study design" },
+  { id = "5", title = "Setting" },
+  { id = "6a", title = "Participants: eligibility and selection" },
+  { id = "6b", title = "Matching criteria" },
+  { id = "7", title = "Variables" },
+  { id = "8", title = "Data sources/measurement" },
+  { id = "9", title = "Bias" },
+  { id = "10", title = "Study size" },
+  { id = "11", title = "Quantitative variables" },
+  { id = "12a", title = "Statistical methods" },
+  { id = "12b", title = "Subgroups and interactions" },
+  { id = "12c", title = "Missing data" },
+  { id = "12d", title = "Follow-up, matching or sampling handling" },
+  { id = "12e", title = "Sensitivity analyses" },
+  { id = "13a", title = "Numbers at each stage" },
+  { id = "13b", title = "Reasons for non-participation" },
+  { id = "13c", title = "Flow diagram" },
+  { id = "14a", title = "Participant characteristics" },
+  { id = "14b", title = "Missing data per variable" },
+  { id = "14c", title = "Follow-up time" },
+  { id = "15", title = "Outcome data" },
+  { id = "16a", title = "Unadjusted and adjusted estimates" },
+  { id = "16b", title = "Category boundaries" },
+  { id = "16c", title = "Absolute risk" },
+  { id = "17", title = "Other analyses" },
+  { id = "18", title = "Key results" },
+  { id = "19", title = "Limitations" },
+  { id = "20", title = "Interpretation" },
+  { id = "21", title = "Generalisability" },
+  { id = "22", title = "Funding" },
+]
+
+[guideline.CONSORT]
+full_name = "Consolidated Standards of Reporting Trials"
+version = "2010"
+aliases = ["CONSORT", "CONSORT 2010"]
+source = "https://www.consort-spirit.org/"
+verify = false
+items = [
+  { id = "1a", title = "Title identifies a randomised trial" },
+  { id = "1b", title = "Structured abstract" },
+  { id = "2a", title = "Background" },
+  { id = "2b", title = "Objectives" },
+  { id = "3a", title = "Trial design" },
+  { id = "3b", title = "Changes to methods" },
+  { id = "4a", title = "Eligibility" },
+  { id = "4b", title = "Settings and locations" },
+  { id = "5", title = "Interventions" },
+  { id = "6a", title = "Outcomes" },
+  { id = "6b", title = "Changes to outcomes" },
+  { id = "7a", title = "Sample size" },
+  { id = "7b", title = "Interim analyses and stopping" },
+  { id = "8a", title = "Sequence generation" },
+  { id = "8b", title = "Type of randomisation" },
+  { id = "9", title = "Allocation concealment" },
+  { id = "10", title = "Implementation" },
+  { id = "11a", title = "Blinding" },
+  { id = "11b", title = "Similarity of interventions" },
+  { id = "12a", title = "Statistical methods" },
+  { id = "12b", title = "Additional analyses" },
+  { id = "13a", title = "Participant flow" },
+  { id = "13b", title = "Losses and exclusions" },
+  { id = "14a", title = "Recruitment dates" },
+  { id = "14b", title = "Why the trial ended" },
+  { id = "15", title = "Baseline data" },
+  { id = "16", title = "Numbers analysed" },
+  { id = "17a", title = "Outcomes and estimation" },
+  { id = "17b", title = "Binary outcomes: absolute and relative" },
+  { id = "18", title = "Ancillary analyses" },
+  { id = "19", title = "Harms" },
+  { id = "20", title = "Limitations" },
+  { id = "21", title = "Generalisability" },
+  { id = "22", title = "Interpretation" },
+  { id = "23", title = "Registration" },
+  { id = "24", title = "Protocol access" },
+  { id = "25", title = "Funding" },
+]
+
+[guideline.STARD]
+full_name = "Standards for Reporting of Diagnostic Accuracy Studies"
+version = "2015"
+aliases = ["STARD", "STARD 2015"]
+source = "https://www.equator-network.org/reporting-guidelines/stard/"
+verify = false
+items = [
+  { id = "1", title = "Identification as an accuracy study" },
+  { id = "2", title = "Structured abstract" },
+  { id = "3", title = "Clinical background" },
+  { id = "4", title = "Objectives" },
+  { id = "5", title = "Prospective or retrospective" },
+  { id = "6", title = "Eligibility" },
+  { id = "7", title = "Basis of recruitment" },
+  { id = "8", title = "Setting and dates" },
+  { id = "9", title = "Sampling of participants" },
+  { id = "10a", title = "Index test" },
+  { id = "10b", title = "Reference standard" },
+  { id = "11", title = "Rationale for the reference standard" },
+  { id = "12a", title = "Index test positivity cut-offs" },
+  { id = "12b", title = "Reference standard cut-offs" },
+  { id = "13a", title = "Index test blinding" },
+  { id = "13b", title = "Reference standard blinding" },
+  { id = "14", title = "Accuracy estimation methods" },
+  { id = "15", title = "Indeterminate results" },
+  { id = "16", title = "Missing data" },
+  { id = "17", title = "Variability analyses" },
+  { id = "18", title = "Intended sample size" },
+  { id = "19", title = "Participant flow" },
+  { id = "20", title = "Baseline characteristics" },
+  { id = "21a", title = "Severity distribution" },
+  { id = "21b", title = "Alternative diagnoses" },
+  { id = "22", title = "Interval between tests" },
+  { id = "23", title = "Cross tabulation" },
+  { id = "24", title = "Accuracy estimates with precision" },
+  { id = "25", title = "Adverse events" },
+  { id = "26", title = "Limitations" },
+  { id = "27", title = "Implications" },
+  { id = "28", title = "Registration" },
+  { id = "29", title = "Protocol access" },
+  { id = "30", title = "Funding" },
+]
+
+[guideline.TRIPOD]
+full_name = "Transparent Reporting of a multivariable prediction model for Individual Prognosis Or Diagnosis"
+version = "2015"
+aliases = ["TRIPOD"]
+source = "https://www.tripod-statement.org/"
+verify = false
+items = [
+  { id = "1", title = "Title" },
+  { id = "2", title = "Abstract" },
+  { id = "3a", title = "Background" },
+  { id = "3b", title = "Objectives" },
+  { id = "4a", title = "Data source" },
+  { id = "4b", title = "Dates" },
+  { id = "5a", title = "Setting" },
+  { id = "5b", title = "Eligibility" },
+  { id = "5c", title = "Treatments" },
+  { id = "6a", title = "Outcome definition" },
+  { id = "6b", title = "Outcome blinding" },
+  { id = "7a", title = "Predictor definition" },
+  { id = "7b", title = "Predictor blinding" },
+  { id = "8", title = "Sample size" },
+  { id = "9", title = "Missing data" },
+  { id = "10a", title = "Predictor handling" },
+  { id = "10b", title = "Model type and building" },
+  { id = "10c", title = "Risk calculation (validation)" },
+  { id = "10d", title = "Performance measures" },
+  { id = "10e", title = "Model updating" },
+  { id = "11", title = "Risk groups" },
+  { id = "12", title = "Development versus validation differences" },
+  { id = "13a", title = "Participant flow" },
+  { id = "13b", title = "Participant characteristics" },
+  { id = "13c", title = "Comparison with development data" },
+  { id = "14a", title = "Participants and events" },
+  { id = "14b", title = "Unadjusted associations" },
+  { id = "15a", title = "Full model" },
+  { id = "15b", title = "How to use the model" },
+  { id = "16", title = "Performance results" },
+  { id = "17", title = "Model updating results" },
+  { id = "18", title = "Limitations" },
+  { id = "19a", title = "Validation interpretation" },
+  { id = "19b", title = "Overall interpretation" },
+  { id = "20", title = "Implications" },
+  { id = "21", title = "Supplementary information" },
+  { id = "22", title = "Funding" },
+]
+
+[guideline.PRISMA]
+full_name = "Preferred Reporting Items for Systematic reviews and Meta-Analyses"
+version = "2020"
+aliases = ["PRISMA", "PRISMA 2020"]
+source = "https://www.prisma-statement.org/"
+verify = false
+items = [
+  { id = "1", title = "Title" },
+  { id = "2", title = "Abstract" },
+  { id = "3", title = "Rationale" },
+  { id = "4", title = "Objectives" },
+  { id = "5", title = "Eligibility criteria" },
+  { id = "6", title = "Information sources" },
+  { id = "7", title = "Search strategy" },
+  { id = "8", title = "Selection process" },
+  { id = "9", title = "Data collection process" },
+  { id = "10a", title = "Outcome data items" },
+  { id = "10b", title = "Other data items" },
+  { id = "11", title = "Risk of bias assessment" },
+  { id = "12", title = "Effect measures" },
+  { id = "13a", title = "Synthesis eligibility" },
+  { id = "13b", title = "Data preparation" },
+  { id = "13c", title = "Tabulation and display" },
+  { id = "13d", title = "Synthesis methods" },
+  { id = "13e", title = "Heterogeneity exploration" },
+  { id = "13f", title = "Sensitivity analyses" },
+  { id = "14", title = "Reporting bias assessment" },
+  { id = "15", title = "Certainty assessment" },
+  { id = "16a", title = "Study selection" },
+  { id = "16b", title = "Excluded studies" },
+  { id = "17", title = "Study characteristics" },
+  { id = "18", title = "Risk of bias in studies" },
+  { id = "19", title = "Individual study results" },
+  { id = "20a", title = "Synthesis characteristics" },
+  { id = "20b", title = "Synthesis results" },
+  { id = "20c", title = "Heterogeneity results" },
+  { id = "20d", title = "Sensitivity results" },
+  { id = "21", title = "Reporting biases" },
+  { id = "22", title = "Certainty of evidence" },
+  { id = "23a", title = "Interpretation" },
+  { id = "23b", title = "Evidence limitations" },
+  { id = "23c", title = "Review process limitations" },
+  { id = "23d", title = "Implications" },
+  { id = "24a", title = "Registration" },
+  { id = "24b", title = "Protocol access" },
+  { id = "24c", title = "Amendments" },
+  { id = "25", title = "Support" },
+  { id = "26", title = "Competing interests" },
+  { id = "27", title = "Data, code and material availability" },
+]
+
+[guideline.SPIRIT]
+full_name = "Standard Protocol Items: Recommendations for Interventional Trials"
+version = "2013"
+aliases = ["SPIRIT", "SPIRIT 2013"]
+case_sensitive = true
+source = "https://www.consort-spirit.org/"
+verify = false
+items = [
+  { id = "1", title = "Title" },
+  { id = "2a", title = "Registration" },
+  { id = "2b", title = "Registration data set" },
+  { id = "3", title = "Protocol version" },
+  { id = "4", title = "Funding" },
+  { id = "5a", title = "Contributors" },
+  { id = "5b", title = "Sponsor contact" },
+  { id = "5c", title = "Sponsor and funder role" },
+  { id = "5d", title = "Committees" },
+  { id = "6a", title = "Background and rationale" },
+  { id = "6b", title = "Choice of comparators" },
+  { id = "7", title = "Objectives" },
+  { id = "8", title = "Trial design" },
+  { id = "9", title = "Setting" },
+  { id = "10", title = "Eligibility" },
+  { id = "11a", title = "Interventions" },
+  { id = "11b", title = "Modification criteria" },
+  { id = "11c", title = "Adherence" },
+  { id = "11d", title = "Concomitant care" },
+  { id = "12", title = "Outcomes" },
+  { id = "13", title = "Participant timeline" },
+  { id = "14", title = "Sample size" },
+  { id = "15", title = "Recruitment" },
+  { id = "16a", title = "Sequence generation" },
+  { id = "16b", title = "Allocation concealment" },
+  { id = "16c", title = "Implementation" },
+  { id = "17a", title = "Blinding" },
+  { id = "17b", title = "Unblinding" },
+  { id = "18a", title = "Data collection" },
+  { id = "18b", title = "Retention" },
+  { id = "19", title = "Data management" },
+  { id = "20a", title = "Statistical methods" },
+  { id = "20b", title = "Additional analyses" },
+  { id = "20c", title = "Analysis population and missing data" },
+  { id = "21a", title = "Data monitoring" },
+  { id = "21b", title = "Interim analyses" },
+  { id = "22", title = "Harms" },
+  { id = "23", title = "Auditing" },
+  { id = "24", title = "Ethics approval" },
+  { id = "25", title = "Protocol amendments" },
+  { id = "26a", title = "Consent" },
+  { id = "26b", title = "Ancillary consent" },
+  { id = "27", title = "Confidentiality" },
+  { id = "28", title = "Declaration of interests" },
+  { id = "29", title = "Data access" },
+  { id = "30", title = "Ancillary and post-trial care" },
+  { id = "31a", title = "Dissemination" },
+  { id = "31b", title = "Authorship" },
+  { id = "31c", title = "Reproducible research" },
+  { id = "32", title = "Consent materials" },
+  { id = "33", title = "Biological specimens" },
+]
+
+[guideline.CARE]
+full_name = "CAse REport guidelines"
+version = "2013"
+aliases = ["CARE"]
+case_sensitive = true
+source = "https://www.care-statement.org/"
+verify = false
+items = [
+  { id = "1", title = "Title" },
+  { id = "2", title = "Keywords" },
+  { id = "3a", title = "Abstract: introduction" },
+  { id = "3b", title = "Abstract: case presentation" },
+  { id = "3c", title = "Abstract: conclusion and outcomes" },
+  { id = "3d", title = "Abstract: take-away" },
+  { id = "4", title = "Introduction" },
+  { id = "5a", title = "Patient demographics" },
+  { id = "5b", title = "Main concerns" },
+  { id = "5c", title = "History" },
+  { id = "5d", title = "Relevant past interventions" },
+  { id = "6", title = "Clinical findings" },
+  { id = "7", title = "Timeline" },
+  { id = "8a", title = "Diagnostic methods" },
+  { id = "8b", title = "Diagnostic challenges" },
+  { id = "8c", title = "Diagnosis" },
+  { id = "8d", title = "Prognostic characteristics" },
+  { id = "9a", title = "Types of intervention" },
+  { id = "9b", title = "Intervention administration" },
+  { id = "9c", title = "Changes in intervention" },
+  { id = "10a", title = "Clinician- and patient-assessed outcomes" },
+  { id = "10b", title = "Important follow-up results" },
+  { id = "10c", title = "Adherence and tolerability" },
+  { id = "10d", title = "Adverse events" },
+  { id = "11a", title = "Strengths and limitations" },
+  { id = "11b", title = "Relevant literature" },
+  { id = "11c", title = "Rationale for conclusions" },
+  { id = "11d", title = "Take-away lessons" },
+  { id = "12", title = "Patient perspective" },
+  { id = "13", title = "Informed consent" },
+]
+
+[guideline.CHEERS]
+full_name = "Consolidated Health Economic Evaluation Reporting Standards"
+version = "2022"
+aliases = ["CHEERS", "CHEERS 2022"]
+case_sensitive = true
+source = "https://www.equator-network.org/reporting-guidelines/cheers/"
+verify = false
+items = [
+  { id = "1", title = "Title" },
+  { id = "2", title = "Abstract" },
+  { id = "3", title = "Background and objectives" },
+  { id = "4", title = "Health economic analysis plan" },
+  { id = "5", title = "Study population" },
+  { id = "6", title = "Setting and location" },
+  { id = "7", title = "Comparators" },
+  { id = "8", title = "Perspective" },
+  { id = "9", title = "Time horizon" },
+  { id = "10", title = "Discount rate" },
+  { id = "11", title = "Selection of outcomes" },
+  { id = "12", title = "Measurement of outcomes" },
+  { id = "13", title = "Valuation of outcomes" },
+  { id = "14", title = "Measurement and valuation of resources and costs" },
+  { id = "15", title = "Currency, price date and conversion" },
+  { id = "16", title = "Rationale and description of model" },
+  { id = "17", title = "Analytics and assumptions" },
+  { id = "18", title = "Characterising heterogeneity" },
+  { id = "19", title = "Characterising distributional effects" },
+  { id = "20", title = "Characterising uncertainty" },
+  { id = "21", title = "Approach to engagement" },
+  { id = "22", title = "Study parameters" },
+  { id = "23", title = "Summary of main results" },
+  { id = "24", title = "Effect of uncertainty" },
+  { id = "25", title = "Effect of engagement" },
+  { id = "26", title = "Study findings, limitations and generalisability" },
+  { id = "27", title = "Source of funding" },
+  { id = "28", title = "Conflicts of interest" },
+]
+
+[guideline."TRIPOD+AI"]
+full_name = "TRIPOD+AI: prediction models using regression or machine learning"
+version = "2024"
+aliases = ["TRIPOD+AI", "TRIPOD-AI", "TRIPOD AI"]
+source = "https://www.tripod-statement.org/"
+verify = true
+items = []
+
+[guideline.SQUIRE]
+full_name = "Standards for QUality Improvement Reporting Excellence"
+version = "2.0"
+aliases = ["SQUIRE", "SQUIRE 2.0"]
+case_sensitive = true
+source = "https://www.squire-statement.org/"
+verify = true
+items = []
+
+[guideline.CONSORT-2025]
+full_name = "CONSORT 2025"
+version = "2025"
+aliases = ["CONSORT 2025"]
+source = "https://www.consort-spirit.org/"
+verify = true
+items = []
+
+[guideline.SPIRIT-2025]
+full_name = "SPIRIT 2025"
+version = "2025"
+aliases = ["SPIRIT 2025"]
+case_sensitive = true
+source = "https://www.consort-spirit.org/"
+verify = true
+items = []

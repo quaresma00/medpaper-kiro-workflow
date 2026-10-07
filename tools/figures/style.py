@@ -142,9 +142,21 @@ def apply_style(base_pt: float = 7.0, palette: str = "okabe_ito") -> list[str]:
 
 
 def size_mm(width: str = "single", height_mm: float | None = None) -> tuple[float, float]:
+    """Physical size; widths come from the paper's targets (same source as R's medfig.R)."""
     if width not in WIDTHS_MM:
         raise ValueError(f"width must be one of {list(WIDTHS_MM)}, got {width!r}")
     w = WIDTHS_MM[width]
+    try:
+        from wfcore import registry
+        try:
+            proj = wfpaths.project_dir()
+        except SystemExit:
+            proj = None
+        key = {"single": "column_width_mm_single", "double": "column_width_mm_double",
+               "1.5": "column_width_mm_1_5"}[width]
+        w = float(registry.effective_targets(proj).get(key, w))
+    except (OSError, ValueError, ImportError):
+        pass
     return w, height_mm if height_mm else w * 0.72
 
 
@@ -323,6 +335,7 @@ def audit_figure(fig, stem: str | Path, archetype: str | None = None) -> str:
     report = {
         "figure": stem.name,
         "archetype": archetype,
+        "engine": "python",
         "n_axes": len(fig.get_axes()),
         "min_font_pt": min(fonts) if fonts else None,
         "max_font_pt": max(fonts) if fonts else None,
