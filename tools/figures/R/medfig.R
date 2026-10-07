@@ -713,6 +713,28 @@ scale_fill_medpaper <- function(name = "okabe_ito", ...) scale_fill_manual(value
   character(0)
 }
 
+# During a scoped revision round (tools/rework.py, 1.7.0) only the sealed dependency closure may
+# be rebuilt: re-rendering one figure must not silently rewrite another. While feedback is still
+# being collected nothing is rendered at all. Mirrors wfcore.revision.guard_outputs.
+.mf_revision_guard <- function(paper, rels) {
+  sf <- file.path(paper, ".wf", "state.json")
+  if (!file.exists(sf)) return(invisible(TRUE))
+  st <- tryCatch(jsonlite::fromJSON(sf, simplifyVector = FALSE), error = function(e) NULL)
+  rid <- st$active_revision_round
+  if (is.null(rid) || !nzchar(rid)) return(invisible(TRUE))
+  rv <- tryCatch(jsonlite::fromJSON(file.path(paper, ".wf", "revisions", paste0(rid, ".json")),
+                                    simplifyVector = FALSE), error = function(e) NULL)
+  if (is.null(rv)) return(invisible(TRUE))
+  if (identical(rv$status, "collecting"))
+    stop("feedback for revision ", rid, " is still being collected; seal the batch (tools/rework.py seal) before rendering", call. = FALSE)
+  if (!identical(as.integer(rv$schema_version %||% 0L), 2L) || !identical(rv$status, "active")) return(invisible(TRUE))
+  bad <- setdiff(rels, as.character(unlist(rv$allowed_files %||% list())))
+  if (length(bad))
+    stop("out-of-scope render during revision ", rid, ": ", paste(bad, collapse = ", "),
+         " - only the planned dependency closure may be rebuilt (tools/rework.py status)", call. = FALSE)
+  invisible(TRUE)
+}
+
 # ---------------------------------------------------------------------------
 save_medpaper <- function(plot, stem, width = "single", height_mm = NULL, dpi = 600,
                           archetype = NULL, tiff = TRUE, pdf = TRUE) {
@@ -748,6 +770,11 @@ save_medpaper <- function(plot, stem, width = "single", height_mm = NULL, dpi = 
   is_tmp <- .mf_within(out_dir, file.path(paper, "temp"))
   if (!is_out && !is_tmp) stop("figures go to 05_figures/out/ (or temp/ for scratch renders); got ", stem, call. = FALSE)
   name <- basename(abs_stem)
+  if (is_out) {
+    stem_rel <- paste0("05_figures/out/", name)
+    .mf_revision_guard(paper, c(paste0(stem_rel, c(".png", if (isTRUE(tiff)) ".tiff", if (isTRUE(pdf)) ".pdf")),
+                                paste0("05_figures/qc/", name, ".artist.json")))
+  }
 
   # Grob construction measures strings on the current device. Without an open device Rscript
   # would open its default pdf() device (writing Rplots.pdf into the cwd) and measure with

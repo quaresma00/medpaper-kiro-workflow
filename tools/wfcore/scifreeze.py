@@ -417,6 +417,36 @@ def open_variant(project: Path, journal: str, *, force: bool = False) -> tuple[P
     return dest, copied
 
 
+def rebind_variant(project: Path) -> dict:
+    """Bind the existing journal copy to a new freeze after a re-approved scientific change.
+
+    Used only by a resumed package round (tools/rework.py): the science was re-reviewed at S19
+    and re-frozen, the agent merged the changed passages into 08_submission/manuscript/ while
+    keeping unrelated journal edits, and variant_preserves_science must hold before rebinding.
+    Opening a fresh variant instead would throw the journal edits away.
+    """
+    ok, problems, _ = verify_freeze(project)
+    if not ok:
+        raise SystemExit("refusing to rebind: the freeze does not match the scientific files:\n  "
+                         + "\n  ".join(problems))
+    if not variant_exists(project):
+        raise SystemExit(f"no journal variant in {VARIANT_DIR}/ to rebind")
+    ok, problems, _ = variant_delta(project)
+    if not ok:
+        raise SystemExit("refusing to rebind: the journal copy is missing re-approved science:\n  "
+                         + "\n  ".join(problems[:8]))
+    meta = variant_meta(project)
+    live = _sha256(freeze_path(project))
+    if meta.get("freeze_sha256") == live:
+        return meta
+    meta.setdefault("rebinds", []).append({"at": _now(), "from": meta.get("freeze_sha256"),
+                                           "to": live})
+    meta["freeze_sha256"] = live
+    (project / VARIANT_DIR / "variant.json").write_text(
+        json.dumps(meta, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return meta
+
+
 def variant_meta(project: Path) -> dict:
     p = project / VARIANT_DIR / "variant.json"
     if not p.is_file():

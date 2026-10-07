@@ -51,14 +51,19 @@ further review is needed.
 2. When feedback is received, preserve it verbatim and interpret it once into atomic items in
    `project/temp/revision_plan.json` using `reference/rework-routing.md`. Each item must name
    its kind, true source files and observable acceptance criteria. If an item is ambiguous or
-   needs a scientific choice, ask one concise question rather than guessing. Start the batch:
+   needs a scientific choice, ask one concise question rather than guessing. Collect each
+   feedback message, build nothing yet, and seal once when the user says the batch is complete
+   (or pass `--sealed` if they asked to apply it now):
 ```
 .\.venv\Scripts\python.exe tools/rework.py batch --plan project\temp\revision_plan.json
+.\.venv\Scripts\python.exe tools/rework.py seal --why "<the user's apply/end-of-feedback words>"
 .\.venv\Scripts\python.exe tools/rework.py status
 ```
-   The tool rewinds once to the earliest owner across the whole batch and persists the plan
-   under `.wf/revisions/`. If the context compacts, resume from `tools/rework.py status`; do
-   not reinterpret the conversation or silently reduce the requested work.
+   The round stays at S19: no stage is rewound and completed stages stay completed. `status`
+   lists the only files you may change (the dependency closure) and the stages whose content
+   gates will re-check them. If the context compacts, resume from `tools/rework.py status`; do
+   not reinterpret the conversation or silently reduce the requested work. Full rewind is the
+   explicit fallback only (`batch --rewind`), when the scope cannot be determined.
 3. Update each earliest source of truth, then rebuild only its true dependants. Unchanged raw
    data, results, verified references, tables, figures and journal evidence are reused when
    their dependency did not change. A meaning-preserving copyedit updates its owning component
@@ -68,12 +73,16 @@ further review is needed.
 4. Run `tools/manuscript/assemble.py --check`, then re-run manuscript structure, citation,
    number-provenance and artifact-reference checks. The S19 gate requires the canonical
    manuscript to match its component sources exactly.
-5. When the workflow returns to S19, compare every item against its acceptance criteria. Mark
-   the final changed source files and completed gates/inspections, then close the round:
+5. Validate in place (only the affected stages' content gates; a file changed outside the
+   scope fails), compare every item against its acceptance criteria, mark and close:
 ```
+.\.venv\Scripts\python.exe tools/rework.py check
 .\.venv\Scripts\python.exe tools/rework.py mark --item <RNNN-NN> --changed-file <path> --validated-by "<gate or inspection>" --summary "<resolution>"
 .\.venv\Scripts\python.exe tools/rework.py close --summary "<all requested items completed and revalidated>"
 ```
+   A round that came back from S24 with a scientific change also needs, after the user's new
+   approval: `tools/manuscript/scientific_freeze.py capture --force`; `wf advance` then resumes
+   the deferred package round at S24 (S20-S23 are not replayed).
    Rebuild the versioned S19 ZIP after closing the round, verify it, and present the revised
    artifacts and new ZIP path again. New user feedback opens the next round; there is no fixed
    round limit.

@@ -611,6 +611,15 @@ def build(args) -> int:
                 file=sys.stderr)
             return 2
 
+    from wfcore.dependencies import guard_build
+    from wfcore.revision import guard_outputs
+    try:
+        guard_build(project)
+        guard_outputs(project, [args.output, build_receipt_path(project, args.output)])
+    except ValueError as exc:
+        print(f"DOCX build refused: {exc}", file=sys.stderr)
+        return 2
+
     style = load_style(args.style_config)
     if style.get("all_text_black") is not True or style.get("external_hyperlinks") is not False:
         print("style config must require black text and prohibit external hyperlinks", file=sys.stderr)

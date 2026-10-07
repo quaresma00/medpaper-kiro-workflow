@@ -719,6 +719,19 @@ def cmd_advance(args) -> int:
         st.add_note(f"[FORCED ADVANCE] gate had {blocking} blocking issue(s): "
                     + "; ".join(f"{r.check}: {r.detail}" for r in results if r.blocking), stage.id)
 
+    if stage.id == "S19_human_review" and st.data.get("resume_package_revision"):
+        # 1.7.0: re-approved post-S19 science goes straight back to the S24 package round;
+        # S20-S23 stay completed and only the journal-copy closure is reopened.
+        from . import revision
+        try:
+            rid = revision.resume_package(proj, pipe, st)
+        except (OSError, KeyError, ValueError) as exc:
+            print(f"refusing to advance: {exc}")
+            return 2
+        print(f"S19 closed. resumed package revision {rid} at S24_package_human_review")
+        print("next:  python tools/rework.py status   (merge the science into the journal copy)")
+        return 0
+
     nxt, skipped_between = pipe.transition_after(stage.id)
     st.complete(stage.id, nxt.id if nxt else None,
                 [(s.id, s.skip_reason, s.override_fingerprint) for s in skipped_between],
@@ -736,7 +749,14 @@ def cmd_advance(args) -> int:
 
 
 def cmd_loop(args) -> int:
-    pipe, st, _ = _load()
+    pipe, st, proj = _load()
+    from . import revision
+    open_round = revision.active(proj)
+    if revision.is_scoped(open_round):
+        print(f"refusing to loop: scoped revision {open_round.get('round_id')} is open; it is "
+              "fixed in place (tools/rework.py status). Close it, or convert it while still "
+              "collecting with `rework.py batch --rewind`.")
+        return 2
     target = pipe.resolve(args.to)
     cur = pipe.stage(st.current)
     if target.index > cur.index:

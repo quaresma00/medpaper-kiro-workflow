@@ -21,13 +21,18 @@ approves the exact visible files.
    them blindly.
 2. Preserve each feedback message verbatim and interpret it once into atomic items in
    `project/temp/revision_plan.json`; name each item's revision kind, source files and
-   acceptance criteria. Start or extend the persisted round:
+   acceptance criteria. Collect every message into the round, then seal it once:
 ```
 .\.venv\Scripts\python.exe tools/rework.py batch --plan project\temp\revision_plan.json
+.\.venv\Scripts\python.exe tools/rework.py seal --why "<the user's apply/end-of-feedback words>"
 .\.venv\Scripts\python.exe tools/rework.py status
 ```
-   A content change routes to its earliest Markdown, analysis, table, figure, reference,
-   title-page or package source; rebuild its true dependants and return through S23. Never edit
+   Nothing rewinds: edit only the files `status` lists (journal copy in
+   `08_submission/manuscript/`, title page, cover letter, the affected DOCX), rebuild them in
+   place and run `tools/rework.py check`, then mark and close. Changing scientific sources
+   (07_manuscript, results, tables, figures, references) sends the round back to S19 for
+   re-review and re-freeze; afterwards `wf advance` at S19 resumes a package round here that
+   merges the change into the journal copy (`scientific_freeze.py rebind-variant`). Never edit
    narrative content only in DOCX. Format-only work stays at S24. Preserve every unrelated
    user edit and modify only the affected Word file or deterministic style/build source.
    If context compacts, resume from `tools/rework.py status` rather than re-reading the entire
@@ -37,8 +42,10 @@ approves the exact visible files.
 .\.venv\Scripts\python.exe tools/package_content.py verify --project project
 ```
    A passing visible-text baseline proves a DOCX change was formatting-only. If it fails,
-   reconcile the changed wording back to its owning source, route the workflow there, rebuild
-   the DOCX at S23 and capture a new baseline there. Never recapture at S24 to bless drift.
+   reconcile the changed wording back to its owning source in a revision round, rebuild the
+   DOCX from it and capture the new baseline (`package_content.py capture --replace` is
+   accepted at S24 only inside a sealed non-layout round that revalidates S23).
+   Never recapture at S24 to bless drift.
 4. Re-run `bundle_complete`, `docx_bundle_ready`, `package_content_matches_baseline`, the
    standalone Word manifest audit and
    visual QA for every changed file. Recheck filenames, upload roles, word/keyword/reference
@@ -46,8 +53,9 @@ approves the exact visible files.
    against the chosen journal's official guideline snapshot. If a title-page reference count
    is present, verify that both the canonical source and the user-edited DOCX still equal the
    number of distinct citekeys actually used in `full_manuscript.md`, not the library size.
-5. At S24, verify each atomic request against its acceptance criteria. Mark the final changed
-   files and checks, then close the revision round with `tools/rework.py close`. Present the
+5. At S24, run `tools/rework.py check`, verify each atomic request against its acceptance
+   criteria, mark the final changed files and checks, then close the revision round with
+   `tools/rework.py close`. Present the
    resulting package again; later feedback opens a new round without a fixed round limit.
 6. Write or append `project/08_submission/package_human_review.md` with headings `Package presented`,
    `User modifications`, `Revalidation`, `User confirmation`, `Frozen package`.

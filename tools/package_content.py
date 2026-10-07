@@ -32,7 +32,13 @@ def main() -> int:
     project = wfpaths.paper_from_cli(args.project)
     if args.command == "capture":
         stage = _current_stage(project)
-        if stage and stage != "S23_package":
+        from wfcore import revision
+        open_round = revision.active(project)
+        # A sealed scoped round that revalidates S23 rebuilt the DOCX from its sources in
+        # place; a layout-only (Word formatting) round may never re-bless visible text.
+        in_round = (revision.permits(project, "S23_package") and
+                    any(i.get("change_type") != "layout" for i in open_round.get("items", [])))
+        if stage and stage != "S23_package" and not in_round:
             print(f"package content: capture is allowed only at S23_package, current={stage}",
                   file=sys.stderr)
             return 2

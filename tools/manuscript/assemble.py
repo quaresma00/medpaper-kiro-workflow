@@ -101,6 +101,14 @@ def main() -> int:
             return 2
         print("canonical manuscript matches its source sections")
         return 0
+    from wfcore.dependencies import guard_build
+    from wfcore.revision import guard_outputs
+    try:
+        guard_build(project)
+        guard_outputs(project, [output])
+    except ValueError as exc:
+        print(f"assemble: {exc}", file=sys.stderr)
+        return 2
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(expected, encoding="utf-8")
     print(f"assembled canonical manuscript -> {output}")

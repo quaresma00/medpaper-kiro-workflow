@@ -7,6 +7,7 @@ import json
 from . import Ctx, Result, check
 from ..packagecontent import verify_baseline
 from ..reviewpackage import verify as verify_review_package
+from ..revision import renewable
 
 
 def _sha256(path) -> str:
@@ -27,7 +28,10 @@ def revision_rounds_closed(ctx: Ctx) -> Result:
             )
         except (OSError, json.JSONDecodeError) as exc:
             return Result(False, "revision_rounds_closed", f"active round {active} is unreadable: {exc}")
-        if active_payload.get("review_stage") != ctx.stage.id:
+        scoped = active_payload.get("schema_version") == 2
+        # A legacy full-rewind round travels back through the stage gates; a scoped round
+        # never leaves its review checkpoint, so it is never "in transit".
+        if not scoped and active_payload.get("review_stage") != ctx.stage.id:
             return Result(
                 True, "revision_rounds_closed",
                 f"revision round {active} is in transit to {active_payload.get('review_stage')}",
@@ -35,8 +39,9 @@ def revision_rounds_closed(ctx: Ctx) -> Result:
         return Result(
             False, "revision_rounds_closed", f"revision round {active} is still active",
             [
-                "Run tools/rework.py status; complete every atomic item and return through the normal gates.",
-                "At the review stage, mark final changed files/checks and run tools/rework.py close.",
+                "Run tools/rework.py status; complete every atomic item.",
+                ("Then tools/rework.py check, mark each item and close." if scoped else
+                 "At the review stage, mark final changed files/checks and run tools/rework.py close."),
             ],
         )
     directory = ctx.state.dir / "revisions"
@@ -45,6 +50,7 @@ def revision_rounds_closed(ctx: Ctx) -> Result:
     problems = []
     count = 0
     latest_receipts: dict[str, tuple[str, str, str]] = {}
+    rounds = []
     for path in sorted(directory.glob("R*.json")):
         count += 1
         try:
@@ -52,9 +58,18 @@ def revision_rounds_closed(ctx: Ctx) -> Result:
         except (OSError, json.JSONDecodeError) as exc:
             problems.append(f"{path.name}: unreadable ({exc})")
             continue
-        if revision.get("schema_version") != 1 or revision.get("status") != "complete":
-            problems.append(f"{path.name}: not a completed schema-1 revision round")
+        if revision.get("schema_version") not in {1, 2} or revision.get("status") != "complete":
+            problems.append(f"{path.name}: not a completed schema-1/2 revision round")
             continue
+        rounds.append((path, revision))
+    # Scoped (schema-2) rounds also bind every file their checks certified. Only the newest
+    # completed round's set is compared: a later round re-certifies (or rebuilds) them.
+    latest_scoped = rounds[-1] if rounds and rounds[-1][1].get("schema_version") == 2 else None
+    for path, revision in rounds:
+        if revision.get("schema_version") == 2:
+            proof = revision.get("validation", {})
+            if not proof.get("ok") or not proof.get("input_signature") or not proof.get("results"):
+                problems.append(f"{path.name}: no executed scoped-check evidence")
         items = revision.get("items")
         if not isinstance(items, list) or not items:
             problems.append(f"{path.name}: no revision items")
@@ -77,12 +92,18 @@ def revision_rounds_closed(ctx: Ctx) -> Result:
                 # A later completed revision may legitimately supersede the same source.
                 # Keep every old receipt as history, but compare the working tree only with
                 # the newest completed receipt for each path.
-                latest_receipts[str(rel)] = (path.name, str(item_id), str(expected))
+                if not renewable(str(rel)):
+                    latest_receipts[str(rel)] = (path.name, str(item_id), str(expected))
+    if latest_scoped:
+        path, revision = latest_scoped
+        for rel, expected in revision.get("validation", {}).get("artifact_hashes", {}).items():
+            if not renewable(rel):
+                latest_receipts[rel] = (path.name, "scoped validation", expected)
     for rel, (round_name, item_id, expected) in latest_receipts.items():
         source = ctx.project / rel
         if not source.is_file():
             problems.append(f"{round_name}/{item_id}: changed source missing ({rel})")
-        elif _sha256(source) != expected:
+        elif _sha256(source).casefold() != expected.casefold():
             problems.append(f"{round_name}/{item_id}: changed source drifted after latest closure ({rel})")
     if problems:
         return Result(False, "revision_rounds_closed", "; ".join(problems[:8]))

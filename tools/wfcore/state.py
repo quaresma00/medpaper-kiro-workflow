@@ -95,8 +95,27 @@ class State:
             self.data["pipeline_version"] = pipeline_version
             self.event("pipeline_migration",
                        f"{old_version} -> {pipeline_version}; current {current} -> {self.data['current']}")
+            self._note_legacy_revision()
             self.save()
         return changed
+
+    def _note_legacy_revision(self) -> None:
+        """1.7.0 rounds are scoped (schema 2). A round opened earlier keeps its rewind flow.
+
+        Its stages were already reset when it opened, so it finishes through the normal gates
+        and closes as before; nothing is converted. Recorded once so the history explains it.
+        """
+        rid = self.data.get("active_revision_round")
+        if not rid or self.data.get("legacy_revision_round") == rid:
+            return
+        try:
+            payload = json.loads((self.dir / "revisions" / f"{rid}.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        if payload.get("schema_version") == 1:
+            self.data["legacy_revision_round"] = rid
+            self.event("revision_legacy_round",
+                       f"{rid} (schema 1) finishes through its stage gates; new rounds are scoped")
 
     # ---- config --------------------------------------------------------
     def config(self) -> dict:

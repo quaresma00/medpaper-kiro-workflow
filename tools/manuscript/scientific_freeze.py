@@ -34,7 +34,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="scientific freeze and journal variant")
     ap.add_argument("command",
                     choices=("capture", "verify", "open-variant", "reset-journal",
-                             "delta", "show"))
+                             "rebind-variant", "delta", "show"))
     ap.add_argument("--journal", default="", help="target journal, for open-variant")
     ap.add_argument("--confirm-journal", default="",
                     help="reset-journal: exact OLD journal name being discarded")
@@ -93,6 +93,19 @@ def main() -> int:
               f"{scifreeze.ARCHIVE_DIR}/ (nothing deleted; no gate reads the archive)")
         print("frozen 07_manuscript/ was not touched. Rebuild S20 target/guidelines/style, then:")
         print('  scientific_freeze.py open-variant --journal "<new journal>"')
+        return 0
+
+    if args.command == "rebind-variant":
+        from wfcore import revision
+        open_round = revision.active(proj)
+        if not (open_round and open_round.get("resume_from_science")
+                and open_round.get("status") == "active"):
+            raise SystemExit("rebind-variant belongs to a resumed package round (after S19 "
+                             "re-approval of a scientific change); use open-variant otherwise")
+        revision.guard_outputs(proj, [proj / scifreeze.VARIANT_DIR / "variant.json"])
+        meta = scifreeze.rebind_variant(proj)
+        print(f"journal variant for {meta.get('journal')} now traces to the current freeze; "
+              "journal edits kept")
         return 0
 
     if args.command == "open-variant":

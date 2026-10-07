@@ -2,7 +2,15 @@
 
 一套面向医学与临床研究的 Kiro 工作流。它把“研究想法”推进为经过数据、文献、统计结果、图表、人工复核和期刊规则共同校验的投稿包，而不是只让 AI 一次性写出一篇看似完整的论文。
 
-当前版本：`1.6.0`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE + R 4.3+
+当前版本：`1.7.0`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE + R 4.3+
+
+## 1.7.0 变化
+
+- **局部返修不回卷**：S19/S24 的修改意见默认不再回卷后续阶段。每条反馈 `rework.py batch --plan` 收集（不构建），用户说完后 `rework.py seal --why` 封批一次、只构建一次；已完成阶段保持完成，`wf loop` 在返修期间被拒绝。整体回卷保留为显式兜底：`batch --rewind`（换刊等）。
+- **依赖闭包最小重建**：`wfcore/dependencies.py` 依据 artifact_plan、结果 JSON 的 `environment.script`/`source_files`、表格与投稿包 manifest 计算受影响文件；缺少依赖信息时保守全连。`save_medpaper`、`assemble.py`、`build_docx.py` 只允许写闭包内文件，改一张 R 图只重画这一张。`rework build --scope full` 每轮最多 2 次。
+- **范围校验与漂移检测**：`rework.py check` 只运行受影响阶段的内容 gate（审批/生命周期 gate 除外，paper 级跳过的阶段不参与）；闭包外任何文件变化即失败；文献缓存等证据刷新不算漂移。改动 `03_analysis/` 必跑 `analysis_reproduces`；gate 回执在返修前后全部作废。
+- **S19 后的科学改动**：在 S24 提出的科学改动先回到 S19 重新审批并重新冻结，S20–S23 历史保留；随后 `wf advance` 在 S24 自动续开投稿包返修轮，合并到期刊稿后用 `scientific_freeze.py rebind-variant` 重新绑定。
+- **兼容**：修订轮 schema 2；仍读取 schema 1。进行中的旧轮次（schema 1）按原回卷流程完成，迁移时只记录事件，不转换。
 
 ## 1.6.0 变化
 
@@ -453,7 +461,7 @@ tools/pubmed/                              文献元数据、引用和全文来�
 tools/data_manifest.py                     数据全量获取清单，阻断静默抽样与截断
 tools/tables/、tools/figures/               表格、图片生成与质量检查
 tools/text/、tools/manuscript/              事实不变润色和确定性 Word 构建
-tools/rework.py                            把修改意见路由到最早的归属阶段
+tools/rework.py                            修改意见收集、封批、范围校验（默认不回卷）
 tools/hooks/skill_guard.py                 技能仲裁执行器
 tools/install_adapters.py                  接线 Kiro steering / hooks / skill
 tools/figures/R/                           R 作图：medfig.R（save_medpaper、主题、配色）与 recipes.R

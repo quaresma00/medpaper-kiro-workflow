@@ -46,22 +46,38 @@ command. Interpret the feedback once and write `project/temp/revision_plan.json`
 ```
 
 If `ambiguous_or_requires_user_decision` is non-empty, ask one concise question and do not
-guess. Otherwise start or extend the current round:
+guess. Otherwise collect it into the round (scoped, schema 2, since 1.7.0):
 
 ```powershell
-.\.venv\Scripts\python.exe tools\rework.py batch --plan project\temp\revision_plan.json
-.\.venv\Scripts\python.exe tools\rework.py status
+.\.venv\Scripts\python.exe tools\rework.py batch --plan project\temp\revision_plan.json   # one per message; builds nothing
+.\.venv\Scripts\python.exe tools\rework.py seal --why "<user: that is all, apply it>"     # once
+.\.venv\Scripts\python.exe tools\rework.py status                                        # closure + stages to re-check
+.\.venv\Scripts\python.exe tools\rework.py check                                         # after editing; also `wf check`
 ```
 
-The batch command stores the verbatim feedback, its SHA-256, the interpretation, atomic
-items, acceptance criteria and earliest owning stage under `.wf/revisions/RNNN.json`. It
-invalidates only decisions whose evidence can change and preserves unrelated approvals. If
-new feedback arrives before the round finishes, create another small plan containing only the
-new items and run `batch` again; it is appended to the same active round and rewinds farther
-only when necessary.
+`batch` stores the verbatim feedback, its SHA-256, the interpretation and atomic items under
+`.wf/revisions/RNNN.json` and snapshots the paper. Further messages before `seal` append to the
+same round; identical feedback is ignored. While collecting, `wf run-script`, `save_medpaper`,
+`assemble.py` and `build_docx.py` refuse to build. `seal` plans the dependency closure
+(`wfcore/dependencies.py`: artifact plan, result receipts, bundle manifest; unknown edges widen),
+the stages whose non-lifecycle gates must re-check it (skipped stages never; any 03_analysis
+change always adds `analysis_reproduces`) and invalidates only decisions whose evidence can
+change. The state machine does not move: completed stages stay completed, and `wf advance`
+and `wf loop` are refused until the round closes. The three writers refuse files outside the
+closure, so changing one figure re-renders only that figure. `check` fails any file changed
+outside the closure. `rework.py build --scope full` (rebuild everything in the closure) is
+allowed at most twice per round; otherwise `build --why "<files>"` records targeted rebuilds.
 
-After all affected sources and true dependants have been rebuilt and the workflow has
-returned to S19 or S24, record the final files and completed checks for each item:
+At S24 a scientific source (anything outside `00_input/` and `08_submission/`) moves the round
+back to S19: re-review, new approval, `scientific_freeze.py capture --force`, then `wf advance`
+resumes a package round at S24 whose only work is to merge the change into the journal copy
+and rebind it (`scientific_freeze.py rebind-variant`); S20-S23 are not replayed.
+
+Full rewind is the explicit fallback only, when the scope cannot be determined (for example a
+journal switch) or the user asks for it: `batch --rewind` (converts a still-collecting round)
+or the single-kind `start` below. Legacy schema-1 rounds keep that flow until closed.
+
+Then record the final files and completed checks for each item:
 
 ```powershell
 .\.venv\Scripts\python.exe tools\rework.py mark --item R001-01 `
@@ -77,7 +93,7 @@ returned to S19 or S24, record the final files and completed checks for each ite
 `revision_rounds_closed` blocks S19/S24 approval and S25 audit when an item is pending, a
 changed source is missing, or its final hash drifted after the round was closed.
 
-Before changing an artifact after it has been presented for review, run:
+Single-kind route lookup and the legacy full-rewind `start`:
 
 ```powershell
 .\.venv\Scripts\python.exe tools/rework.py plan --kind <kind> --why "<requested change>"
@@ -97,6 +113,7 @@ Use the earliest stage that owns the changed fact or artifact:
 | Results wording with unchanged analysis | `results-wording` -> S09 |
 | table content | `tables` -> S10 |
 | figure content or rendering | `figures` -> S11 |
+| figure/table appearance only, same data (no `.md`) | `figure-layout` -> S11, `table-layout` -> S10 |
 | reference selection, citation or verified metadata | `references` -> S13 |
 | Introduction | `introduction` -> S14 |
 | Discussion | `discussion` -> S16 |
@@ -118,8 +135,8 @@ If Word text changes, reconcile the requested wording to its Markdown/data/table
 run the owning route, rebuild the true dependants and capture a new baseline at S23. Never
 recapture a baseline at S24 merely to bless an edited DOCX.
 
-The legacy single-kind `start` command conservatively invalidates every downstream decision;
-the preferred batch-round command invalidates only decisions whose evidence may have changed.
+The legacy single-kind `start` command rewinds and conservatively invalidates every downstream
+decision; the scoped round invalidates only decisions whose evidence may have changed.
 After corrections, progress through the gates, present the revised artifact again, obtain the
 required user confirmation, freeze the new package and run one new independent audit.
 Unchanged artifacts may be reused; rebuild only the changed artifact and its actual dependants.

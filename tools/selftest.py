@@ -2101,7 +2101,7 @@ def run_codex_integration() -> None:
                f"card must name `{agent}` so the work is not done in the main context")
 
     record("pipeline and skill versions agree",
-           pipe["meta"]["version"] == "1.6.0" and 'version: "2.1.0"' in skill,
+           pipe["meta"]["version"] == "1.7.0" and 'version: "2.1.0"' in skill,
            f'pipeline={pipe["meta"]["version"]}, skill=2.1.0 (Kiro adapter revision)')
     record("all 25 stage cards exist",
            len(pipe["stage"]) == 25 and
@@ -2429,13 +2429,13 @@ def run_codex_integration() -> None:
     batch_env = {**os.environ, "MEDPAPER_PROJECT": str(batch_project),
                  "MEDPAPER_ROOT": str(ROOT), "PYTHONIOENCODING": "utf-8"}
     opened = subprocess.run(
-        [sys.executable, str(ROOT / "tools/rework.py"), "batch", "--plan", str(plan_path),
+        [sys.executable, str(ROOT / "tools/rework.py"), "batch", "--rewind", "--plan", str(plan_path),
          "--project", str(batch_project)], capture_output=True, text=True, env=batch_env,
         encoding="utf-8", errors="replace")
     batch_state = State(batch_project, ".wf").load()
     round_path = batch_project / ".wf/revisions/R001.json"
     round_payload = json.loads(round_path.read_text(encoding="utf-8")) if round_path.exists() else {}
-    record("multi-item revision persists interpretation and rewinds once to earliest owner",
+    record("explicit full-rewind fallback (batch --rewind) rewinds once to earliest owner",
            opened.returncode == 0 and batch_state.current == "S08_methods" and
            batch_state.data.get("active_revision_round") == "R001" and
            round_payload.get("earliest_stage") == "S08_methods" and
@@ -4896,7 +4896,278 @@ def run_v160(tmp: Path) -> None:
            any(g["check"] == "reader_review_coverage" for g in s18["gate"])
            and "reader-inputs" in (ROOT / "pipeline/stages/S18_independent_review.md")
            .read_text(encoding="utf-8"))
-    record("pipeline version is 1.6.0", pipe.meta.get("version") == "1.6.0")
+    record("pipeline version is 1.7.0", pipe.meta.get("version") == "1.7.0")
+
+
+def run_v170(tmp: Path) -> None:
+    """1.7.0 scoped rework: collect -> seal -> fix in place -> check; no stage-tail rewind."""
+    import json as _json
+    from wfcore import registry, revision as rv, dependencies as deps
+    from wfcore.checks import Ctx, get, load_all
+    from wfcore.state import State
+    section("1.7.0 scoped rework: one sealed batch, affected gates only, drift caught")
+    pipe = registry.load()
+    tmp.mkdir(parents=True, exist_ok=True)
+    rework = ROOT / "tools/rework.py"
+    acc = ["The requested change is visible in the source", "Nothing unrelated changed"]
+
+    def paper(name: str, at: str) -> tuple[Path, State]:
+        P = tmp / name
+        P.mkdir(parents=True)
+        st = State(P, ".wf").create(pipe.meta["name"], pipe.meta["version"], at)
+        for s in pipe.stages:
+            if s.index < pipe.stage(at).index:
+                st.stage_info(s.id)["status"] = "done"
+        st.stage_info(at)["status"] = "active"
+        st.record_decision("manuscript_human_reviewed", "NO_FURTHER_REVIEW",
+                           "The fixture user approved the scientific manuscript at S19.")
+        st.save()
+        files = {
+            "07_manuscript/methods.md": "# Methods\n\nOriginal methods.\n",
+            "07_manuscript/discussion.md": "# Discussion\n\nOriginal discussion.\n",
+            "07_manuscript/introduction.md": "# Introduction\n\nOriginal introduction.\n",
+            "06_refs/verified.json": '{"checked": 1}\n',
+            "03_analysis/code/primary.py": "print('primary')\n",
+            "03_analysis/code/secondary.py": "print('secondary')\n",
+            "03_analysis/results/primary.json": _json.dumps(
+                {"hr": 1.5, "environment": {"script": "03_analysis/code/primary.py"}}),
+            "03_analysis/results/secondary.json": _json.dumps(
+                {"hr": 0.9, "environment": {"script": "03_analysis/code/secondary.py"}}),
+            "05_figures/code/fig1.R": "# fig1\n", "05_figures/code/fig2.R": "# fig2\n",
+            "05_figures/out/Figure1.png": "old figure 1", "05_figures/out/Figure2.png": "old figure 2",
+            "01_protocol/artifact_plan.json": _json.dumps({"main_figures": [
+                {"id": "Figure 1", "file": "05_figures/out/Figure1.png",
+                 "script": "05_figures/code/fig1.R",
+                 "source_results": ["03_analysis/results/primary.json"]},
+                {"id": "Figure 2", "file": "05_figures/out/Figure2.png",
+                 "script": "05_figures/code/fig2.R",
+                 "source_results": ["03_analysis/results/secondary.json"]}],
+                "supp_figures": [], "main_tables": [], "supp_tables": []}),
+        }
+        for rel, text in files.items():
+            (P / rel).parent.mkdir(parents=True, exist_ok=True)
+            (P / rel).write_text(text, encoding="utf-8")
+        return P, st
+
+    def plan(name: str, feedback: str, items: list[dict]) -> Path:
+        path = tmp / f"{name}.json"
+        path.write_text(_json.dumps({
+            "feedback_verbatim": feedback,
+            "interpretation": "Apply the user's request to the named sources only and keep every "
+                              "other approved artifact unchanged.",
+            "ambiguous_or_requires_user_decision": [], "items": items}), encoding="utf-8")
+        return path
+
+    def rw(P: Path, *args):
+        return _run([sys.executable, rework, *args, "--project", P],
+                    env=_env(MEDPAPER_PROJECT=P, MEDPAPER_ROOT=ROOT))
+
+    def load_round(P: Path) -> dict:
+        return _json.loads((P / ".wf/revisions/R001.json").read_text(encoding="utf-8"))
+
+    # ---- multi-message collection, one seal ---------------------------------------------
+    P, _ = paper("scoped", "S19_human_review")
+    (P / ".wf/check_receipts.json").write_text("{}", encoding="utf-8")
+    a = rw(P, "batch", "--plan", plan("m1", "Please clarify the causal claim in the Discussion.", [
+        {"kind": "discussion", "request": "Clarify the causal interpretation in the Discussion.",
+         "affected_sources": ["07_manuscript/discussion.md"], "acceptance_criteria": acc}]))
+    b = rw(P, "batch", "--plan", plan("m2", "Also shorten the Methods paragraph, please.", [
+        {"kind": "methods", "request": "Shorten the Methods while keeping every detail.",
+         "affected_sources": ["07_manuscript/methods.md"], "acceptance_criteria": acc}]))
+    r = load_round(P)
+    st = State(P, ".wf").load()
+    try:
+        deps.guard_build(P)
+        blocked = False
+    except ValueError:
+        blocked = True
+    record("two feedback messages collect into one round and nothing builds before seal",
+           a.returncode == 0 and b.returncode == 0 and r.get("status") == "collecting"
+           and r.get("schema_version") == 2 and len(r.get("feedback_updates", [])) == 2
+           and len(r.get("items", [])) == 2 and blocked and st.current == "S19_human_review",
+           _out(b)[-200:])
+    s = rw(P, "seal", "--why", "The user said that is all, apply both changes now.")
+    r = load_round(P)
+    st = State(P, ".wf").load()
+    try:
+        deps.guard_build(P)
+        open_build = True
+    except ValueError:
+        open_build = False
+    record("seal plans once; no rewind: S08/S16 stay done, checkpoint stays S19",
+           s.returncode == 0 and r.get("status") == "active" and open_build
+           and st.current == "S19_human_review" and st.status_of("S08_methods") == "done"
+           and st.status_of("S16_discussion") == "done" and st.status_of("S17_assemble") == "done"
+           and st.decision("manuscript_human_reviewed") is None, _out(s)[-200:])
+    record("gate receipts are invalidated across a rework",
+           not (P / ".wf/check_receipts.json").exists())
+    stages = set(r.get("validation_stages", []))
+    check_stages = {c["stage"] for c in r.get("checks", [])}
+    record("only the affected stages' non-lifecycle gates are validated",
+           {"S08_methods", "S16_discussion"} <= stages
+           and not stages & {"S05_analysis", "S10_tables", "S11_figures", "S14_introduction",
+                             "S19_human_review", "S20_journal"}
+           and check_stages <= stages | {"S19_human_review"}
+           and not any(c["spec"].get("check") in rv.LIFECYCLE_CHECKS for c in r.get("checks", [])),
+           f"stages={sorted(stages)}")
+
+    # ---- scope drift, evidence refresh ------------------------------------------------
+    (P / "07_manuscript/methods.md").write_text("# Methods\n\nShorter methods.\n", encoding="utf-8")
+    in_scope = rv.scope_problems(P, r)
+    sig0 = rv.input_signature(P, st, r)
+    (P / "06_refs/verified.json").write_text('{"checked": 2}\n', encoding="utf-8")
+    sig1 = rv.input_signature(P, st, r)
+    record("a refreshed evidence receipt is not scope drift and keeps the input signature",
+           not in_scope and not rv.scope_problems(P, r) and sig0 == sig1, "; ".join(in_scope))
+    intro = P / "07_manuscript/introduction.md"
+    intro.write_text("# Introduction\n\nSilently edited.\n", encoding="utf-8")
+    results, _, _ = rv.validate(P, pipe, st, {**r, "checks": []})
+    record("N: a file changed outside the sealed scope fails revision_scope_unchanged",
+           results and results[0].check == "revision_scope_unchanged" and not results[0].ok
+           and "introduction.md" in results[0].detail, results[0].detail[:160] if results else "")
+    intro.write_text("# Introduction\n\nOriginal introduction.\n", encoding="utf-8")
+    c = rw(P, "check")
+    r = load_round(P)
+    record("rework check runs the scoped gates in place and records the evidence",
+           c.returncode in (0, 2) and "Scoped checks:" in _out(c) and "validation" in r
+           and State(P, ".wf").load().current == "S19_human_review", _out(c)[-200:])
+    lp = _wf("loop", "--to", "S16_discussion", "--why", "fixture tries to rewind mid-round",
+             env=_env(MEDPAPER_PROJECT=P), cwd=P)
+    record("N: wf loop is refused while a scoped round is open",
+           lp.returncode != 0 and State(P, ".wf").load().current == "S19_human_review",
+           f"rc={lp.returncode} " + (lp.stdout or "")[-200:])
+    builds = [rw(P, "build", "--scope", "full", "--why", "fixture full build attempt")
+              for _ in range(3)]
+    record("rework build --scope full is capped at 2 per round",
+           [p.returncode == 0 for p in builds] == [True, True, False]
+           and load_round(P).get("full_builds") == 2, _out(builds[2])[-160:])
+
+    # ---- planning rules ----------------------------------------------------------------
+    st2 = State(P, ".wf").load()
+    st2.stage_info("S16_discussion")["status"] = "skipped"
+    skip_round = {"review_stage": "S19_human_review", "baseline": {}, "items": [
+        {"kind": "discussion", "change_type": "scientific", "owning_stage": "S16_discussion",
+         "affected_sources": ["07_manuscript/discussion.md"]}]}
+    rv.plan_scope(P, pipe, st2, skip_round)
+    record("a paper-local skipped stage never enters validation",
+           "S16_discussion" not in skip_round["validation_stages"]
+           and all(c["stage"] != "S16_discussion" for c in skip_round["checks"]),
+           str(skip_round["validation_stages"]))
+    ana = {"review_stage": "S19_human_review", "baseline": {}, "items": [
+        {"kind": "analysis", "change_type": "scientific", "owning_stage": "S05_analysis",
+         "affected_sources": ["03_analysis/code/primary.py"]}]}
+    rv.plan_scope(P, pipe, st, ana)
+    record("a 03_analysis change forces analysis_reproduces and reaches only its own result",
+           any(c["spec"].get("check") == "analysis_reproduces" for c in ana["checks"])
+           and {"S05_analysis", "S06_protocol_final"} <= set(ana["validation_stages"])
+           and "03_analysis/results/primary.json" in ana["rebuild_files"]
+           and "03_analysis/results/secondary.json" not in ana["rebuild_files"]
+           and "05_figures/out/Figure1.png" in ana["rebuild_files"]
+           and "05_figures/out/Figure2.png" not in ana["rebuild_files"],
+           f"{len(ana['rebuild_files'])} file(s)")
+
+    # ---- one figure changed: the other is protected ------------------------------------
+    F, _ = paper("onefig", "S19_human_review")
+    fs = rw(F, "batch", "--sealed", "--why", "The user asked to apply the figure fix now.",
+            "--plan", plan("f1", "Figure 1 axis label is wrong, please fix it.", [
+                {"kind": "figures", "request": "Fix the axis label of Figure 1 only.",
+                 "affected_sources": ["05_figures/code/fig1.R"], "acceptance_criteria": acc}]))
+    fr = load_round(F)
+    try:
+        rv.guard_outputs(F, [F / "05_figures/out/Figure2.png"])
+        fig2_refused = False
+    except ValueError:
+        fig2_refused = True
+    try:
+        rv.guard_outputs(F, [F / "05_figures/out/Figure1.png"])
+        fig1_ok = True
+    except ValueError:
+        fig1_ok = False
+    record("one figure's closure includes that figure only; writers refuse the other",
+           fs.returncode == 0 and fr.get("status") == "active" and fig1_ok and fig2_refused
+           and "05_figures/out/Figure1.png" in fr.get("rebuild_files", [])
+           and "05_figures/out/Figure2.png" not in fr.get("rebuild_files", []), _out(fs)[-200:])
+    if shutil.which("Rscript"):
+        before = _sha(F / "05_figures/out/Figure2.png")
+        body = ('p <- ggplot(mtcars, aes(wt, mpg)) + geom_point() + labs(x = "Weight", y = "MPG") '
+                '+ theme_medpaper()\nsave_medpaper(p, "05_figures/out/{n}", width = "single")\n')
+        _r_script(F / "05_figures/code/fig1.R", body.replace("{n}", "Figure1"))
+        _r_script(F / "05_figures/code/fig2.R", body.replace("{n}", "Figure2"))
+        p1 = _wf("run-script", "05_figures/code/fig1.R", env=_env(MEDPAPER_PROJECT=F), cwd=tmp)
+        p2 = _wf("run-script", "05_figures/code/fig2.R", env=_env(MEDPAPER_PROJECT=F), cwd=tmp)
+        record("R: re-rendering Figure 1 works; Figure 2 render is refused and byte-identical",
+               p1.returncode == 0 and (F / "05_figures/out/Figure1.tiff").is_file()
+               and p2.returncode != 0 and "out-of-scope render" in _out(p2)
+               and _sha(F / "05_figures/out/Figure2.png") == before,
+               (_out(p1)[-120:] + " | " + _out(p2)[-160:]))
+    else:
+        record("R: one-figure re-render (skipped: Rscript not on PATH)", True)
+
+    # ---- science changed after S19 returns to S19 -------------------------------------
+    Q, qst = paper("post19", "S24_package_human_review")
+    qst.record_decision("submission_package_user_confirmed", "OK",
+                        "The fixture user approved the package before new feedback.")
+    qst.save()
+    (Q / "08_submission/manuscript").mkdir(parents=True)
+    (Q / "08_submission/manuscript/title_page.md").write_text("# Title page\n", encoding="utf-8")
+    qs = rw(Q, "batch", "--sealed", "--why", "The user wants both changes applied now.",
+            "--plan", plan("q1", "Soften the causal claim and fix the title page affiliation.", [
+                {"kind": "discussion", "request": "Soften the causal claim in the Discussion.",
+                 "affected_sources": ["07_manuscript/discussion.md"], "acceptance_criteria": acc},
+                {"kind": "title-page-or-statements", "request": "Fix the first author affiliation.",
+                 "affected_sources": ["08_submission/manuscript/title_page.md"],
+                 "acceptance_criteria": acc}]))
+    qr = load_round(Q)
+    qst = State(Q, ".wf").load()
+    try:
+        rv.resume_package(Q, pipe, qst)
+        early = True
+    except ValueError:
+        early = False
+    record("post-S19 science returns to S19 for re-approval; S20-S23 history kept",
+           qs.returncode == 0 and qst.current == "S19_human_review"
+           and qst.status_of("S24_package_human_review") == "pending"
+           and all(qst.status_of(s) == "done" for s in
+                   ("S20_journal", "S21_authors", "S22_polish", "S23_package"))
+           and qst.data.get("resume_package_revision") == "R001"
+           and qst.decision("manuscript_human_reviewed") is None
+           and qst.decision("submission_package_user_confirmed") is None
+           and len(qr.get("deferred_package_items", [])) == 1
+           and not any(f.startswith("08_submission/") for f in qr.get("allowed_files", []))
+           and not early, _out(qs)[-200:])
+    s19 = pipe.stage("S19_human_review")
+    record("the S19 re-review still requires explicit approval and a re-freeze",
+           any(g.get("check") == "s19_review_release_explicit" for g in s19.gate)
+           and any(g.get("check") == "scientific_freeze_captured" for g in s19.gate)
+           and "rebind-variant" in (ROOT / "tools/manuscript/scientific_freeze.py")
+           .read_text(encoding="utf-8"))
+
+    # ---- legacy schema-1 rounds stay readable; migration notes them ----------------------
+    L = tmp / "legacy"
+    L.mkdir()
+    lst = State(L, ".wf").create(pipe.meta["name"], "1.6.0", "S24_package_human_review")
+    (L / "07_manuscript").mkdir()
+    (L / "07_manuscript/methods.md").write_text("# Methods\n\nLegacy.\n", encoding="utf-8")
+    (L / ".wf/revisions").mkdir(parents=True)
+    (L / ".wf/revisions/R001.json").write_text(_json.dumps({
+        "schema_version": 1, "round_id": "R001", "status": "complete",
+        "review_stage": "S24_package_human_review", "items": [{
+            "id": "R001-01", "kind": "methods", "status": "done",
+            "validated_by": ["legacy fixture validation"],
+            "changed_files": [{"path": "07_manuscript/methods.md",
+                               "sha256": _sha(L / "07_manuscript/methods.md")}]}]}), encoding="utf-8")
+    load_all()
+    gate = get("revision_rounds_closed")(Ctx(pipe, lst, L, pipe.stage("S24_package_human_review"), {}))
+    record("a completed schema-1 round is still read by revision_rounds_closed", gate.ok, gate.detail)
+    (L / ".wf/revisions/R002.json").write_text(_json.dumps({
+        "schema_version": 1, "round_id": "R002", "status": "active",
+        "review_stage": "S24_package_human_review", "items": []}), encoding="utf-8")
+    lst.data["active_revision_round"] = "R002"
+    lst.save()
+    lst.migrate_pipeline(pipe.meta["version"], [s.id for s in pipe.stages])
+    record("migration keeps an open schema-1 round on its rewind flow and records it",
+           lst.data.get("legacy_revision_round") == "R002"
+           and any(e.get("kind") == "revision_legacy_round" for e in lst.data.get("events", [])))
 
 
 def run_reporting_checklist(tmp: Path) -> None:
@@ -5120,6 +5391,7 @@ def main() -> int:
         run_r_figures(tmp / "rfig_root")
         run_reporting_checklist(tmp / "checklist_root")
         run_v160(tmp / "v160_root")
+        run_v170(tmp / "v170_root")
         run_new_wiring()
         section("isolation")
         record("selftest did not touch the real papers root or user home",
