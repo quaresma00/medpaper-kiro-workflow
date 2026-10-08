@@ -109,7 +109,9 @@ unlooked-at.
    `submission_files_visually_confirmed YES`, then clean temporary/orphaned files.
 11. Write `project/08_submission/reporting_checklist.md` against this journal variant, one
    block per guideline named on the protocol's `Guideline:` lines, every item of
-   `reference/reporting_guidelines.toml` exactly once:
+   `reference/reporting_guidelines.toml` exactly once (`STROBE + RECORD`: either a separate
+   `Guideline: RECORD` block, or one `Guideline: STROBE + RECORD` block whose Item cells are
+   prefixed, e.g. `STROBE 7`, `RECORD 7.1`):
 ```markdown
 # Reporting checklist
 

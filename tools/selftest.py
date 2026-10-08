@@ -2126,7 +2126,7 @@ def run_codex_integration() -> None:
                f"card must name `{agent}` so the work is not done in the main context")
 
     record("pipeline and skill versions agree",
-           pipe["meta"]["version"] == "1.7.1" and 'version: "2.1.0"' in skill,
+           pipe["meta"]["version"] == "1.7.2" and 'version: "2.1.0"' in skill,
            f'pipeline={pipe["meta"]["version"]}, skill=2.1.0 (Kiro adapter revision)')
     record("all 25 stage cards exist",
            len(pipe["stage"]) == 25 and
@@ -5077,7 +5077,7 @@ def run_v160(tmp: Path) -> None:
            any(g["check"] == "reader_review_coverage" for g in s18["gate"])
            and "reader-inputs" in (ROOT / "pipeline/stages/S18_independent_review.md")
            .read_text(encoding="utf-8"))
-    record("pipeline version is 1.7.1", pipe.meta.get("version") == "1.7.1")
+    record("pipeline version is 1.7.2", pipe.meta.get("version") == "1.7.2")
 
 
 def run_v170(tmp: Path) -> None:
@@ -5357,11 +5357,26 @@ def run_reporting_checklist(tmp: Path) -> None:
     section("reporting-guideline checklist")
     reg = rp.load_registry()
     counts = {g: len(reg[g]["items"]) for g in ("STROBE", "CONSORT", "CONSORT-2010", "STARD",
-                                                  "TRIPOD", "PRISMA", "SPIRIT", "CARE", "CHEERS")}
+                                                  "TRIPOD", "PRISMA", "SPIRIT", "CARE", "CHEERS",
+                                                  "RECORD", "STROBE-MR", "TRIPOD+AI")}
     record("registry structure is valid and item counts match the official lists",
            not rp.registry_problems(reg) and counts == {"STROBE": 34, "CONSORT": 42,
            "CONSORT-2010": 37, "STARD": 34, "TRIPOD": 37, "PRISMA": 42, "SPIRIT": 51, "CARE": 30,
-           "CHEERS": 28}, str(counts))
+           "CHEERS": 28, "RECORD": 13, "STROBE-MR": 42, "TRIPOD+AI": 52}, str(counts))
+    record("1.7.2 lists are verified and keep the official main-item numbering",
+           not any(reg[g]["verify"] for g in ("RECORD", "STROBE-MR", "TRIPOD+AI"))
+           and len({i["id"].rstrip("abcdefg") for i in reg["STROBE-MR"]["items"]}) == 20
+           and len({i["id"].rstrip("abcdefg") for i in reg["TRIPOD+AI"]["items"]}) == 27
+           and {i["id"].split(".")[0] for i in reg["RECORD"]["items"]}
+           == {"1", "6", "7", "12", "13", "19", "22"})
+    split = {s: rp.split_guidelines(s, reg) for s in (
+        "STROBE + RECORD", "STROBE+RECORD", "STROBE, RECORD", "TRIPOD+AI", "STROBE + PRISMA-ScR")}
+    record("Guideline: values combine with + , ; & and; TRIPOD+AI is never split",
+           split == {"STROBE + RECORD": (["STROBE", "RECORD"], []),
+                     "STROBE+RECORD": (["STROBE", "RECORD"], []),
+                     "STROBE, RECORD": (["STROBE", "RECORD"], []),
+                     "TRIPOD+AI": (["TRIPOD+AI"], []),
+                     "STROBE + PRISMA-ScR": (["STROBE"], ["PRISMA-ScR"])}, str(split))
     record("bare CONSORT means the current 2025 statement; 2010 must be named explicitly",
            reg["CONSORT"]["version"] == "2025"
            and rp.resolve_alias("CONSORT", reg) == "CONSORT"
@@ -5370,12 +5385,14 @@ def run_reporting_checklist(tmp: Path) -> None:
     det = {s: rp.detect_guidelines(s, reg) for s in (
         "CONSORT 2025", "TRIPOD+AI", "STROBE-MR", "standard care", "CARE",
         "in the spirit of the original trial", "SPIRIT 2013", "three cheers", "a squire",
-        "CHEERS 2022")}
+        "CHEERS 2022", "STROBE + RECORD", "the medical record")}
     record("alias detection: longest first, boundaries, case-sensitive English words",
-           det == {"CONSORT 2025": ["CONSORT"], "TRIPOD+AI": ["TRIPOD+AI"], "STROBE-MR": [],
+           det == {"CONSORT 2025": ["CONSORT"], "TRIPOD+AI": ["TRIPOD+AI"],
+                   "STROBE-MR": ["STROBE-MR"],
                    "standard care": [], "CARE": ["CARE"], "in the spirit of the original trial": [],
                    "SPIRIT 2013": ["SPIRIT"], "three cheers": [], "a squire": [],
-                   "CHEERS 2022": ["CHEERS"]}, str(det))
+                   "CHEERS 2022": ["CHEERS"], "STROBE + RECORD": ["STROBE", "RECORD"],
+                   "the medical record": []}, str(det))
     P = _new_paper(tmp / "checkpaper")
     (P / "01_protocol").mkdir(exist_ok=True)
     (P / "08_submission/manuscript").mkdir(parents=True)
@@ -5453,7 +5470,46 @@ def run_reporting_checklist(tmp: Path) -> None:
            not g.ok and "added the Evidence column" in g.detail, g.detail[:160])
     checklist(guideline="CONSORT")
     record("N: a checklist for another guideline fails", not gate().ok)
-    protocol("Guideline: TRIPOD+AI")
+    # STROBE + RECORD: union of both lists, as separate blocks or one prefixed combined block.
+    ritems = [i["id"] for i in reg["RECORD"]["items"]]
+    rev = {i: f"Record extension item {i} is stated in this sentence." for i in ritems}
+    man = P / "08_submission/manuscript/full_manuscript.md"
+    man_before = man.read_text(encoding="utf-8")
+    man.write_text(man_before.replace("## Results", "## Data sources\n"
+                   + " ".join(rev.values()) + "\n\n## Results"), encoding="utf-8")
+    rrows = [(i, "Reported", "Data sources", rev[i], "") for i in ritems]
+    protocol("Guideline: STROBE + RECORD")
+    checklist()
+    g = gate()
+    record("N: STROBE + RECORD with only the STROBE block fails",
+           not g.ok and "do not match the protocol" in g.detail, g.detail[:160])
+    cl = P / "08_submission/reporting_checklist.md"
+
+    def rec_block(rows):
+        return ("\nGuideline: RECORD\n\n| Item | Status | Location | Evidence | Reason |\n"
+                "|---|---|---|---|---|\n"
+                + "\n".join(f"| {a} | {b} | {c} | {d} | {e} |" for a, b, c, d, e in rows) + "\n")
+    checklist()
+    cl.write_text(cl.read_text(encoding="utf-8") + rec_block(rrows), encoding="utf-8")
+    g = gate()
+    record("STROBE + RECORD with a STROBE block and a RECORD block passes", g.ok, g.detail[:160])
+    checklist()
+    cl.write_text(cl.read_text(encoding="utf-8") + rec_block(rrows[1:]), encoding="utf-8")
+    g = gate()
+    record("N: STROBE + RECORD missing a RECORD item fails",
+           not g.ok and "RECORD: missing item(s) 1.1" in g.detail, g.detail[:160])
+    combined = ([(f"STROBE {a}", b, c, d, e) for a, b, c, d, e in base]
+                + [(f"RECORD {a}", b, c, d, e) for a, b, c, d, e in rrows])
+    checklist(combined, guideline="STROBE + RECORD")
+    g = gate()
+    record("one combined STROBE + RECORD block with prefixed items passes", g.ok, g.detail[:160])
+    checklist(base + [(f"RECORD {a}", b, c, d, e) for a, b, c, d, e in rrows],
+              guideline="STROBE + RECORD")
+    g = gate()
+    record("N: unprefixed items in a combined block fail",
+           not g.ok and "needs a guideline prefix" in g.detail, g.detail[:160])
+    man.write_text(man_before, encoding="utf-8")
+    protocol("Guideline: SQUIRE")
     g = gate()
     w = _gate("reporting_checklist_complete", P, stage="S06_protocol_final", guideline_only=True, severity="warn")
     record("N: an unverified guideline fails, and the S06 variant only warns",

@@ -19,7 +19,7 @@ version = "2007"
 aliases = ["STROBE"]
 source = "https://www.strobe-statement.org/checklists/"
 verify = false
-notes = "RECORD (routinely collected health data) extends STROBE. RECORD items are not shipped: report STROBE here and address RECORD items in the text."
+notes = "Database studies (NHANES, MIMIC, SEER, UK Biobank, claims/EHR) declare `Guideline: STROBE + RECORD`; the RECORD entry holds only its extension items."
 items = [
   { id = "1a", title = "Title/abstract: design named" },
   { id = "1b", title = "Abstract: informative summary" },
@@ -55,6 +55,88 @@ items = [
   { id = "20", title = "Interpretation" },
   { id = "21", title = "Generalisability" },
   { id = "22", title = "Funding" },
+]
+
+[guideline.RECORD]
+full_name = "REporting of studies Conducted using Observational Routinely-collected health Data"
+version = "2015"
+# Benchimol EI et al. PLoS Med 2015;12(10):e1001885 (Table, RECORD-specific rows), fetched in
+# v1.7.2 from https://pmc.ncbi.nlm.nih.gov/articles/PMC4595218/ . Extension items only: always
+# used together with STROBE (`Guideline: STROBE + RECORD`).
+aliases = ["RECORD"]
+case_sensitive = true
+source = "https://doi.org/10.1371/journal.pmed.1001885 (Benchimol et al. PLoS Med 2015;12:e1001885)"
+verify = false
+notes = "Use with STROBE; this entry lists only the RECORD extension items."
+items = [
+  { id = "1.1", title = "Title/abstract: type of data and database names" },
+  { id = "1.2", title = "Title/abstract: geographic region and time frame" },
+  { id = "1.3", title = "Title/abstract: database linkage stated" },
+  { id = "6.1", title = "Population selection codes or algorithms" },
+  { id = "6.2", title = "Validation studies of selection codes or algorithms" },
+  { id = "6.3", title = "Data linkage flow diagram" },
+  { id = "7.1", title = "Codes and algorithms for exposures, outcomes, confounders, modifiers" },
+  { id = "12.1", title = "Investigator access to the database population" },
+  { id = "12.2", title = "Data cleaning methods" },
+  { id = "12.3", title = "Data linkage level, methods and quality evaluation" },
+  { id = "13.1", title = "Study population selection incl. data quality, availability, linkage" },
+  { id = "19.1", title = "Limitations of data not collected for the question" },
+  { id = "22.1", title = "Access to protocol, raw data or programming code" },
+]
+
+[guideline.STROBE-MR]
+full_name = "STROBE using Mendelian Randomisation"
+version = "2021"
+# Skrivankova VW et al. BMJ 2021;375:n2233 (Table 3 checklist; statement in JAMA
+# 2021;326:1614), fetched in v1.7.2 from Europe PMC full text of PMC8546498
+# (https://www.ebi.ac.uk/europepmc/webservices/rest/PMC8546498/fullTextXML). 20 items; items
+# with sub-items are listed by sub-item only.
+aliases = ["STROBE-MR", "STROBE MR"]
+source = "https://doi.org/10.1136/bmj.n2233 (Skrivankova et al. BMJ 2021;375:n2233)"
+verify = false
+items = [
+  { id = "1", title = "Title/abstract: MR design indicated" },
+  { id = "2", title = "Background and rationale" },
+  { id = "3", title = "Objectives and causal hypotheses" },
+  { id = "4a", title = "Setting and underlying population" },
+  { id = "4b", title = "Participants: eligibility and selection" },
+  { id = "4c", title = "Genetic variants: measurement, QC, selection" },
+  { id = "4d", title = "Exposure, outcome and other variable assessment" },
+  { id = "4e", title = "Ethics approval and consent" },
+  { id = "5", title = "Core instrumental variable assumptions" },
+  { id = "6a", title = "Handling of quantitative variables" },
+  { id = "6b", title = "Handling and weighting of genetic variants" },
+  { id = "6c", title = "MR estimator and related statistics" },
+  { id = "6d", title = "Missing data" },
+  { id = "6e", title = "Multiple testing" },
+  { id = "7", title = "Methods to assess assumptions" },
+  { id = "8", title = "Sensitivity and additional analyses (methods)" },
+  { id = "9a", title = "Software, packages, versions" },
+  { id = "9b", title = "Pre-registration" },
+  { id = "10a", title = "Numbers at each stage and exclusions" },
+  { id = "10b", title = "Summary statistics of phenotypes" },
+  { id = "10c", title = "Heterogeneity across meta-analysed sources" },
+  { id = "10d", title = "Two-sample MR: sample similarity and overlap" },
+  { id = "11a", title = "Variant-exposure and variant-outcome associations" },
+  { id = "11b", title = "MR estimates with uncertainty" },
+  { id = "11c", title = "Absolute risk translation" },
+  { id = "11d", title = "Plots of main results" },
+  { id = "12a", title = "Assessment of assumption validity" },
+  { id = "12b", title = "Additional statistics (e.g. heterogeneity)" },
+  { id = "13a", title = "Sensitivity analyses for assumption violations" },
+  { id = "13b", title = "Other sensitivity or additional analyses" },
+  { id = "13c", title = "Direction of causal association" },
+  { id = "13d", title = "Comparison with non-MR estimates" },
+  { id = "13e", title = "Additional plots (e.g. leave-one-out)" },
+  { id = "14", title = "Key results" },
+  { id = "15", title = "Limitations" },
+  { id = "16a", title = "Interpretation: meaning" },
+  { id = "16b", title = "Interpretation: mechanism" },
+  { id = "16c", title = "Interpretation: clinical relevance" },
+  { id = "17", title = "Generalisability" },
+  { id = "18", title = "Funding" },
+  { id = "19", title = "Data and data sharing" },
+  { id = "20", title = "Conflicts of interest" },
 ]
 
 [guideline.CONSORT]
@@ -443,10 +525,68 @@ items = [
 [guideline."TRIPOD+AI"]
 full_name = "TRIPOD+AI: prediction models using regression or machine learning"
 version = "2024"
+# Collins GS et al. BMJ 2024;385:e078378 (Table 2 checklist), fetched in v1.7.2 from Europe
+# PMC full text of PMC11019967
+# (https://www.ebi.ac.uk/europepmc/webservices/rest/PMC11019967/fullTextXML). 27 main items;
+# sub-items listed individually. Item 2 refers to the separate TRIPOD+AI for Abstracts list.
 aliases = ["TRIPOD+AI", "TRIPOD-AI", "TRIPOD AI"]
-source = "https://www.tripod-statement.org/"
-verify = true
-items = []
+source = "https://www.tripod-statement.org/ (Collins et al. BMJ 2024;385:e078378)"
+verify = false
+notes = "Use for machine-learning prediction models; classic regression-only models may use TRIPOD (2015)."
+items = [
+  { id = "1", title = "Title" },
+  { id = "2", title = "Abstract (TRIPOD+AI for Abstracts)" },
+  { id = "3a", title = "Healthcare context and rationale" },
+  { id = "3b", title = "Target population and intended purpose" },
+  { id = "3c", title = "Known health inequalities" },
+  { id = "4", title = "Objectives" },
+  { id = "5a", title = "Data sources" },
+  { id = "5b", title = "Dates of data" },
+  { id = "6a", title = "Study setting" },
+  { id = "6b", title = "Eligibility criteria" },
+  { id = "6c", title = "Treatments received and handling" },
+  { id = "7", title = "Data pre-processing and quality checking" },
+  { id = "8a", title = "Outcome definition and time horizon" },
+  { id = "8b", title = "Outcome assessor qualifications" },
+  { id = "8c", title = "Outcome blinding" },
+  { id = "9a", title = "Choice of initial predictors" },
+  { id = "9b", title = "Predictor definitions and measurement" },
+  { id = "9c", title = "Predictor assessor qualifications" },
+  { id = "10", title = "Sample size" },
+  { id = "11", title = "Missing data" },
+  { id = "12a", title = "Data use in analysis (development/evaluation split)" },
+  { id = "12b", title = "Predictor handling" },
+  { id = "12c", title = "Model type, building steps, tuning, internal validation" },
+  { id = "12d", title = "Heterogeneity in estimates and performance" },
+  { id = "12e", title = "Performance measures and plots" },
+  { id = "12f", title = "Model updating" },
+  { id = "12g", title = "How predictions were calculated (evaluation)" },
+  { id = "13", title = "Class imbalance" },
+  { id = "14", title = "Fairness" },
+  { id = "15", title = "Model output" },
+  { id = "16", title = "Development versus evaluation data differences" },
+  { id = "17", title = "Ethical approval" },
+  { id = "18a", title = "Funding" },
+  { id = "18b", title = "Conflicts of interest" },
+  { id = "18c", title = "Protocol" },
+  { id = "18d", title = "Registration" },
+  { id = "18e", title = "Data sharing" },
+  { id = "18f", title = "Code sharing" },
+  { id = "19", title = "Patient and public involvement" },
+  { id = "20a", title = "Participant flow" },
+  { id = "20b", title = "Participant characteristics" },
+  { id = "20c", title = "Comparison with development data (evaluation)" },
+  { id = "21", title = "Participants and outcome events per analysis" },
+  { id = "22", title = "Full model specification" },
+  { id = "23a", title = "Performance estimates with CIs, incl. subgroups" },
+  { id = "23b", title = "Heterogeneity of performance across clusters" },
+  { id = "24", title = "Model updating results" },
+  { id = "25", title = "Interpretation" },
+  { id = "26", title = "Limitations" },
+  { id = "27a", title = "Handling poor-quality or missing input data in use" },
+  { id = "27b", title = "User interaction and expertise required" },
+  { id = "27c", title = "Next steps for future research" },
+]
 
 [guideline.SQUIRE]
 full_name = "Standards for QUality Improvement Reporting Excellence"

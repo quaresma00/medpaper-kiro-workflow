@@ -47,8 +47,8 @@ the effect size and the data's limits are known. This is the last cheap exit.
 ```
 
 The `Reporting guideline` section must hold one `Guideline: <name>` line per applicable
-guideline (e.g. `Guideline: STROBE`); that line is what `reporting_checklist_complete` reads
-at S23. A warning here means the guideline is not registered in
+guideline (e.g. `Guideline: STROBE`, or `Guideline: STROBE + RECORD` for a database study;
+mapping in S03); that line is what `reporting_checklist_complete` reads at S23. A warning here means the guideline is not registered in
 `reference/reporting_guidelines.toml` or its item list is not shipped yet - fix that in the
 engine workspace now, not at S23.
 

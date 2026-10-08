@@ -11,7 +11,12 @@ pre-specified rather than fitted to whatever happened to be significant.
    `Reporting guideline` section holds one `Guideline: <name>` line per applicable guideline
    (e.g. `Guideline: STROBE`); S23's checklist gate reads that line, and prose mentions
    ("CONSORT does not apply") are ignored once it exists. Registered names:
-   `reference/reporting_guidelines.toml`.
+   `reference/reporting_guidelines.toml`. Typical public-database mapping:
+   - database cohort / cross-sectional (NHANES, MIMIC, SEER, UK Biobank, claims/EHR):
+     `Guideline: STROBE + RECORD`
+   - Mendelian randomisation: `Guideline: STROBE-MR`
+   - prediction model / nomogram: `TRIPOD` (classic regression) or `TRIPOD+AI` (machine learning)
+   - meta-analysis / systematic review: `PRISMA`
 2. Write `project/01_protocol/protocol_v1.md` with exactly these headings:
    `Objective`, `Design`, `Population and eligibility`, `Variables`,
    `Statistical analysis plan`, `Sample size / power`, `Reporting guideline`, `Ethics`.

@@ -98,6 +98,26 @@ def resolve_alias(value: str, reg: dict) -> str | None:
     return None
 
 
+_COMBINE = re.compile(r"\s+\+\s+|\s*[,;&/]\s*|\s+and\s+", re.I)
+
+
+def split_guidelines(value: str, reg: dict) -> tuple[list[str], list[str]]:
+    """'STROBE + RECORD' -> (['STROBE', 'RECORD'], []). A name that resolves whole (TRIPOD+AI)
+    is never split; '+' without spaces is split only when every piece resolves."""
+    whole = resolve_alias(value, reg)
+    if whole:
+        return [whole], []
+    ids, bad = [], []
+    for part in (p for p in _COMBINE.split(value) if p.strip()):
+        gid = resolve_alias(part, reg)
+        pieces = [gid] if gid else [resolve_alias(x, reg) for x in part.split("+") if x.strip()]
+        if not pieces or None in pieces:
+            bad.append(part.strip())
+            continue
+        ids += [g for g in pieces if g not in ids]
+    return ids, bad
+
+
 def normalise_heading(h: str) -> str:
     h = re.sub(r"[*_`]", "", h)
     h = re.sub(r"^\s*\d+(?:\.\d+)*\.?\s+", "", h)
@@ -144,11 +164,10 @@ def protocol_guidelines(section: str, reg: dict) -> tuple[list[str], list[str]]:
     if explicit:
         ids, problems = [], []
         for v in explicit:
-            gid = resolve_alias(v, reg)
-            if gid is None:
-                problems.append(f"unregistered guideline on a Guideline: line: {v}")
-            elif gid not in ids:
-                ids.append(gid)
+            gids, bad = split_guidelines(v, reg)
+            for b in bad:
+                problems.append(f"unregistered guideline on a Guideline: line: {b}")
+            ids += [g for g in gids if g not in ids]
         return ids, problems
     return detect_guidelines(section, reg), []
 
@@ -295,25 +314,36 @@ def reporting_checklist_complete(ctx: Ctx) -> Result:
         return scope(token) is not None
 
     blocks, problems = parse_checklist(ctx.read(rel))
-    block_ids = {}
-    for label in blocks:
-        gid = resolve_alias(label, reg)
-        if gid is None:
+    # One block per guideline, or one combined block ('Guideline: STROBE + RECORD') whose
+    # Item cells carry the guideline as a prefix ('RECORD 6.1') so ids never clash.
+    gid_rows: dict[str, list[dict]] = {}
+    for label, rows in blocks.items():
+        gids, bad = split_guidelines(label, reg)
+        if bad or not gids:
             problems.append(f"checklist names an unregistered guideline: {label}")
-        else:
-            block_ids[gid] = label
-    if set(block_ids) != set(ids):
+            continue
+        if len(gids) == 1:
+            gid_rows.setdefault(gids[0], []).extend(rows)
+            continue
+        for r in rows:
+            m = re.match(r"^(.+?)\s+(\S+)$", r["item"])
+            gid = resolve_alias(m.group(1), reg) if m else None
+            if gid not in gids:
+                problems.append(f"{label}: item '{r['item']}' in a combined block needs a "
+                                f"guideline prefix ({' / '.join(gids)} <id>)")
+                continue
+            gid_rows.setdefault(gid, []).append(dict(r, item=m.group(2)))
+    if set(gid_rows) != set(ids):
         problems.append(f"checklist blocks do not match the protocol: checklist "
-                        f"{sorted(block_ids)}, protocol {sorted(ids)}")
+                        f"{sorted(gid_rows)}, protocol {sorted(ids)}")
     unresolved_all = []
     no_evidence: list[str] = []
     not_found: list[str] = []
     reuse: dict[str, list[str]] = {}
-    for gid, label in block_ids.items():
+    for gid, rows in gid_rows.items():
         if gid not in ids:
             continue
         want = [i["id"] for i in reg[gid].get("items", [])]
-        rows = blocks[label]
         got = [r["item"] for r in rows]
         missing = [i for i in want if i not in got]
         dup = sorted({i for i in got if got.count(i) > 1})
