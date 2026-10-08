@@ -806,13 +806,33 @@ def run_reference_identity(proj: Path) -> None:
            ft.check_identity(base, html_bad, "html")["identity"] == "mismatch")
 
     # The asymmetry that matters: a PDF's cited DOIs are not evidence of anything.
-    pdf_self = b"%PDF-1.7 ... doi:10.1055/a-2669-5801 ... body"
+    pdf_self = (b"%PDF-1.7\nEndoscopy 2025. doi:10.1055/a-2669-5801\n"
+                b"Fully covered self-expandable metal stents in benign biliary stricture\n"
+                b"Abstract ... body\nReferences\n1. Other. doi:10.1055/s-0034-1393583\n")
     pdf_cites_others = (b"%PDF-1.7 ... References: 10.1055/s-0034-1393583, "
                         b"10.3748/wjg.v27.i38.6357 ... body")
-    record("a PDF containing our DOI counts as a match",
-           ft.check_identity(base, pdf_self, "pdf")["identity"] == "match")
+    pdf_doi_in_refs_only = (b"%PDF-1.7\nAn unrelated cohort of hepatic outcomes\nAbstract body\n"
+                            b"References\n1. De Pretis. Fully covered self-expandable metal stents"
+                            b" in benign biliary stricture. doi:10.1055/a-2669-5801\n")
+    pdf_wrong_cites_target = (b"%PDF-1.7\nAnatomy-shaped design of a fully-covered biliary stent\n"
+                              b"doi:10.1055/s-0034-1393583\nAbstract body\nReferences\n"
+                              b"7. doi:10.1055/a-2669-5801\n")
+    pdf_doi_no_title = b"%PDF-1.7\ndoi:10.1055/a-2669-5801\nAbstract body\n"
+    record("a PDF whose front matter has our DOI and title counts as a match",
+           ft.check_identity(base, pdf_self, "pdf")["identity"] == "match",
+           ft.check_identity(base, pdf_self, "pdf")["identity_detail"])
+    v = ft.check_identity(base, pdf_doi_in_refs_only, "pdf")
+    record("a PDF with our DOI only in its reference list is a mismatch",
+           v["identity"] == "mismatch" and v["identity_basis"] == "pdf-doi-only-in-references",
+           v["identity_detail"])
+    v = ft.check_identity(base, pdf_wrong_cites_target, "pdf")
+    record("a different article that cites ours is a mismatch, not a match",
+           v["identity"] == "mismatch", v["identity_detail"])
+    v = ft.check_identity(base, pdf_doi_no_title, "pdf")
+    record("our DOI in the front matter without title/author evidence is only indeterminate",
+           v["identity"] == "indeterminate", v["identity_detail"])
     v = ft.check_identity(base, pdf_cites_others, "pdf")
-    record("a PDF citing OTHER DOIs is indeterminate, never a mismatch",
+    record("a PDF citing OTHER DOIs is indeterminate, never a match",
            v["identity"] == "indeterminate",
            "treating a bibliography as identity is the original bug; it must not be repeated")
     record("the indeterminate verdict says why the cited DOIs were ignored",
@@ -843,7 +863,7 @@ def run_reference_identity(proj: Path) -> None:
     (scoped / "06_refs/deepread/deepread_index.json").write_text(
         json.dumps({"selected": sel}), encoding="utf-8")
 
-    def gate(identity: str):
+    def gate(identity: str, basis: str = ""):
         """Set the first paper's identity verdict; the other two always verify."""
         recs = []
         for n, ck in enumerate(keys):
@@ -853,6 +873,8 @@ def run_reference_identity(proj: Path) -> None:
             verdict = identity if n == 0 else "match"
             if verdict:
                 rec["identity"] = verdict
+                if n == 0 and basis:
+                    rec["identity_basis"] = basis
                 if verdict == "mismatch":
                     rec["identity_detail"] = "DOI mismatch; payload is Weigt 2016"
             recs.append(rec)
@@ -876,6 +898,9 @@ def run_reference_identity(proj: Path) -> None:
     r = gate("indeterminate")
     record("an indeterminate identity is unproven, not acceptable",
            not r.ok, r.detail)
+    r = gate("match", "pdf-doi-present")
+    record("a match accepted by the pre-1.7.1 DOI-anywhere rule must be re-verified",
+           not r.ok and "re-verify from the front matter" in r.detail, r.detail)
 
     from wfcore import cli
     record("deepread_complete cannot be bypassed with --force",
@@ -2101,7 +2126,7 @@ def run_codex_integration() -> None:
                f"card must name `{agent}` so the work is not done in the main context")
 
     record("pipeline and skill versions agree",
-           pipe["meta"]["version"] == "1.7.0" and 'version: "2.1.0"' in skill,
+           pipe["meta"]["version"] == "1.7.1" and 'version: "2.1.0"' in skill,
            f'pipeline={pipe["meta"]["version"]}, skill=2.1.0 (Kiro adapter revision)')
     record("all 25 stage cards exist",
            len(pipe["stage"]) == 25 and
@@ -2544,7 +2569,8 @@ def run_fulltext_registration(proj: Path) -> None:
         # indeterminate path and its explicit confirmation step are exercised too.
         body = bytes([64 + i]) * 1800
         if i < 4:
-            body = f"doi:{entry['doi']}\n".encode() + body
+            # 1.7.1: identity needs the DOI AND the title (or first author + year) on page 1.
+            body = f"{entry['title']}\ndoi:{entry['doi']}\n".encode() + body
         source.write_bytes(b"%PDF-1.4\n" + body)
         p = subprocess.run(
             [sys.executable, str(tool), "register", "--citekey", entry["citekey"],
@@ -3816,6 +3842,61 @@ def run_language_policy() -> None:
     record("S04/S05/S10/S11 and SKILL.md point at the language policy", not missing, str(missing))
     record("figures default to R", str(registry.load().targets.get("figure_engine")) == "R")
 
+    # 1.7.1: doctor requires the engine core plus what the paper's own scripts use, not the
+    # whole statistics catalogue.
+    import tempfile
+    tp = Path(tempfile.mkdtemp(prefix="medpaper_rpk_"))
+    try:
+        (tp / "03_analysis/code").mkdir(parents=True)
+        (tp / "03_analysis/code/01_m.R").write_text(
+            "library(survival)\nx <- meta::metagen(1, 1)\n# library(commentedpkg)\n"
+            "p <- recipe_cif(curve = r$cif, times = 0:3)\nlibrary(notapkg456)\n",
+            encoding="utf-8")
+        used = cli.r_packages_used(tp)
+        record("paper R package scan: library(), pkg::, engine helpers; comments ignored",
+               {"survival", "meta", "tidycmprsk", "ggsurvfit", "notapkg456"} <= set(used)
+               and "commentedpkg" not in used, str(sorted(used)))
+        if shutil.which("Rscript"):
+            pol = {"r": {"min_version": "4.3.0", "required": {"jsonlite": "0",
+                                                             "notapkg123": "0"}},
+                   "task": [{"id": "figures", "packages": ["jsonlite"]}]}
+            rows = {n.strip(): (s, d) for n, s, d in cli._r_rows(pol, tp)}
+            record("an unused catalogue package is info; a package the paper uses is MISSING",
+                   rows.get("notapkg123", ("",))[0] == "absent"
+                   and "not used" in rows.get("notapkg123", ("", ""))[1]
+                   and rows.get("notapkg456", ("",))[0] == "MISSING"
+                   and "01_m.R" in rows.get("notapkg456", ("", ""))[1], str(rows)[:300])
+    finally:
+        shutil.rmtree(tp, ignore_errors=True)
+
+
+def run_paper_header(tmp: Path) -> None:
+    from wfcore import cli, paths as wp
+    section("1.7.1 resolved-paper header and global-marker warning")
+    a, b = _new_paper(tmp / "paper_a"), _new_paper(tmp / "paper_b")
+    real_marker, real_cwd = wp.active_paper, Path.cwd()
+    saved_env = os.environ.pop("MEDPAPER_PROJECT", None)
+    try:
+        wp.active_paper = lambda: b
+        os.chdir(a)
+        lines = cli.paper_header(a, "found at or above the working directory")
+        record("every command names the paper it acts on, and the cwd paper beats the marker",
+               lines[0].startswith("[medpaper] paper: ") and str(a) in lines[0]
+               and any("global `wf use` marker points at" in x for x in lines), str(lines))
+        lines = cli.paper_header(b, "MEDPAPER_PROJECT")
+        record("acting on another paper than the cwd's is a WARNING",
+               any("WARNING: the working directory is inside paper" in x for x in lines),
+               str(lines))
+        os.chdir(tmp)
+        lines = cli.paper_header(b, "selected with wf use")
+        record("a marker-only selection says how to pin the paper",
+               any("chosen by the global `wf use` marker" in x for x in lines), str(lines))
+    finally:
+        os.chdir(real_cwd)
+        wp.active_paper = real_marker
+        if saved_env is not None:
+            os.environ["MEDPAPER_PROJECT"] = saved_env
+
 
 def run_no_plot_calls_r() -> None:
     from wfcore.checks.text import plot_calls
@@ -3871,7 +3952,9 @@ def run_results_environment(tmp: Path) -> None:
         "'draw': float(numpy.random.random())})\n", encoding="utf-8")
     (code / "02_r.R").write_text(
         R_HELPER + "medpaper_seed(42)\n"
-        'write_results(list(hr = 1.87432198765, n = 1284L, covariates = I("age")), "r_primary")\n',
+        'write_results(list(hr = 1.87432198765, n = 1284L, covariates = I("age"), '
+        'third = 1/3, long = 0.1234567890123456789, tiny = 1e-20, big = 2^53, '
+        'p = 0.000123456789012345), "r_primary")\n',
         encoding="utf-8")
     p1 = _wf("run-script", "03_analysis/code/01_py.py", env=env, cwd=tmp)
     p2 = _wf("run-script", "03_analysis/code/02_r.R", env=env, cwd=tmp)
@@ -3884,7 +3967,12 @@ def run_results_environment(tmp: Path) -> None:
            and pe.get("seed") == 20240917 and "numpy" in pe.get("packages", {})
            and pe.get("script") == "03_analysis/code/01_py.py"
            and pe.get("script_sha256") == _sha(code / "01_py.py"), _out(p1)[-160:])
-    record("R write_results keeps 1.87432198765 (digits = NA) and I() arrays",
+    record("R write_results round-trips doubles exactly (digits = I(17), not 15 digits)",
+           rr.get("third") == 1 / 3 and rr.get("long") == 0.1234567890123456789
+           and rr.get("tiny") == 1e-20 and rr.get("big") == 2 ** 53
+           and rr.get("p") == 0.000123456789012345,
+           str({k: rr.get(k) for k in ("third", "long", "tiny", "big", "p")}))
+    record("R write_results keeps 1.87432198765 and I() arrays",
            p2.returncode == 0 and rr.get("hr") == 1.87432198765 and rr.get("n") == 1284
            and rr.get("covariates") == ["age"] and re_.get("language") == "R"
            and re_.get("version") == "4.5.2" and "jsonlite" in re_.get("packages", {})
@@ -4193,6 +4281,66 @@ def run_reproduce(tmp: Path) -> None:
     g = _gate("analysis_reproduces", P, stage="S23_package")
     record("the gate passes again after a clean re-run (S23 declaration)", r8.returncode == 0 and g.ok,
            g.detail[:100])
+    record("without a manifest the filename order is used and flagged",
+           _json.loads(report.read_text(encoding="utf-8")).get("order_source") == "filename"
+           and "FILENAME order" in r8.stdout)
+
+    # ---- 1.7.1: declared order and scoped re-execution ---------------------
+    man = P / "03_analysis/analysis_manifest.json"
+    C = "03_analysis/code/"
+    entries = [
+        {"path": C + "03_r.R", "outputs": ["03_analysis/results/r_res.json"]},
+        {"path": C + "02_model.py", "inputs": ["02_data/derived/clean.csv"],
+         "outputs": ["03_analysis/results/primary.json"]},
+        {"path": C + "01_clean.py", "inputs": ["02_data/raw/data.csv"],
+         "outputs": ["02_data/derived/clean.csv"]}]
+    man.write_text(_json.dumps({"schema": 1, "scripts": entries}), encoding="utf-8")
+    from wfcore import reproproof as _rpf
+    order, src, probs = _rpf.ordered_scripts(P)
+    names = [p.name for p in order]
+    record("the manifest's input/output edges order the scripts, not their names",
+           src == "manifest" and not probs and names.index("01_clean.py") < names.index("02_model.py"),
+           str(names))
+    man.write_text(_json.dumps({"schema": 1, "scripts": entries[:2]}), encoding="utf-8")
+    r9 = _run([*RP, "run", "--project", P], cwd=tmp)
+    record("N: a manifest that omits a top-level script is refused",
+           r9.returncode == 1 and "is not listed" in r9.stdout, r9.stdout[-160:])
+    cyc = [dict(entries[0], after=[C + "02_model.py"]), dict(entries[1], after=[C + "03_r.R"]),
+           entries[2]]
+    man.write_text(_json.dumps({"schema": 1, "scripts": cyc}), encoding="utf-8")
+    r9 = _run([*RP, "run", "--project", P], cwd=tmp)
+    record("N: a dependency cycle is refused", r9.returncode == 1 and "cycle" in r9.stdout,
+           r9.stdout[-160:])
+    man.write_text(_json.dumps({"schema": 1, "scripts": entries}), encoding="utf-8")
+    r10 = _run([*RP, "run", "--project", P], cwd=tmp)
+    rep10 = _json.loads(report.read_text(encoding="utf-8"))
+    record("a full run follows the manifest order",
+           r10.returncode == 0 and rep10.get("order_source") == "manifest"
+           and [s["path"] for s in rep10["scripts"]].index(C + "01_clean.py")
+           < [s["path"] for s in rep10["scripts"]].index(C + "02_model.py"), _out(r10)[-160:])
+    rs = code / "03_r.R"
+    rs_old = rs.read_text(encoding="utf-8")
+    rs.write_text(rs_old + "# comment only\n", encoding="utf-8")
+    _wf("run-script", "03_analysis/code/03_r.R", env=env, cwd=tmp)
+    r11 = _run([*RP, "run", "--affected-only", "--project", P], cwd=tmp)
+    rep11 = _json.loads(report.read_text(encoding="utf-8"))
+    carried_rows = {s["path"] for s in rep11["scripts"] if s.get("carried")}
+    g = _gate("analysis_reproduces", P, stage="S06_protocol_final")
+    record("--affected-only re-runs only the changed script and carries the rest",
+           r11.returncode == 0 and rep11.get("mode") == "affected-only"
+           and carried_rows == {C + "01_clean.py", C + "02_model.py"}
+           and "03_analysis/results/primary.json" in rep11.get("carried_results", {}), _out(r11)[-200:])
+    record("the gate accepts a scoped proof whose carried evidence is intact", g.ok, g.detail[:160])
+    (P / "02_data/raw/data.csv").write_text("x,y\n1,2\n2,4\n3,7\n\n", encoding="utf-8")
+    r12 = _run([*RP, "run", "--affected-only", "--project", P], cwd=tmp)
+    rep12 = _json.loads(report.read_text(encoding="utf-8"))
+    record("a data change reaches every script (nothing carried)",
+           not any(s.get("carried") for s in rep12["scripts"]), _out(r12)[-200:])
+    (P / "02_data/raw/data.csv").write_text("x,y\n1,2\n2,4\n3,7\n", encoding="utf-8")
+    rs.write_text(rs_old, encoding="utf-8")
+    _wf("run-script", "03_analysis/code/03_r.R", env=env, cwd=tmp)
+    man.unlink()
+    _run([*RP, "run", "--project", P], cwd=tmp)
     report.unlink()
     g = _gate("analysis_reproduces", P, stage="S06_protocol_final")
     record("N: a missing report fails", not g.ok)
@@ -4233,8 +4381,15 @@ def run_r_figures(tmp: Path) -> None:
 res <- jsonlite::fromJSON(medpaper_path("03_analysis/results/primary.json"), simplifyVector = FALSE)
 set.seed(1)
 dat <- data.frame(time = rexp(150, 0.05), status = rbinom(150, 1, 0.7), arm = sample(c("A", "B"), 150, TRUE))
-p1 <- recipe_km(dat, "time", "status", "arm", times = c(0, 10, 20, 30), hr = res$hr, hr_ci = c(res$hr_low, res$hr_high), p = res$p)
+source(file.path(Sys.getenv("MEDPAPER_ROOT"), "tools/R/medresults.R"))
+km <- curve_table_km(survival::survfit(survival::Surv(time, status) ~ arm, data = dat), times = c(0, 10, 20, 30))
+p1 <- recipe_km(curve = km, times = c(0, 10, 20, 30), hr = res$hr, hr_ci = c(res$hr_low, res$hr_high), p = res$p)
 save_medpaper(p1, "05_figures/out/Figure1", width = "single")
+g1 <- tryCatch({ recipe_km(dat, "time", "status", "arm", times = c(0, 10, 20, 30)); "none" }, error = function(e) conditionMessage(e))
+dna <- dat; dna$time[1:3] <- NA
+g2 <- tryCatch({ recipe_km(dna, "time", "status", "arm", times = c(0, 10, 20, 30), refit = TRUE, analysis_n = 150); "none" }, error = function(e) conditionMessage(e))
+g3 <- attr(recipe_km(dna, "time", "status", "arm", times = c(0, 10, 20, 30), refit = TRUE, analysis_n = 147), "medpaper_population")
+cat("REFIT_GUARD", grepl("off by default", g1), grepl("N = 147 complete cases", g2), g3$n_dropped_na == 3 && g3$n_used == 147, "\n")
 rows <- data.frame(label = c("Overall", "Age < 65", "Age >= 65", "Women"), estimate = c(res$hr, 1.5, 2.1, 1.7),
                    ci_low = c(res$hr_low, 0.9, 1.3, 1.0), ci_high = c(res$hr_high, 2.5, 3.4, 2.9))
 save_medpaper(recipe_forest(rows), "05_figures/out/Figure2", width = "double", height_mm = 60)
@@ -4248,7 +4403,9 @@ fit <- ggsurvfit::survfit2(Surv(time, status) ~ arm, data = dat)
 raw <- ggsurvfit::ggsurvfit(fit) + ggsurvfit::add_censor_mark() + ggsurvfit::add_risktable() + theme_medpaper()
 save_medpaper(raw, "05_figures/out/RawKM", width = "single", archetype = "km_survival")
 d2 <- data.frame(time = rexp(150, 0.05), status = factor(sample(c("censor", "event", "death"), 150, TRUE), levels = c("censor", "event", "death")), arm = sample(c("A", "B"), 150, TRUE))
-save_medpaper(recipe_cif(d2, "time", "status", "arm", times = c(0, 10, 20, 30)), "05_figures/out/CIF", width = "single")
+save_medpaper(recipe_cif(d2, "time", "status", "arm", times = c(0, 10, 20, 30), refit = TRUE, analysis_n = 150), "05_figures/out/CIF", width = "single")
+ci <- tidycmprsk::cuminc(survival::Surv(time, status) ~ arm, data = d2)
+save_medpaper(recipe_cif(curve = curve_table_cif(ci, "event", times = c(0, 10, 20, 30)), times = c(0, 10, 20, 30)), "temp/CIFtab", width = "single")
 w <- tryCatch({ medpaper_palette("nejm"); "none" }, warning = function(w) conditionMessage(w))
 w2 <- tryCatch({ medpaper_palette("okabe_ito"); "none" }, warning = function(w) conditionMessage(w))
 same <- identical(suppressWarnings(medpaper_palette("nature")), suppressWarnings(medpaper_palette("npg")))
@@ -4321,6 +4478,30 @@ t <- medpaper_targets(); cat("TARGETS", t$column_width_mm_single, t$column_width
            str({k: er.get(k, {}).get("found") for k in ("step_curve", "censoring_marks", "risk_table")}))
     record("recipe_cif finds its step curve and risk table",
            ec.get("step_curve", {}).get("found") and ec.get("risk_table", {}).get("found"))
+    pop1, popc = side.get("Figure1", {}).get("population", {}), side.get("CIF", {}).get("population", {})
+    record("recipe_km draws the exported curve table and records its population in the sidecar",
+           pop1.get("mode") == "results" and pop1.get("n_used") == 150 == pop1.get("analysis_n"),
+           str(pop1))
+    record("refit is opt-in, refuses an N that differs from results, and records NA rows dropped",
+           "REFIT_GUARD TRUE TRUE TRUE" in p.stdout and popc.get("mode") == "refit"
+           and popc.get("n_used") == 150,
+           [l for l in p.stdout.splitlines() if l.startswith("REFIT")].__str__() + str(popc))
+    tab = P / "temp/qc/CIFtab.artist.json"
+    tabpop = _json.loads(tab.read_text(encoding="utf-8")).get("population", {}) if tab.is_file() else {}
+    record("recipe_cif draws an exported cuminc table without refitting",
+           tabpop.get("mode") == "results" and tabpop.get("n_used") == 150, str(tabpop))
+    (P / "03_analysis/results/km.json").write_text(_json.dumps({"n": 150, "km": {"n": 150}}),
+                                                     encoding="utf-8")
+    pp_ok = qc.population_problems({"mode": "results", "n_used": 150, "analysis_n": 150},
+                                   ["03_analysis/results/km.json"], P)
+    pp_bad = qc.population_problems({"mode": "refit", "n_used": 147, "analysis_n": 150},
+                                    ["03_analysis/results/km.json"], P)
+    pp_absent = qc.population_problems({"mode": "refit", "n_used": 140, "analysis_n": 140},
+                                       ["03_analysis/results/km.json"], P)
+    record("qc flags a figure N that differs from, or is absent in, its source results",
+           not pp_ok and any("analysis N is 150" in x for x in pp_bad)
+           and any("not an N recorded" in x for x in pp_absent), str((pp_ok, pp_bad, pp_absent)))
+    (P / "03_analysis/results/km.json").unlink()
     record("palettes: nejm warns, okabe_ito does not, nature == npg, risky set parity",
            "PALETTE_WARN TRUE OKABE_WARN FALSE NATURE_NPG TRUE" in p.stdout
            and f"RISKY {','.join(sorted(__import__('figures.style', fromlist=['x']).RISKY_PAIRS | {'npg'}))}" in p.stdout,
@@ -4896,7 +5077,7 @@ def run_v160(tmp: Path) -> None:
            any(g["check"] == "reader_review_coverage" for g in s18["gate"])
            and "reader-inputs" in (ROOT / "pipeline/stages/S18_independent_review.md")
            .read_text(encoding="utf-8"))
-    record("pipeline version is 1.7.0", pipe.meta.get("version") == "1.7.0")
+    record("pipeline version is 1.7.1", pipe.meta.get("version") == "1.7.1")
 
 
 def run_v170(tmp: Path) -> None:
@@ -5175,17 +5356,23 @@ def run_reporting_checklist(tmp: Path) -> None:
     from wfcore.checks import reporting as rp
     section("reporting-guideline checklist")
     reg = rp.load_registry()
-    counts = {g: len(reg[g]["items"]) for g in ("STROBE", "CONSORT", "STARD", "TRIPOD", "PRISMA",
-                                                  "SPIRIT", "CARE", "CHEERS")}
+    counts = {g: len(reg[g]["items"]) for g in ("STROBE", "CONSORT", "CONSORT-2010", "STARD",
+                                                  "TRIPOD", "PRISMA", "SPIRIT", "CARE", "CHEERS")}
     record("registry structure is valid and item counts match the official lists",
-           not rp.registry_problems(reg) and counts == {"STROBE": 34, "CONSORT": 37, "STARD": 34,
-           "TRIPOD": 37, "PRISMA": 42, "SPIRIT": 51, "CARE": 30, "CHEERS": 28}, str(counts))
+           not rp.registry_problems(reg) and counts == {"STROBE": 34, "CONSORT": 42,
+           "CONSORT-2010": 37, "STARD": 34, "TRIPOD": 37, "PRISMA": 42, "SPIRIT": 51, "CARE": 30,
+           "CHEERS": 28}, str(counts))
+    record("bare CONSORT means the current 2025 statement; 2010 must be named explicitly",
+           reg["CONSORT"]["version"] == "2025"
+           and rp.resolve_alias("CONSORT", reg) == "CONSORT"
+           and rp.resolve_alias("CONSORT 2010", reg) == "CONSORT-2010"
+           and len({i["id"].rstrip("abcd") for i in reg["CONSORT"]["items"]}) == 30)
     det = {s: rp.detect_guidelines(s, reg) for s in (
         "CONSORT 2025", "TRIPOD+AI", "STROBE-MR", "standard care", "CARE",
         "in the spirit of the original trial", "SPIRIT 2013", "three cheers", "a squire",
         "CHEERS 2022")}
     record("alias detection: longest first, boundaries, case-sensitive English words",
-           det == {"CONSORT 2025": ["CONSORT-2025"], "TRIPOD+AI": ["TRIPOD+AI"], "STROBE-MR": [],
+           det == {"CONSORT 2025": ["CONSORT"], "TRIPOD+AI": ["TRIPOD+AI"], "STROBE-MR": [],
                    "standard care": [], "CARE": ["CARE"], "in the spirit of the original trial": [],
                    "SPIRIT 2013": ["SPIRIT"], "three cheers": [], "a squire": [],
                    "CHEERS 2022": ["CHEERS"]}, str(det))
@@ -5196,15 +5383,27 @@ def run_reporting_checklist(tmp: Path) -> None:
     def protocol(body: str):
         (P / "01_protocol/protocol_final.md").write_text(f"# Protocol\n\n## Reporting guideline\n{body}\n\n## Ethics\nx\n", encoding="utf-8")
     heads = ["Introduction", "2.1 Study design", "Methods", "Results", "Discussion"]
-    (P / "08_submission/manuscript/full_manuscript.md").write_text(
-        "# A cohort study title\n\n" + "".join(f"## {h}\ntext\n\n" for h in heads), encoding="utf-8")
     items = [i["id"] for i in reg["STROBE"]["items"]]
 
-    def checklist(rows=None, guideline="STROBE"):
-        rows = rows if rows is not None else [(i, "Reported", "Methods", "") for i in items]
-        body = "\n".join(f"| {a} | {b} | {c} | {d} |" for a, b, c, d in rows)
+    def ev(i):
+        return f"Checklist item {i} is reported in this exact sentence."
+    methods_body = " ".join(ev(i) for i in items)
+    bodies = {"Methods": methods_body,
+              "2.1 Study design": "This is a retrospective cohort design sentence."}
+    (P / "08_submission/manuscript/full_manuscript.md").write_text(
+        "# A retrospective cohort study title of moderate length\n\n" + "".join(
+            f"## {h}\n{bodies.get(h, 'text')}\n\n" for h in heads), encoding="utf-8")
+
+    def checklist(rows=None, guideline="STROBE", legacy=False):
+        rows = rows if rows is not None else [(i, "Reported", "Methods", ev(i), "") for i in items]
+        if legacy:
+            body = "\n".join(f"| {a} | {b} | {c} | {e} |" for a, b, c, _, e in rows)
+            head = "| Item | Status | Location | Reason |\n|---|---|---|---|"
+        else:
+            body = "\n".join(f"| {a} | {b} | {c} | {d} | {e} |" for a, b, c, d, e in rows)
+            head = "| Item | Status | Location | Evidence | Reason |\n|---|---|---|---|---|"
         (P / "08_submission/reporting_checklist.md").write_text(
-            f"# Reporting checklist\n\nGuideline: {guideline}\n\n| Item | Status | Location | Reason |\n|---|---|---|---|\n{body}\n",
+            f"# Reporting checklist\n\nGuideline: {guideline}\n\n{head}\n{body}\n",
             encoding="utf-8")
 
     def gate(**spec):
@@ -5213,14 +5412,14 @@ def run_reporting_checklist(tmp: Path) -> None:
     checklist()
     g = gate()
     record("a complete checklist against the variant passes", g.ok, g.detail[:120])
-    base = [(i, "Reported", "Methods", "") for i in items]
+    base = [(i, "Reported", "Methods", ev(i), "") for i in items]
     negs = {
         "missing item": base[1:],
         "duplicate": base + [base[0]],
-        "unknown id": base + [("99z", "Reported", "Methods", "")],
-        "absent heading": [(items[0], "Reported", "Methods 2", "")] + base[1:],
-        "short reason": [(items[0], "Not applicable", "", "too short")] + base[1:],
-        "bad status": [(items[0], "Partly", "Methods", "")] + base[1:],
+        "unknown id": base + [("99z", "Reported", "Methods", ev("1a"), "")],
+        "absent heading": [(items[0], "Reported", "Methods 2", ev(items[0]), "")] + base[1:],
+        "short reason": [(items[0], "Not applicable", "", "", "too short")] + base[1:],
+        "bad status": [(items[0], "Partly", "Methods", ev(items[0]), "")] + base[1:],
     }
     failed = {}
     for k, rows in negs.items():
@@ -5228,6 +5427,30 @@ def run_reporting_checklist(tmp: Path) -> None:
         failed[k] = not gate().ok
     record("N: missing, duplicate, unknown, unresolved, short-reason and bad-status rows fail",
            all(failed.values()), str(failed))
+    checklist([(items[0], "Reported", "Methods", "", "")] + base[1:])
+    g = gate()
+    record("N: a Reported row with only a section and no evidence quote fails",
+           not g.ok and "without a verbatim Evidence quote" in g.detail, g.detail[:160])
+    checklist([(items[0], "Reported", "Methods", "We followed every guideline item carefully.",
+                "")] + base[1:])
+    g = gate()
+    record("N: an evidence quote that is not in the manuscript fails",
+           not g.ok and "not found in the stated location" in g.detail, g.detail[:160])
+    checklist([(items[0], "Reported", "Introduction", ev(items[0]), "")] + base[1:])
+    g = gate()
+    record("N: a real quote attributed to the wrong section fails",
+           not g.ok and "not found in the stated location" in g.detail, g.detail[:160])
+    checklist([(i, "Reported", "Methods", ev(items[0]), "") for i in items[:5]] + base[5:])
+    g = gate()
+    record("N: one quote reused for many items fails",
+           not g.ok and "reused for more than" in g.detail, g.detail[:160])
+    checklist([(items[0], "Reported", "Methods", f"  checklist ITEM {items[0]} is reported\n in "
+                "this *exact* sentence.  ", "")] + base[1:])
+    record("evidence matching ignores whitespace, case and emphasis markup", gate().ok)
+    checklist(legacy=True)
+    g = gate()
+    record("N: a pre-1.7.1 four-column checklist is refused with a migration hint",
+           not g.ok and "added the Evidence column" in g.detail, g.detail[:160])
     checklist(guideline="CONSORT")
     record("N: a checklist for another guideline fails", not gate().ok)
     protocol("Guideline: TRIPOD+AI")
@@ -5247,21 +5470,30 @@ def run_reporting_checklist(tmp: Path) -> None:
     record("explicit Guideline: lines win over prose; prose fallback detects both",
            ok1 and not g2.ok and "do not match the protocol" in g2.detail)
     protocol("Guideline: STROBE")
-    rows = [(items[0], "Reported", "Title", ""), (items[1], "Reported", "Study design", "")] + base[2:]
+    rows = [(items[0], "Reported", "Title", "A retrospective cohort study title", ""),
+            (items[1], "Reported", "Study design", "This is a retrospective cohort design", "")
+            ] + base[2:]
     checklist(rows)
-    record("Title resolves to the H1 and numbered headings match without their numbers", gate().ok)
+    g = gate()
+    record("Title resolves to the H1 and numbered headings match without their numbers", g.ok,
+           g.detail[:160])
     sup = P / "08_submission/manuscript/supplementary_methods.md"
-    rows = [(items[0], "Reported", "Supplementary Methods > Sensitivity analyses", ""),
-            (items[1], "Reported", "Title page; Statements > Funding", "")] + base[2:]
+    rows = [(items[0], "Reported", "Supplementary Methods > Sensitivity analyses",
+             "Sensitivity analyses excluded early deaths.", ""),
+            (items[1], "Reported", "Title page; Statements > Funding",
+             "This study received no specific funding.", "")] + base[2:]
     checklist(rows)
     absent = not gate().ok
-    sup.write_text("# Supplementary Methods\n## Sensitivity analyses\nx\n", encoding="utf-8")
+    sup.write_text("# Supplementary Methods\n## Sensitivity analyses\n"
+                   "Sensitivity analyses excluded early deaths.\n", encoding="utf-8")
     (P / "08_submission/manuscript/title_page.md").write_text("# Title page\nx\n", encoding="utf-8")
-    (P / "08_submission/manuscript/statements.md").write_text("# Statements\n## Funding\nnone\n", encoding="utf-8")
-    present = gate().ok
-    checklist([(items[0], "Reported", "Nonexistent doc > X", "")] + base[1:])
+    (P / "08_submission/manuscript/statements.md").write_text(
+        "# Statements\n## Funding\nThis study received no specific funding.\n", encoding="utf-8")
+    g = gate()
+    present = g.ok
+    checklist([(items[0], "Reported", "Nonexistent doc > X", ev(items[0]), "")] + base[1:])
     record("locations resolve across the variant's documents",
-           absent and present and not gate().ok)
+           absent and present and not gate().ok, g.detail[:160])
     record("the checklist is journal-downstream (cleared on a journal switch)",
            "08_submission/reporting_checklist.md" in scifreeze.JOURNAL_DOWNSTREAM)
 
@@ -5385,6 +5617,7 @@ def main() -> int:
         purity.mkdir()
         run_engine_purity(purity)
         run_language_policy()
+        run_paper_header(tmp / "header_root")
         run_no_plot_calls_r()
         run_results_environment(tmp / "receipts_root")
         run_reproduce(tmp / "repro_root")

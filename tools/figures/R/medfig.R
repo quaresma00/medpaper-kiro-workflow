@@ -657,7 +657,7 @@ scale_fill_medpaper <- function(name = "okabe_ito", ...) scale_fill_manual(value
 .mf_write_json <- function(obj, path) {
   tmp <- paste0(path, ".tmp")
   on.exit(if (file.exists(tmp)) unlink(tmp), add = TRUE)
-  txt <- jsonlite::toJSON(obj, auto_unbox = TRUE, digits = NA, pretty = TRUE, null = "null", na = "null")
+  txt <- jsonlite::toJSON(obj, auto_unbox = TRUE, digits = I(17), pretty = TRUE, null = "null", na = "null")
   writeLines(enc2utf8(as.character(txt)), tmp, useBytes = TRUE)
   if (!file.rename(tmp, path)) stop("could not move ", tmp, " to ", path, call. = FALSE)
   invisible(path)
@@ -855,6 +855,10 @@ save_medpaper <- function(plot, stem, width = "single", height_mm = NULL, dpi = 
   audit$source_hashes <- stats::setNames(lapply(src_rels, function(r) .mf_sha256(file.path(paper, r))), src_rels)
   if (!length(src_rels)) audit$source_hashes <- structure(list(), names = character(0))
   audit$render_hashes <- stats::setNames(lapply(staged, .mf_sha256), vapply(finals, rel_of, character(1)))
+  # Which population the drawn curve represents (recipe_km/recipe_cif, 1.7.1); qc.py compares
+  # it with the figure's source_results.
+  pop <- attr(plot, "medpaper_population")
+  audit$population <- if (is.list(pop)) pop else structure(list(), names = character(0))
   for (i in seq_along(finals)) {
     # file.rename replaces an existing target, so the old file is never removed first.
     if (!file.rename(staged[i], finals[i])) stop("could not publish ", finals[i], call. = FALSE)
@@ -862,7 +866,7 @@ save_medpaper <- function(plot, stem, width = "single", height_mm = NULL, dpi = 
   keys <- c("figure", "archetype", "engine", "n_axes", "min_font_pt", "max_font_pt", "min_line_pt",
             "text_clipped_at_edge", "axes_tightbbox_overlaps", "glyph_warnings",
             "tick_label_collisions", "interior_voids", "elements", "figure_text",
-            "script", "script_sha256", "source_hashes", "render_hashes")
+            "script", "script_sha256", "source_hashes", "render_hashes", "population")
   .mf_write_json(audit[keys], sidecar)
 
   px <- c(floor(w_mm / 25.4 * dpi), floor(h_mm / 25.4 * dpi))

@@ -67,9 +67,13 @@ Results JSON are written only through `write_results()` (Python `tools/analysis/
 R `tools/R/medresults.R`), which appends an `environment` receipt: language and version,
 packages, seed, script and its sha256. Those receipt numbers never count as provenance. At S06
 `python tools/reproduce.py run` re-executes every top-level `03_analysis/code` script in a
-sandbox and requires identical results; `analysis_reproduces` re-checks that proof at S17,
-S23 and S25. At S23 `08_submission/reporting_checklist.md` maps every item of the protocol's
-reporting guideline (`reference/reporting_guidelines.toml`) to a location that exists.
+sandbox, in the order `03_analysis/analysis_manifest.json` declares (filename order with a
+warning when absent; `--affected-only` re-runs just the affected scripts), and requires
+identical results; `analysis_reproduces` re-checks that proof at S17, S23 and S25. At S23
+`08_submission/reporting_checklist.md` maps every item of the protocol's reporting guideline
+(`reference/reporting_guidelines.toml`) to a location that exists plus a verbatim evidence
+quote found there. KM/CIF figures draw the curve table the analysis exported
+(`curve_table_km()`/`curve_table_cif()`), not a refit.
 
 ## Customise one paper without changing the engine
 

@@ -20,6 +20,12 @@ _B_LEFT = r"(?<![A-Za-z0-9+\-])"
 _B_RIGHT = r"(?![A-Za-z0-9+\-])"
 _HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
 _GUIDELINE_LINE = re.compile(r"^\s*[-*]?\s*Guideline:\s*(.+?)\s*$", re.I)
+HEADER = ["item", "status", "location", "evidence", "reason"]
+LEGACY_HEADER = ["item", "status", "location", "reason"]
+# A section heading proves a place exists, not that the item is reported there. Every Reported
+# row therefore carries a verbatim quote that must be found inside that location's text.
+EVIDENCE_MIN_CHARS = 25
+EVIDENCE_MAX_REUSE = 3
 
 
 def load_registry(path: Path | None = None) -> dict:
@@ -163,18 +169,47 @@ def parse_checklist(text: str) -> tuple[dict[str, list[dict]], list[str]]:
             continue
         cells = [c.strip() for c in line.strip().strip("|").split("|")]
         if not header_ok[current]:
-            if [c.casefold() for c in cells[:4]] == ["item", "status", "location", "reason"]:
-                header_ok[current] = True
-            else:
-                problems.append(f"{current}: table header must be Item | Status | Location | Reason")
-                header_ok[current] = True
+            if [c.casefold() for c in cells[:5]] != HEADER:
+                problems.append(f"{current}: table header must be "
+                                f"{' | '.join(h.capitalize() for h in HEADER)}"
+                                + (" (1.7.1 added the Evidence column: a verbatim quote from "
+                                   "the manuscript at that location)"
+                                   if [c.casefold() for c in cells[:4]] == LEGACY_HEADER else ""))
+            header_ok[current] = True
             continue
         if all(re.fullmatch(r":?-+:?", c) for c in cells if c):
             continue
-        cells += [""] * (4 - len(cells))
+        cells += [""] * (5 - len(cells))
         blocks[current].append({"item": cells[0], "status": cells[1], "location": cells[2],
-                                "reason": cells[3]})
+                                "evidence": cells[3], "reason": cells[4]})
     return blocks, problems
+
+
+def norm_quote(text: str) -> str:
+    """Whitespace-, case- and markdown-emphasis-insensitive form used for evidence matching."""
+    t = re.sub(r"[*_`]", "", text)
+    t = t.replace("\u201c", "").replace("\u201d", "").replace("\u2018", "'").replace("\u2019", "'")
+    t = t.strip().strip('"').strip()
+    return re.sub(r"\s+", " ", t).casefold()
+
+
+def section_text(text: str, wanted: str) -> str:
+    """Body of every section whose normalised heading is `wanted`, subsections included."""
+    out, level, in_fence = [], None, False
+    for line in text.splitlines():
+        if line.strip().startswith("```"):
+            in_fence = not in_fence
+        m = None if in_fence else _HEADING.match(line)
+        if m:
+            if level is not None and len(m.group(1)) <= level:
+                level = None
+            if level is None and normalise_heading(m.group(2)) == wanted:
+                level = len(m.group(1))
+                out.append(m.group(2))
+                continue
+        if level is not None:
+            out.append(line)
+    return "\n".join(out)
 
 
 @check("reporting_checklist_complete")
@@ -214,13 +249,14 @@ def reporting_checklist_complete(ctx: Ctx) -> Result:
     if not ctx.p(rel).is_file():
         return Result(False, name, f"{rel} missing", ["Write it at S23 against the journal "
                       "variant: one `Guideline: <name>` line and an Item | Status | Location | "
-                      "Reason table per guideline."], severity=sev)
+                      "Evidence | Reason table per guideline."], severity=sev)
     man_rel = ctx.spec.get("manuscript", MANUSCRIPT_REL)
     if not ctx.p(man_rel).is_file():
         return Result(False, name, f"{man_rel} missing (open the journal variant first)",
                       severity=sev)
     documents = dict(ctx.spec.get("documents", DEFAULT_DOCUMENTS))
     doc_heads: dict[str, list[str] | None] = {}
+    doc_texts: dict[str, str] = {}
     problems = []
     names_cf = [n.casefold() for n in documents]
     if len(set(names_cf)) != len(names_cf) or "title" in names_cf:
@@ -232,21 +268,31 @@ def reporting_checklist_complete(ctx: Ctx) -> Result:
             return Result(False, name, f"documents spec: {drel} escapes the paper", severity=sev)
         text = p.read_text(encoding="utf-8") if p.is_file() else ""
         doc_heads[dname.casefold()] = headings(text)[0] if text.strip() else None
-    main_heads, title = headings(ctx.read(man_rel))
+        doc_texts[dname.casefold()] = text
+    main_text = ctx.read(man_rel)
+    main_heads, title = headings(main_text)
 
-    def resolves(token: str) -> bool:
+    def scope(token: str) -> str | None:
+        """The text a location token points at, or None when it does not resolve."""
         t = token.strip()
         if not t:
-            return False
+            return None
         if t.casefold() == "title":
-            return title is not None
+            return title
         if ">" in t:
             doc, head = (x.strip() for x in t.split(">", 1))
             hs = doc_heads.get(doc.casefold())
-            return bool(hs) and normalise_heading(head) in hs
+            if not hs or normalise_heading(head) not in hs:
+                return None
+            return section_text(doc_texts[doc.casefold()], normalise_heading(head))
         if normalise_heading(t) in main_heads:
-            return True
-        return doc_heads.get(t.casefold()) is not None
+            return section_text(main_text, normalise_heading(t))
+        if doc_heads.get(t.casefold()) is not None:
+            return doc_texts[t.casefold()]
+        return None
+
+    def resolves(token: str) -> bool:
+        return scope(token) is not None
 
     blocks, problems = parse_checklist(ctx.read(rel))
     block_ids = {}
@@ -260,6 +306,9 @@ def reporting_checklist_complete(ctx: Ctx) -> Result:
         problems.append(f"checklist blocks do not match the protocol: checklist "
                         f"{sorted(block_ids)}, protocol {sorted(ids)}")
     unresolved_all = []
+    no_evidence: list[str] = []
+    not_found: list[str] = []
+    reuse: dict[str, list[str]] = {}
     for gid, label in block_ids.items():
         if gid not in ids:
             continue
@@ -284,6 +333,14 @@ def reporting_checklist_complete(ctx: Ctx) -> Result:
                 for t in tokens:
                     if not resolves(t):
                         unresolved_all.append(f"{gid} {r['item']}: '{t.strip()}'")
+                quote = norm_quote(r.get("evidence", ""))
+                if len(quote) < EVIDENCE_MIN_CHARS:
+                    no_evidence.append(f"{gid} {r['item']}")
+                else:
+                    reuse.setdefault(quote, []).append(f"{gid} {r['item']}")
+                    scopes = [s for s in (scope(t) for t in tokens) if s is not None]
+                    if scopes and not any(quote in norm_quote(s) for s in scopes):
+                        not_found.append(f"{gid} {r['item']}: \"{r['evidence'][:50]}\"")
             elif status == "not applicable":
                 if len(r["reason"].strip()) < 20:
                     problems.append(f"{gid} {r['item']}: Not applicable needs a reason of >= 20 "
@@ -291,6 +348,17 @@ def reporting_checklist_complete(ctx: Ctx) -> Result:
             else:
                 problems.append(f"{gid} {r['item']}: status must be Reported or Not applicable, "
                                 f"got '{r['status']}'")
+    if no_evidence:
+        problems.append(f"Reported row(s) without a verbatim Evidence quote of >= "
+                        f"{EVIDENCE_MIN_CHARS} characters: {', '.join(no_evidence[:10])}")
+    if not_found:
+        problems.append("Evidence quote(s) not found in the stated location's text: "
+                        + "; ".join(not_found[:5]))
+    overused = [f"{len(v)} items ({', '.join(v[:4])})" for v in reuse.values()
+                if len(v) > EVIDENCE_MAX_REUSE]
+    if overused:
+        problems.append(f"the same Evidence quote is reused for more than {EVIDENCE_MAX_REUSE} "
+                        f"items, so it cannot be specific evidence: {'; '.join(overused[:3])}")
     if unresolved_all:
         avail = [f"main manuscript: {', '.join(main_heads[:20])}"]
         for dname, hs in doc_heads.items():
@@ -300,7 +368,11 @@ def reporting_checklist_complete(ctx: Ctx) -> Result:
     if problems:
         return Result(False, name, "; ".join(problems[:8]),
                       ["Locations: a main-manuscript heading, `Title`, `<Document> > <heading>` "
-                       "(Supplementary Methods, Title page, Statements) or a bare document name."],
+                       "(Supplementary Methods, Title page, Statements) or a bare document name.",
+                       "Evidence: copy the sentence that actually reports the item, verbatim, "
+                       "from that location (>= 25 characters). A heading is not evidence; if "
+                       "no sentence reports it, fix the manuscript or mark Not applicable with "
+                       "a reason."],
                       severity=sev)
-    return Result(True, name, f"{', '.join(ids)}: every item reported or justified, every "
-                              "location exists")
+    return Result(True, name, f"{', '.join(ids)}: every item reported with a quote found at its "
+                              "location, or justified as not applicable")

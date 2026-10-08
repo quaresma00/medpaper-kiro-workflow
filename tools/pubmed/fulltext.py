@@ -69,12 +69,97 @@ def _sha256(path: Path) -> str:
 #   <article-id> in the JATS front matter, <meta name="citation_doi">. A contradiction there is
 #   conclusive, so a mismatch refuses the file.
 #
-#   A PDF has no such position. Its raw bytes contain the DOIs of everything it CITES, so
-#   "some other DOI appears in here" is not evidence of anything - treating it as evidence
-#   would repeat the exact mistake that caused this bug (reading a bibliography as if it
-#   described the article). For a PDF only positive evidence counts: our identifier present
-#   means match, absent means indeterminate. Never mismatch.
+#   A PDF has no such position. Its text contains the DOIs of everything it CITES, so "our
+#   DOI appears somewhere" is not evidence either: a different article that cites ours
+#   contains it in its reference list. Identity is therefore read from the FRONT MATTER only
+#   (the first pages, cut at the References/Bibliography heading) and needs two independent
+#   signals: our DOI in the front matter AND (title similarity OR first-author surname + year).
+#   Our DOI present only after the references heading means the file cites us - mismatch.
+#   Anything weaker is indeterminate, which the S15 gate treats as unproven.
 _DOI_RE = re.compile(rb"10\.\d{4,9}/[-._;()/:A-Za-z0-9]+")
+_DOI_TXT = re.compile(r"10\.\d{4,9}/[-._;()/:A-Za-z0-9]+")
+_REFS_HEAD = re.compile(r"(?im)^\s*(?:\d+\.?\s*)?(references|bibliography|literature cited|"
+                        r"works cited|reference list)\s*:?\s*$")
+_REFS_INLINE = re.compile(r"(?i)\b(references|bibliography|literature cited)\b\s*[:\n]")
+TITLE_MIN_OVERLAP = 0.8
+FRONT_PAGES = 2
+
+
+def _pdf_text(blob: bytes) -> tuple[str, str]:
+    """(front_matter_text, full_text). pypdf when it can parse the file; otherwise the raw
+    bytes decoded, which is what an uncompressed or synthetic PDF offers."""
+    pages: list[str] = []
+    try:
+        import io
+        from pypdf import PdfReader
+        reader = PdfReader(io.BytesIO(blob))
+        pages = [(p.extract_text() or "") for p in reader.pages]
+    except Exception:  # noqa: BLE001
+        pages = []
+    if any(p.strip() for p in pages):
+        full = "\n".join(pages)
+        front = "\n".join(pages[:FRONT_PAGES])
+    else:
+        full = blob[:8_000_000].decode("latin-1", errors="replace")
+        front = full
+    for rx in (_REFS_HEAD, _REFS_INLINE):
+        m = rx.search(front)
+        if m:
+            front = front[:m.start()]
+            break
+    return front, full
+
+
+def _norm_tokens(text: str) -> list[str]:
+    return [t for t in re.sub(r"[^0-9a-z]+", " ", text.casefold()).split() if len(t) >= 3]
+
+
+def title_overlap(title: str, text: str) -> float:
+    """Share of the library title's content words that occur in `text`."""
+    want = _norm_tokens(title)
+    if not want:
+        return 0.0
+    have = set(_norm_tokens(text))
+    return sum(1 for t in want if t in have) / len(want)
+
+
+def _dois(text: str) -> set[str]:
+    return {m.group(0).casefold().rstrip(".,;)") for m in _DOI_TXT.finditer(text)}
+
+
+def _pdf_identity(entry: dict, blob: bytes, ext: str, want_doi: str) -> dict:
+    front, full = _pdf_text(blob)
+    # Line-wrapped DOIs ("10.1055/a-\n2669") are rejoined before matching.
+    front_j = re.sub(r"-\s*\n\s*", "-", front)
+    full_j = re.sub(r"-\s*\n\s*", "-", full)
+    front_dois, all_dois = _dois(front_j), _dois(full_j)
+    title = str(entry.get("title") or "")
+    overlap = title_overlap(title, front_j)
+    authors = entry.get("authors") or []
+    surname = str(authors[0].get("last", "")) if authors and isinstance(authors[0], dict) else ""
+    year = str(entry.get("year") or "")[:4]
+    author_year = bool(surname and year and re.search(rf"(?i)\b{re.escape(surname)}\b", front_j)
+                       and year in front_j)
+    title_ok = overlap >= TITLE_MIN_OVERLAP
+    signals = (f"title overlap {overlap:.2f} (need {TITLE_MIN_OVERLAP}); first author+year "
+               f"{'found' if author_year else 'not found'}")
+    if want_doi and want_doi in front_dois:
+        if title_ok or author_year:
+            return {"identity": "match", "identity_basis": "pdf-front-matter",
+                    "identity_detail": f"library DOI {want_doi} in the front matter; {signals}"}
+        return {"identity": "indeterminate", "identity_basis": "pdf-front-doi-only",
+                "identity_detail": f"library DOI in the front matter but no second signal; "
+                                   f"{signals}"}
+    if want_doi and want_doi in all_dois:
+        other = sorted(front_dois - {want_doi})[:2]
+        return {"identity": "mismatch", "identity_basis": "pdf-doi-only-in-references",
+                "identity_detail": f"library DOI {want_doi} occurs only after the front matter "
+                                   f"(this file CITES the article)"
+                                   + (f"; front matter names {', '.join(other)}" if other else "")
+                                   + f"; {signals}"}
+    return {"identity": "indeterminate", "identity_basis": f"{ext}-front-unverified",
+            "identity_detail": f"library DOI not found in the front matter; {signals}. "
+                               f"A PDF's cited DOIs are not evidence of identity"}
 
 
 def _jats_ids(blob: bytes) -> dict:
@@ -129,16 +214,7 @@ def check_identity(entry: dict, blob: bytes, ext: str) -> dict:
     elif ext in ("html", "htm"):
         found, conclusive = _html_ids(blob), True
     else:
-        # PDF (or anything opaque): positive evidence only.
-        raw = blob if len(blob) < 8_000_000 else blob[:8_000_000]
-        hits = {m.group(0).decode("ascii", "replace").casefold().rstrip(".,;)")
-                for m in _DOI_RE.finditer(raw)}
-        if want_doi and want_doi in hits:
-            return {"identity": "match", "identity_basis": "pdf-doi-present",
-                    "identity_detail": f"library DOI {want_doi} occurs in the file"}
-        return {"identity": "indeterminate", "identity_basis": f"{ext}-opaque",
-                "identity_detail": "no identifier could be read from the payload; a PDF's "
-                                   "cited DOIs are not evidence either way"}
+        return _pdf_identity(entry, blob, ext, want_doi)
 
     got_doi = str(found.get("doi") or "").strip().casefold()
     got_pmid = str(found.get("pmid") or "").strip()

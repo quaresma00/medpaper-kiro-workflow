@@ -2,8 +2,8 @@
 # attr(, "medpaper_archetype") set; render it with save_medpaper().
 #
 #   source(file.path(Sys.getenv("MEDPAPER_ROOT"), "tools/figures/R/recipes.R"))
-#   res <- jsonlite::fromJSON(medpaper_path("03_analysis/results/primary.json"), simplifyVector = FALSE)
-#   p <- recipe_km(dat, "time", "status", "arm", times = c(0, 12, 24, 36),
+#   res <- jsonlite::fromJSON(medpaper_path("03_analysis/results/primary.json"))
+#   p <- recipe_km(curve = res$km, times = c(0, 12, 24, 36),       # res$km from curve_table_km()
 #                  hr = res$hr, hr_ci = c(res$hr_low, res$hr_high), p = res$p)
 #   save_medpaper(p, "05_figures/out/Figure1", width = "single")
 #
@@ -44,9 +44,99 @@ if (!exists("save_medpaper", mode = "function")) source(file.path(dirname(.rc_se
           axis.title.y = element_blank(), plot.title = element_text(size = 8))
 }
 
-recipe_km <- function(data, time, status, group, times, hr = NULL, hr_ci = NULL, p = NULL,
-                      xlab = "Time", ylab = "Survival probability", palette = "okabe_ito") {
+# ---------------------------------------------------------------------------
+# Curves come from the confirmed analysis, not from a second fit (1.7.1).
+# A figure that re-estimates a survival or cumulative-incidence curve can silently use another
+# population (NA rows dropped by the plotting fit, a different filter) than the analysis it
+# illustrates. The default path draws a curve table the analysis script exported with
+# curve_table_km()/curve_table_cif() (tools/R/medresults.R) into its results JSON:
+#
+#   res <- jsonlite::fromJSON(medpaper_path("03_analysis/results/primary.json"))
+#   p <- recipe_km(curve = res$km, times = c(0, 12, 24), hr = res$hr, ...)
+#
+# Fitting inside the recipe remains possible only with refit = TRUE and analysis_n = the N
+# recorded in results JSON; the complete-case N actually used must equal it. Either way the
+# population (n_used, analysis_n, NA rows dropped, mode) is written to the figure sidecar and
+# qc.py checks it against the figure's source_results.
+.rc_population <- function(p, pop) { attr(p, "medpaper_population") <- pop; p }
+
+.rc_refit_data <- function(data, cols, analysis_n, refit, recipe) {
+  if (!isTRUE(refit))
+    stop(recipe, ": refitting the curve inside the figure is off by default. Pass curve = the ",
+         "table exported by curve_table_", sub("recipe_", "", recipe), "() into results JSON, or ",
+         "refit = TRUE with analysis_n = the N recorded in results JSON", call. = FALSE)
+  .rc_num(analysis_n, 1, "analysis_n")
+  keep <- stats::complete.cases(data[, cols, drop = FALSE])
+  used <- data[keep, , drop = FALSE]
+  if (nrow(used) != analysis_n)
+    stop(recipe, ": the refit would use N = ", nrow(used), " complete cases (", sum(!keep),
+         " row(s) with NA in ", paste(cols, collapse = "/"), " dropped) but results JSON says ",
+         "analysis N = ", analysis_n, ". Plot the same population the analysis used.", call. = FALSE)
+  list(data = used, pop = list(mode = "refit", n_input = nrow(data), n_used = nrow(used),
+                               n_dropped_na = sum(!keep), analysis_n = analysis_n,
+                               na_rule = paste("complete cases on", paste(cols, collapse = ", "))))
+}
+
+.rc_curve_df <- function(curve, recipe) {
+  need <- c("time", "estimate", "strata")
+  if (!is.list(curve) || !all(need %in% names(curve)))
+    stop(recipe, ": curve must carry time, estimate, strata (and n, risk) as exported by ",
+         "curve_table_*()", call. = FALSE)
+  df <- data.frame(time = unlist(curve$time), estimate = unlist(curve$estimate),
+                   strata = as.character(unlist(curve$strata)))
+  lo <- suppressWarnings(as.numeric(unlist(lapply(curve$lower %||% list(), function(v) if (is.null(v)) NA else v))))
+  hi <- suppressWarnings(as.numeric(unlist(lapply(curve$upper %||% list(), function(v) if (is.null(v)) NA else v))))
+  # A band is drawn only when the exported table has finite limits at every step.
+  if (length(lo) == nrow(df) && length(hi) == nrow(df) && all(is.finite(c(lo, hi)))) {
+    df$lower <- lo; df$upper <- hi
+  }
+  .rc_num(df$time, nrow(df), "curve$time"); .rc_num(df$estimate, nrow(df), "curve$estimate")
+  df
+}
+
+.rc_curve_plot <- function(curve, recipe, times, ylim, xlab, ylab, palette, legend_xy, legend_just) {
+  df <- .rc_curve_df(curve, recipe)
+  lv <- unique(df$strata)
+  df$strata <- factor(df$strata, levels = lv)
+  .rc_num(curve$n, 1, "curve$n")
+  pal <- medpaper_palette(palette, length(lv))
+  # Same look as the refit path (ggsurvfit draws no band by default); lower/upper stay in the
+  # table for the text and for any explicit band a script adds.
+  pl <- ggplot(df, aes(time, estimate, colour = strata)) + geom_step()
+  cens <- as.logical(unlist(curve$censor %||% list()))
+  if (length(cens) == nrow(df) && any(cens, na.rm = TRUE))
+    pl <- pl + geom_point(data = df[!is.na(cens) & cens, , drop = FALSE], shape = 3, size = 1.2,
+                          show.legend = FALSE)
+  pl <- pl + scale_colour_manual(values = pal) +
+    scale_x_continuous(breaks = times) + coord_cartesian(xlim = range(times), ylim = ylim) +
+    labs(x = xlab, y = ylab, colour = NULL) + theme_medpaper() +
+    theme(legend.position = "inside", legend.position.inside = legend_xy, legend.justification = legend_just)
+  rk <- curve$risk
+  if (!is.list(rk) || !all(c("time", "strata", "n_risk") %in% names(rk)))
+    stop(recipe, ": curve$risk (time, strata, n_risk at the axis times) is required", call. = FALSE)
+  rt <- data.frame(time = unlist(rk$time), strata = as.character(unlist(rk$strata)),
+                   n.risk = unlist(rk$n_risk))
+  list(curve = pl, risk = .rc_risk_leaf(rt, times, lv, palette), levels = lv,
+       pop = list(mode = "results", n_used = as.numeric(curve$n), analysis_n = as.numeric(curve$n),
+                  n_dropped_na = curve$n_dropped_na %||% NULL,
+                  na_rule = curve$na_rule %||% "as exported by the analysis script"))
+}
+
+recipe_km <- function(data = NULL, time = NULL, status = NULL, group = NULL, times, hr = NULL,
+                      hr_ci = NULL, p = NULL, xlab = "Time", ylab = "Survival probability",
+                      palette = "okabe_ito", curve = NULL, refit = FALSE, analysis_n = NULL) {
   .rc_num(times, what = "times"); .rc_num(hr, 1, "hr"); .rc_num(hr_ci, 2, "hr_ci"); .rc_num(p, 1, "p")
+  hr_txt <- if (!is.null(hr)) paste0("HR ", if (!is.null(hr_ci)) .fmt_est(hr, hr_ci[1], hr_ci[2]) else .fmt_num(hr),
+                                     if (!is.null(p)) paste0("; P ", .fmt_p(p)) else "") else NULL
+  if (!is.null(curve)) {
+    cp <- .rc_curve_plot(curve, "recipe_km", times, c(0, 1), xlab, ylab, palette, c(0.02, 0.02), c(0, 0))
+    pl <- cp$curve
+    if (!is.null(hr_txt)) pl <- pl + annotate("text", x = max(times), y = 0.98, label = hr_txt, hjust = 1, vjust = 1, size = 7 / ggplot2::.pt)
+    out <- patchwork::wrap_plots(pl, cp$risk, ncol = 1, heights = c(3, 1))
+    return(.rc_population(.rc_tag(out, "km_survival"), cp$pop))
+  }
+  rf <- .rc_refit_data(data, c(time, status, group), analysis_n, refit, "recipe_km")
+  data <- rf$data
   data[[group]] <- factor(data[[group]])
   lv <- levels(data[[group]])
   fml <- stats::as.formula(sprintf("survival::Surv(%s, %s) ~ %s", time, status, group))
@@ -57,20 +147,28 @@ recipe_km <- function(data, time, status, group, times, hr = NULL, hr_ci = NULL,
     scale_x_continuous(breaks = times) + coord_cartesian(xlim = range(times), ylim = c(0, 1)) +
     labs(x = xlab, y = ylab, colour = NULL) + theme_medpaper() +
     theme(legend.position = "inside", legend.position.inside = c(0.02, 0.02), legend.justification = c(0, 0))
-  if (!is.null(hr)) {
-    txt <- paste0("HR ", if (!is.null(hr_ci)) .fmt_est(hr, hr_ci[1], hr_ci[2]) else .fmt_num(hr),
-                  if (!is.null(p)) paste0("; P ", .fmt_p(p)) else "")
-    curve <- curve + annotate("text", x = max(times), y = 0.98, label = txt, hjust = 1, vjust = 1, size = 7 / ggplot2::.pt)
-  }
+  if (!is.null(hr_txt))
+    curve <- curve + annotate("text", x = max(times), y = 0.98, label = hr_txt, hjust = 1, vjust = 1, size = 7 / ggplot2::.pt)
   s <- summary(fit, times = times, extend = TRUE)
   rt <- data.frame(time = s$time, strata = sub("^.*=", "", as.character(s$strata)), n.risk = s$n.risk)
   risk <- .rc_risk_leaf(rt, times, lv, palette)
-  .rc_tag(patchwork::wrap_plots(curve, risk, ncol = 1, heights = c(3, 1)), "km_survival")
+  .rc_population(.rc_tag(patchwork::wrap_plots(curve, risk, ncol = 1, heights = c(3, 1)), "km_survival"), rf$pop)
 }
 
-recipe_cif <- function(data, time, status, group, times, cause = 1, gray_p = NULL,
-                       xlab = "Time", ylab = "Cumulative incidence", palette = "okabe_ito") {
+recipe_cif <- function(data = NULL, time = NULL, status = NULL, group = NULL, times, cause = 1,
+                       gray_p = NULL, xlab = "Time", ylab = "Cumulative incidence",
+                       palette = "okabe_ito", curve = NULL, refit = FALSE, analysis_n = NULL) {
   .rc_num(times, what = "times"); .rc_num(gray_p, 1, "gray_p"); .rc_num(cause, 1, "cause")
+  gray_txt <- if (!is.null(gray_p)) paste0("Gray's test P ", .fmt_p(gray_p)) else NULL
+  if (!is.null(curve)) {
+    cp <- .rc_curve_plot(curve, "recipe_cif", times, NULL, xlab, ylab, palette, c(0.02, 0.98), c(0, 1))
+    pl <- cp$curve
+    if (!is.null(gray_txt)) pl <- pl + annotate("text", x = max(times), y = Inf, label = gray_txt, hjust = 1, vjust = 1.5, size = 7 / ggplot2::.pt)
+    out <- patchwork::wrap_plots(pl, cp$risk, ncol = 1, heights = c(3, 1))
+    return(.rc_population(.rc_tag(out, "cumulative_incidence"), cp$pop))
+  }
+  rf <- .rc_refit_data(data, c(time, status, group), analysis_n, refit, "recipe_cif")
+  data <- rf$data
   data[[group]] <- factor(data[[group]])
   lv <- levels(data[[group]])
   if (!is.factor(data[[status]])) stop("status must be a factor whose first level is censoring", call. = FALSE)
@@ -88,13 +186,13 @@ recipe_cif <- function(data, time, status, group, times, cause = 1, gray_p = NUL
     scale_x_continuous(breaks = times) + coord_cartesian(xlim = range(times)) +
     labs(x = xlab, y = ylab, colour = NULL) + theme_medpaper() +
     theme(legend.position = "inside", legend.position.inside = c(0.02, 0.98), legend.justification = c(0, 1))
-  if (!is.null(gray_p))
-    curve <- curve + annotate("text", x = max(times), y = Inf, label = paste0("Gray's test P ", .fmt_p(gray_p)), hjust = 1, vjust = 1.5, size = 7 / ggplot2::.pt)
+  if (!is.null(gray_txt))
+    curve <- curve + annotate("text", x = max(times), y = Inf, label = gray_txt, hjust = 1, vjust = 1.5, size = 7 / ggplot2::.pt)
   td <- tidycmprsk::tidy(ci, times = times)
   td <- td[td$outcome == outcome, , drop = FALSE]
   rt <- data.frame(time = td$time, strata = as.character(td$strata), n.risk = td$n.risk)
   risk <- .rc_risk_leaf(rt, times, lv, palette)
-  .rc_tag(patchwork::wrap_plots(curve, risk, ncol = 1, heights = c(3, 1)), "cumulative_incidence")
+  .rc_population(.rc_tag(patchwork::wrap_plots(curve, risk, ncol = 1, heights = c(3, 1)), "cumulative_incidence"), rf$pop)
 }
 
 recipe_forest <- function(rows, null_value = 1, log_x = TRUE, xlab = "Hazard ratio (95% CI)",

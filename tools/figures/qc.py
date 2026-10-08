@@ -58,7 +58,8 @@ SIDECAR_KEYS = ("figure", "archetype", "n_axes", "min_font_pt", "max_font_pt", "
 # Provenance keys written by save_medpaper() since 1.6.0; legacy sidecars without them still
 # validate, but an R figure without them only warns until it is re-rendered.
 PROVENANCE_KEYS = ("script", "script_sha256", "source_hashes", "render_hashes")
-SIDECAR_OPTIONAL_KEYS = ("engine", *PROVENANCE_KEYS)
+# "population" (1.7.1): N and NA handling of a curve drawn by recipe_km/recipe_cif.
+SIDECAR_OPTIONAL_KEYS = ("engine", *PROVENANCE_KEYS, "population")
 
 
 def targets() -> dict:
@@ -398,6 +399,46 @@ def _r_provenance_problems(art: dict, entry: dict, png_rel: str) -> list[str]:
     for rel, expected in sources.items():
         if digest(rel) != str(expected).upper():
             problems.append(f"result changed after render: {rel}")
+    problems += population_problems(art.get("population"), list(sources), project)
+    return problems
+
+
+def _n_values(obj, out: set, depth: int = 0) -> None:
+    """Every number stored under an N-like key (n, n_*, *_n) anywhere in a results JSON."""
+    if depth > 6:
+        return
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if k == "environment":
+                continue
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and (
+                    k == "n" or k.startswith("n_") or k.endswith("_n")):
+                out.add(float(v))
+            _n_values(v, out, depth + 1)
+    elif isinstance(obj, list):
+        for v in obj[:200]:
+            _n_values(v, out, depth + 1)
+
+
+def population_problems(pop, sources: list[str], project: Path) -> list[str]:
+    """Figure population vs the analysis it illustrates (recipe_km/recipe_cif sidecars)."""
+    if not isinstance(pop, dict) or not pop:
+        return []
+    problems = []
+    n_used, n_res = pop.get("n_used"), pop.get("analysis_n")
+    if not isinstance(n_used, (int, float)) or not isinstance(n_res, (int, float)):
+        return ["figure population lacks n_used/analysis_n"]
+    if n_used != n_res:
+        problems.append(f"figure drew N={n_used:g} but the analysis N is {n_res:g}")
+    found: set = set()
+    for rel in sources:
+        try:
+            _n_values(json.loads((project / rel).read_text(encoding="utf-8")), found)
+        except (OSError, ValueError):
+            continue
+    if sources and float(n_res) not in found:
+        problems.append(f"figure N={n_res:g} is not an N recorded in its source results "
+                        f"({', '.join(sources[:3])})")
     return problems
 
 

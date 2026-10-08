@@ -147,6 +147,31 @@ def _loc(text: str, proj: Path | None) -> str:
 _PROJECT_SOURCE = ""
 
 
+def paper_header(proj: Path, source: str) -> list[str]:
+    """Which paper this command acts on, and a warning when the global `wf use` marker would
+    have picked a different one (1.7.1). With several papers open in parallel the user-level
+    marker is the easiest way to act on the wrong paper, so every command names its target and
+    explicit context (MEDPAPER_PROJECT, --project, the paper folder you are in) visibly wins."""
+    lines = [f"[medpaper] paper: {proj}  ({source})"]
+    try:
+        marker = paths.active_paper()
+    except SystemExit:
+        marker = None
+    here = paths._find_upwards(Path.cwd())
+    resolved = paths._norm(proj)
+    if marker is not None and paths._norm(marker) != resolved:
+        lines.append(f"[medpaper] note: the global `wf use` marker points at {marker}; this "
+                     f"command acts on {proj} because of {source}")
+    if here is not None and paths._norm(here) != resolved:
+        lines.append(f"[medpaper] WARNING: the working directory is inside paper {here}, but "
+                     f"this command acts on {proj} ({source})")
+    elif here is None and marker is not None and paths._norm(marker) == resolved \
+            and not os.environ.get("MEDPAPER_PROJECT"):
+        lines.append("[medpaper] note: chosen by the global `wf use` marker; open the paper "
+                     "folder or set MEDPAPER_PROJECT to pin it when several papers are active")
+    return lines
+
+
 def _load(need_state: bool = True, warn_stderr: bool = True):
     tmp_state = State(paths.project_dir({}), ".wf")
     cfg = tmp_state.config() if tmp_state.config_file.exists() else {}
@@ -159,6 +184,8 @@ def _load(need_state: bool = True, warn_stderr: bool = True):
     # Record why this paper was chosen before exporting MEDPAPER_PROJECT for in-process tools,
     # otherwise every source would read as "MEDPAPER_PROJECT".
     _PROJECT_SOURCE = paths.describe_project_source(pipe.layout)
+    for line in paper_header(proj, _PROJECT_SOURCE):
+        print(line, file=sys.stderr)
     _export_paper_env(proj)
     st = State(proj, pipe.layout.get("state_dir", ".wf"))
     if need_state:
@@ -1049,7 +1076,7 @@ def cmd_doctor(args) -> int:
     else:
         rows.append(("  science deps", "unknown", "cannot probe without a venv"))
 
-    rows.extend(_r_rows(policy or {}))
+    rows.extend(_r_rows(policy or {}, proj))
 
     for exe, why in (("pandoc", "reference rendering"), ("git", "versioning")):
         p = shutil.which(exe)
@@ -1119,15 +1146,69 @@ def _vtuple(v: str) -> tuple[int, ...]:
     return tuple(int(x) for x in re.findall(r"\d+", v)[:4]) or (0,)
 
 
-def _r_rows(policy: dict) -> list[tuple[str, str, str]]:
+# R packages a paper's own scripts reach through an engine helper rather than library().
+_R_HELPER_PACKAGES = {
+    "recipe_km": ("survival", "ggsurvfit"), "recipe_cif": ("tidycmprsk", "ggsurvfit"),
+    "recipe_roc": ("pROC",), "recipe_volcano": ("ggrepel",),
+    "curve_table_km": ("survival",), "curve_table_cif": ("tidycmprsk",),
+}
+_R_USE = re.compile(r"""(?:\b(?:library|require|requireNamespace|loadNamespace)\s*\(\s*["']?"""
+                    r"""([A-Za-z][A-Za-z0-9.]*)|\b([A-Za-z][A-Za-z0-9.]*):::?)""")
+_R_PAPER_DIRS = ("02_data/acquisition", "03_analysis/code", "04_tables/code", "05_figures/code")
+_R_BASE = ("base", "stats", "utils", "graphics", "grDevices", "methods", "grid", "tools",
+           "parallel", "splines", "datasets", "compiler", "stats4", "tcltk")
+
+
+def r_packages_used(proj: Path | None) -> dict[str, str]:
+    """{package: first paper-relative script using it} from the paper's own R scripts."""
+    used: dict[str, str] = {}
+    if proj is None:
+        return used
+    for d in _R_PAPER_DIRS:
+        base = Path(proj) / d
+        if not base.is_dir():
+            continue
+        for f in sorted(base.rglob("*")):
+            if not f.is_file() or f.suffix.casefold() != ".r":
+                continue
+            rel = f.relative_to(proj).as_posix()
+            try:
+                text = f.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            text = "\n".join(line.split("#", 1)[0] for line in text.splitlines())
+            for m in _R_USE.finditer(text):
+                used.setdefault(m.group(1) or m.group(2), rel)
+            for helper, pkgs in _R_HELPER_PACKAGES.items():
+                if re.search(rf"\b{helper}\s*\(", text):
+                    for pkg in pkgs:
+                        used.setdefault(pkg, f"{rel} ({helper})")
+    return used
+
+
+def _r_rows(policy: dict, proj: Path | None = None) -> list[tuple[str, str, str]]:
+    """R and its packages, scoped to what is actually needed (1.7.1).
+
+    Engine core (the figures task + jsonlite) is required whenever R draws the figures. Any
+    other package is required only when the current paper's own R scripts use it; the rest of
+    [r.required] is reported for information, so a paper that never fits a Fine-Gray model is
+    not blocked by a missing cmprsk."""
     import subprocess
     rows: list[tuple[str, str, str]] = []
     rscript = shutil.which("Rscript")
     if not rscript:
         return [("R", "BROKEN", "Rscript not on PATH; figures default to R (targets.figure_engine)")]
     r = policy.get("r", {})
-    req = {k: v for k, v in (r.get("required") or {}).items() if isinstance(v, str)}
-    opt = {k: v for k, v in (r.get("optional") or {}).items() if isinstance(v, str)}
+    catalog = {k: v for k, v in (r.get("required") or {}).items() if isinstance(v, str)}
+    core = {"jsonlite"} | {p for t in policy.get("task", []) if t.get("id") == "figures"
+                           for p in t.get("packages", [])}
+    used = {k: v for k, v in r_packages_used(proj).items() if k not in _R_BASE}
+    req = {k: v for k, v in catalog.items() if k in core or k in used}
+    req.update({k: "0" for k in used if k not in req})
+    info = {k: v for k, v in catalog.items() if k not in req}
+    opt = {k: v for k, v in (r.get("optional") or {}).items() if isinstance(v, str)
+           and k not in req}
+    opt.update(info)
     code = ("a <- commandArgs(trailingOnly = TRUE); "
             "cat('R\\t', R.version$major, '.', R.version$minor, '\\n', sep = ''); "
             "for (p in a) { v <- tryCatch(as.character(utils::packageVersion(p)), "
@@ -1153,7 +1234,8 @@ def _r_rows(policy: dict) -> list[tuple[str, str, str]]:
     for name, minimum in req.items():
         have = pkgs.get(name, "MISSING")
         if have == "MISSING":
-            rows.append((f"  {name}", "MISSING", f"R package required by language_policy.toml"))
+            why = f"used by {used[name]}" if name in used else "engine core (R figures)"
+            rows.append((f"  {name}", "MISSING", f"R package needed: {why}"))
         elif minimum != "0" and _vtuple(have) < _vtuple(minimum):
             rows.append((f"  {name}", "BROKEN", f"TOO OLD {have} < {minimum}"))
         else:
@@ -1161,7 +1243,9 @@ def _r_rows(policy: dict) -> list[tuple[str, str, str]]:
     for name in opt:
         have = pkgs.get(name, "MISSING")
         rows.append((f"  {name}", "ok" if have != "MISSING" else "absent",
-                     have if have != "MISSING" else "optional"))
+                     have if have != "MISSING" else
+                     ("info: not used by the current paper's scripts" if name in info
+                      else "optional")))
     return rows
 
 

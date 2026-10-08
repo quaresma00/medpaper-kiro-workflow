@@ -5,8 +5,10 @@
     python "<engine>/tools/reproduce.py" check [--project DIR]
 
 `run` copies the analysis inputs (02_data/** except derived/, 03_analysis/code/**, the
-tolerance file) into a temporary sandbox, re-runs every top-level 03_analysis/code script in
-filename order, compares each results JSON with the original (volatile timestamps ignored),
+tolerance file, analysis manifest) into a temporary sandbox, re-runs every top-level
+03_analysis/code script in the order declared by 03_analysis/analysis_manifest.json (filename
+order, with a warning, when the paper has none; `--affected-only` re-runs just the scripts the
+changed inputs reach and carries the rest from the previous passing proof), compares each results JSON with the original (volatile timestamps ignored),
 keeps the re-run results in <paper>/.wf/repro/rerun/ as evidence and writes
 03_analysis/reproducibility_report.json. Acquisition is never re-run. `check` runs the
 analysis_reproduces gate logic. Exit 0 = identical, 2 = not reproduced, 1 = refused.
@@ -67,9 +69,50 @@ def cmd_run(args) -> int:
         shutil.rmtree(sandbox, ignore_errors=True)
         print(f"reproduce: refusing sandbox location {sandbox}")
         return 1
-    scripts = rp.analysis_scripts(paper)
+    scripts, order_source, order_problems = rp.ordered_scripts(paper)
+    if order_problems:
+        shutil.rmtree(sandbox, ignore_errors=True)
+        print("reproduce: analysis manifest refused:")
+        for p in order_problems:
+            print(f"  - {p}")
+        return 1
+    if order_source == "filename":
+        print(f"WARNING: no {rp.MANIFEST_REL}; scripts run in FILENAME order. Declare the order "
+              "(and each script's inputs/outputs) there so a rename cannot reorder the analysis.")
+    previous = None
+    if report_path.is_file():
+        try:
+            previous = json.loads(report_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            previous = None
+    scoped, changed, carried = None, [], {}
+    if args.affected_only:
+        scoped, changed, why = rp.affected_scripts(paper, previous)
+        if scoped is not None:
+            entries_m = rp.load_manifest(paper)[0] or []
+            prev_carried = previous.get("carried_results") or {}
+            for e in entries_m:
+                if e["path"] in scoped:
+                    continue
+                for o in e["outputs"]:
+                    if not o.startswith(rp.RESULTS_DIR + "/"):
+                        continue
+                    if not (rerun / Path(o).name).is_file():
+                        scoped, why = None, f"no retained re-run of {o} to carry"
+                        break
+                    carried[o] = prev_carried.get(o) or {
+                        "started_at": previous.get("started_at"),
+                        "generated_at": previous.get("generated_at")}
+                if scoped is None:
+                    break
+        if scoped is None:
+            carried = {}
+            print(f"--affected-only: full re-run instead ({why})")
+        else:
+            print(f"--affected-only: re-running {len(scoped)} of {len(scripts)} script(s) "
+                  f"({why}); changed inputs: {', '.join(changed[:6]) or 'none'}")
     print(f"do not edit the paper while reproduce.py run is active ({len(scripts)} scripts, "
-          f"timeout {timeout:g} s each)")
+          f"order from {order_source}, timeout {timeout:g} s each)")
     sys.stdout.flush()
     started = _now()
     before = runner.tree_snapshot(paper, rp.SNAPSHOT_EXCLUDE)
@@ -96,12 +139,28 @@ def cmd_run(args) -> int:
         env = obj.get("environment") if isinstance(obj, dict) else None
         if isinstance(env, dict) and str(env.get("script", "")).startswith(rp.ACQ_PREFIX):
             shutil.copy2(acq, sandbox / rp.ACQ_RESULT)
+    if scoped is not None:
+        # Downstream scripts read what unaffected scripts produced; give them the proven copies.
+        derived = paper / "02_data" / "derived"
+        if derived.is_dir():
+            shutil.copytree(derived, sandbox / "02_data" / "derived", dirs_exist_ok=True)
+        for o in carried:
+            if (paper / o).is_file():
+                shutil.copy2(paper / o, sandbox / o)
 
+    prev_rows = {r.get("path"): r for r in (previous or {}).get("scripts", [])
+                 if isinstance(r, dict)}
     script_rows, failed = [], None
     logs = sandbox / "_logs"
     logs.mkdir()
-    for s in rp.analysis_scripts(sandbox):
+    for s in (sandbox / p.relative_to(paper) for p in scripts):
         rel = s.relative_to(sandbox).as_posix()
+        if scoped is not None and rel not in scoped:
+            row = dict(prev_rows.get(rel) or {"path": rel, "exit_code": 0})
+            row.update(path=rel, sha256=rp.sha256(paper / rel), carried=True)
+            script_rows.append(row)
+            print(f"  carried {rel}  (unaffected; proven by the previous run)")
+            continue
         row = {"path": rel, "sha256": rp.sha256(paper / rel),
                "language": "python" if s.suffix.casefold() == ".py" else "R",
                "exit_code": None, "seconds": 0.0, "timed_out": False}
@@ -132,8 +191,13 @@ def cmd_run(args) -> int:
     if rerun_new.exists():
         shutil.rmtree(rerun_new)
     rerun_new.mkdir(parents=True)
+    carried_names = {Path(o).name for o in carried}
     for p in sorted((sandbox / rp.RESULTS_DIR).glob("*.json")):
-        shutil.copy2(p, rerun_new / p.name)
+        if p.name not in carried_names:
+            shutil.copy2(p, rerun_new / p.name)
+    for name in carried_names:
+        if (rerun / name).is_file():
+            shutil.copy2(rerun / name, rerun_new / name)
     if rerun.exists():
         shutil.rmtree(rerun)
     os.replace(rerun_new, rerun)
@@ -152,6 +216,10 @@ def cmd_run(args) -> int:
         "timeout_seconds": timeout,
         "rerun_dir": rp.RERUN_DIR,
         "tolerance_sha256": rp.sha256(tp) if tp.is_file() else None,
+        "order_source": order_source,
+        "mode": "affected-only" if scoped is not None else "full",
+        "changed_inputs": changed if scoped is not None else [],
+        "carried_results": carried,
         "inputs": inputs,
         "scripts": script_rows,
         "failed_script": failed,
@@ -201,6 +269,9 @@ def main() -> int:
     r = sub.add_parser("run")
     r.add_argument("--timeout", default="3600")
     r.add_argument("--keep-sandbox", action="store_true")
+    r.add_argument("--affected-only", action="store_true",
+                   help="after a passing proof, re-run only the scripts the changed inputs reach "
+                        "(needs 03_analysis/analysis_manifest.json); others are carried")
     r.add_argument("--project", default=None)
     c = sub.add_parser("check")
     c.add_argument("--project", default=None)

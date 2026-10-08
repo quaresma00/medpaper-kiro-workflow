@@ -1,7 +1,10 @@
 """Reproducibility proof: what S06 re-executes and how the gate re-checks it. Stdlib only.
 
 `tools/reproduce.py run` copies exactly `sandbox_inputs()` into a sandbox, re-runs every
-top-level 03_analysis/code script, keeps the re-run results in `.wf/repro/rerun/` and writes
+top-level 03_analysis/code script in the order `ordered_scripts()` gives (the paper's
+analysis_manifest.json, else filename order) - or, with `--affected-only`, only the scripts
+`affected_scripts()` reaches, carrying the rest from the previous passing proof - keeps the
+re-run results in `.wf/repro/rerun/` and writes
 `03_analysis/reproducibility_report.json`. `validate()` (gate `analysis_reproduces`) recomputes
 every verdict from those files; the report's statuses are informational.
 """
@@ -17,6 +20,7 @@ from pathlib import Path
 
 REPORT_REL = "03_analysis/reproducibility_report.json"
 TOLERANCE_REL = "03_analysis/reproducibility.toml"
+MANIFEST_REL = "03_analysis/analysis_manifest.json"
 VOLATILE_KEYS = frozenset({"run_at", "built_at", "generated_at", "timestamp", "timestamps",
                            "written_at"})
 ACQ_PREFIX = "02_data/acquisition/"
@@ -63,6 +67,130 @@ def analysis_scripts(project: Path) -> list[Path]:
                   key=lambda p: p.name.casefold())
 
 
+# ---------------------------------------------------------------------------
+# Execution order (1.7.1). A file name is not a dependency declaration: "02_model" running
+# after "01_clean" is a naming convention, and a renamed or inserted script silently reorders
+# the analysis. The paper may declare the order in 03_analysis/analysis_manifest.json:
+#
+#   {"schema": 1, "scripts": [
+#      {"path": "03_analysis/code/01_clean.py", "outputs": ["02_data/derived/clean.csv"]},
+#      {"path": "03_analysis/code/02_model.py", "inputs": ["02_data/derived/clean.csv"],
+#       "outputs": ["03_analysis/results/primary.json"], "after": []}]}
+#
+# Edges come from `after` and from one script's `outputs` appearing in another's `inputs`.
+# Every top-level script must be listed exactly once. Without a manifest the old filename
+# order is used and reported as such (papers started before 1.7.1 keep working).
+def load_manifest(project: Path) -> tuple[list[dict] | None, list[str]]:
+    project = Path(project)
+    p = project / MANIFEST_REL
+    if not p.is_file():
+        return None, []
+    data = _load_json(p)
+    if not isinstance(data, dict) or data.get("schema") != 1 \
+            or not isinstance(data.get("scripts"), list):
+        return None, [f"{MANIFEST_REL}: must be {{\"schema\": 1, \"scripts\": [...]}}"]
+    problems: list[str] = []
+    entries: list[dict] = []
+    top = {s.relative_to(project).as_posix() for s in analysis_scripts(project)}
+    seen: set[str] = set()
+    for i, e in enumerate(data["scripts"]):
+        if not isinstance(e, dict) or not isinstance(e.get("path"), str):
+            problems.append(f"{MANIFEST_REL} scripts[{i}]: needs a path")
+            continue
+        path = e["path"].replace("\\", "/")
+        lists = {}
+        for key in ("inputs", "outputs", "after"):
+            v = e.get(key, [])
+            if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
+                problems.append(f"{MANIFEST_REL} {path}: {key} must be a list of paths")
+                v = []
+            lists[key] = [x.replace("\\", "/") for x in v]
+        if path not in top:
+            problems.append(f"{MANIFEST_REL}: {path} is not a top-level 03_analysis/code script")
+        if path in seen:
+            problems.append(f"{MANIFEST_REL}: {path} listed twice")
+        seen.add(path)
+        entries.append({"path": path, **lists})
+    for missing in sorted(top - seen):
+        problems.append(f"{MANIFEST_REL}: {missing} is not listed (every top-level script must "
+                        "be, so nothing runs in an undeclared order)")
+    known = {e["path"] for e in entries}
+    for e in entries:
+        for a in e["after"]:
+            if a not in known:
+                problems.append(f"{MANIFEST_REL} {e['path']}: after names unlisted {a}")
+    return (entries if not problems else None), problems
+
+
+def ordered_scripts(project: Path) -> tuple[list[Path], str, list[str]]:
+    """-> (scripts in execution order, "manifest" | "filename", problems)."""
+    project = Path(project)
+    entries, problems = load_manifest(project)
+    if problems:
+        return [], "manifest", problems
+    if entries is None:
+        return analysis_scripts(project), "filename", []
+    producer = {o: e["path"] for e in entries for o in e["outputs"]}
+    deps = {e["path"]: set(e["after"]) | {producer[i] for i in e["inputs"]
+                                          if i in producer and producer[i] != e["path"]}
+            for e in entries}
+    order: list[str] = []
+    done: set[str] = set()
+    while len(order) < len(entries):
+        ready = [e["path"] for e in entries if e["path"] not in done and deps[e["path"]] <= done]
+        if not ready:
+            stuck = sorted(p for p in deps if p not in done)
+            return [], "manifest", [f"{MANIFEST_REL}: dependency cycle among {', '.join(stuck)}"]
+        order.append(ready[0])
+        done.add(ready[0])
+    return [project / p for p in order], "manifest", []
+
+
+def affected_scripts(project: Path, previous: dict) -> tuple[set[str] | None, list[str], str]:
+    """Scripts a change since `previous` (the last passing report) can reach.
+
+    -> (script paths to re-run, changed inputs, why) or (None, changed, why) for a full run.
+    The closure comes from wfcore.dependencies (which widens on missing metadata), then flows
+    downstream through the manifest's declared inputs. Anything that cannot be scoped safely
+    falls back to a full run."""
+    from . import dependencies
+    project = Path(project)
+    entries, problems = load_manifest(project)
+    if entries is None or problems:
+        return None, [], "no valid analysis_manifest.json; scoped re-run needs declared outputs"
+    if not isinstance(previous, dict) or not previous.get("all_match"):
+        return None, [], "no previous passing reproducibility report to carry results from"
+    tp = project / TOLERANCE_REL
+    if (sha256(tp) if tp.is_file() else None) != previous.get("tolerance_sha256"):
+        return None, [], "the tolerance file changed"
+    prev_inputs = {i.get("path"): i.get("sha256") for i in previous.get("inputs", [])
+                   if isinstance(i, dict)}
+    cur_inputs = {rel: sha256(project / rel) for rel in sandbox_inputs(project)}
+    changed = sorted(r for r in set(prev_inputs) | set(cur_inputs)
+                     if prev_inputs.get(r) != cur_inputs.get(r))
+    prev_scripts = {s.get("path") for s in previous.get("scripts", []) if isinstance(s, dict)}
+    if prev_scripts != {e["path"] for e in entries}:
+        return None, changed, "the analysis script set changed"
+    declared = {o for e in entries for o in e["outputs"]}
+    results = {f"{RESULTS_DIR}/{p.name}" for p in (project / RESULTS_DIR).glob("*.json")} \
+        if (project / RESULTS_DIR).is_dir() else set()
+    undeclared = sorted(results - declared - {ACQ_RESULT})
+    if undeclared:
+        return None, changed, f"results not declared as any script's output: {undeclared[:3]}"
+    if any(c == MANIFEST_REL or c.startswith("02_data/") for c in changed):
+        return set(e["path"] for e in entries), changed, "data or manifest changed"
+    reach = set(dependencies.closure(project, changed))
+    hit = {e["path"] for e in entries
+           if e["path"] in reach or set(e["outputs"]) & reach}
+    grew = True
+    while grew:
+        produced = {o for e in entries if e["path"] in hit for o in e["outputs"]}
+        more = {e["path"] for e in entries if e["path"] not in hit and set(e["inputs"]) & produced}
+        grew = bool(more)
+        hit |= more
+    return hit, changed, "scoped by the dependency closure"
+
+
 def sandbox_inputs(project: Path) -> list[str]:
     project = Path(project)
     out: list[str] = []
@@ -83,6 +211,8 @@ def sandbox_inputs(project: Path) -> list[str]:
             out.append(rel)
     if (project / TOLERANCE_REL).is_file():
         out.append(TOLERANCE_REL)
+    if (project / MANIFEST_REL).is_file():
+        out.append(MANIFEST_REL)
     return sorted(set(out))
 
 
@@ -280,6 +410,7 @@ def validate(project: Path) -> Outcome:
         if reported_inputs.get(rel) != current_inputs.get(rel):
             problems.append(f"input changed since the proof: {rel}")
 
+    problems.extend(ordered_scripts(project)[2])
     reported_scripts = {s.get("path"): s for s in report.get("scripts", []) if isinstance(s, dict)}
     current_scripts = {s.relative_to(project).as_posix(): sha256(s)
                        for s in analysis_scripts(project)}
@@ -300,6 +431,8 @@ def validate(project: Path) -> Outcome:
                              + ", ".join(report["paper_changes"][:5]))
 
     rerun = project / RERUN_DIR
+    carried = report.get("carried_results") if isinstance(report.get("carried_results"),
+                                                          dict) else {}
     rep_results = {r.get("file"): r for r in report.get("results", []) if isinstance(r, dict)}
     cur_files = {f"{RESULTS_DIR}/{p.name}": sha256(p)
                  for p in sorted((project / RESULTS_DIR).glob("*.json"))} \
@@ -325,8 +458,14 @@ def validate(project: Path) -> Outcome:
         obj = _load_json(p)
         env = obj.get("environment") if isinstance(obj, dict) else None
         wa = str(env.get("written_at", "")) if isinstance(env, dict) else ""
-        if not (_ISO.match(wa) and started <= wa <= generated):
-            problems.append(f"retained re-run of {f} was not written by this run")
+        win = carried.get(f)
+        lo, hi = (str(win.get("started_at", "")), str(win.get("generated_at", ""))) \
+            if isinstance(win, dict) else (started, generated)
+        if win is not None and not (_ISO.match(lo) and _ISO.match(hi) and hi <= started):
+            problems.append(f"carried re-run of {f} has no valid earlier proof window")
+        elif not (_ISO.match(wa) and lo <= wa <= hi):
+            problems.append(f"retained re-run of {f} was not written by this run"
+                            + (" or the earlier proof it was carried from" if win else ""))
 
     entries, _within = compare(project, rerun, tols)
     for e in entries:

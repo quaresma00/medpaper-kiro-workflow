@@ -5,8 +5,10 @@
 #   write_results(list(hr = 1.87432198765, n = 1284L, covariates = I("age")), "primary")
 #
 # Run the script with `wf run-script 03_analysis/code/01_primary.R`. jsonlite is called with
-# digits = NA (15 significant digits): its default of 4 would turn 1.87432 into 1.874 and break
-# numbers_have_provenance. Wrap length-1 vectors that must stay JSON arrays in I().
+# digits = I(17): 17 significant digits round-trip every double exactly. Its default of 4 would
+# turn 1.87432 into 1.874, and digits = NA (15 digits, used up to 1.7.0) turned 1/3, pi and 2^53
+# into different numbers. Storage keeps full precision; rounding for display happens in the
+# manuscript. Wrap length-1 vectors that must stay JSON arrays in I().
 # Paper scripts must never call toJSON()/write_json() themselves (paper_scripts_scoped).
 
 .mr_self_file <- local({
@@ -94,10 +96,48 @@ medpaper_seed <- function(seed) {
 .mr_write_json <- function(obj, path) {
   tmp <- paste0(path, ".tmp")
   on.exit(if (file.exists(tmp)) unlink(tmp), add = TRUE)
-  txt <- jsonlite::toJSON(obj, auto_unbox = TRUE, digits = NA, pretty = TRUE, null = "null", na = "null")
+  txt <- jsonlite::toJSON(obj, auto_unbox = TRUE, digits = I(17), pretty = TRUE, null = "null", na = "null")
   writeLines(enc2utf8(as.character(txt)), tmp, useBytes = TRUE)
   if (!file.rename(tmp, path)) stop("could not move ", tmp, " to ", path, call. = FALSE)
   invisible(path)
+}
+
+# Curve tables (1.7.1): export the fitted curve with the results so the figure draws exactly the
+# analysis population instead of refitting it (recipe_km(curve = ...), recipe_cif(curve = ...)).
+#   fit <- survival::survfit(survival::Surv(time, status) ~ arm, data = dat)
+#   write_results(list(hr = hr, n = sum(fit$n), km = curve_table_km(fit, times = c(0, 12, 24))), "primary")
+.mr_strata <- function(x, n) if (is.null(x)) rep("all", n) else sub("^.*=", "", as.character(x))
+
+curve_table_km <- function(fit, times, na_rule = NULL) {
+  if (!inherits(fit, "survfit")) stop("curve_table_km: fit must be a survival::survfit object", call. = FALSE)
+  s <- summary(fit, censored = TRUE)
+  lv <- if (is.null(fit$strata)) "all" else sub("^.*=", "", names(fit$strata))
+  st <- c(lv, .mr_strata(s$strata, length(s$time)))
+  tm <- c(rep(0, length(lv)), s$time)
+  o <- order(match(st, lv), tm)
+  r <- summary(fit, times = times, extend = TRUE)
+  dropped <- length(fit$na.action)
+  list(n = sum(fit$n), n_dropped_na = dropped,
+       na_rule = na_rule %||% "survfit: rows with NA in the model variables dropped",
+       time = tm[o], estimate = c(rep(1, length(lv)), s$surv)[o],
+       lower = c(rep(1, length(lv)), s$lower)[o], upper = c(rep(1, length(lv)), s$upper)[o],
+       strata = st[o], censor = c(rep(FALSE, length(lv)), s$n.censor > 0)[o],
+       risk = list(time = r$time, strata = .mr_strata(r$strata, length(r$time)), n_risk = r$n.risk))
+}
+
+curve_table_cif <- function(ci, outcome, times, na_rule = NULL) {
+  if (!inherits(ci, "tidycuminc")) stop("curve_table_cif: ci must be a tidycmprsk::cuminc object", call. = FALSE)
+  td <- tidycmprsk::tidy(ci)
+  td <- td[td$outcome == outcome & !is.na(td$estimate), , drop = FALSE]
+  at <- tidycmprsk::tidy(ci, times = times)
+  at <- at[at$outcome == outcome, , drop = FALSE]
+  base <- tidycmprsk::tidy(ci, times = 0)
+  base <- base[base$outcome == outcome, , drop = FALSE]
+  list(n = sum(base$n.risk), na_rule = na_rule %||% "cuminc: rows with NA in the model variables dropped",
+       time = td$time, estimate = td$estimate, lower = td$conf.low, upper = td$conf.high,
+       strata = as.character(td$strata),
+       censor = if ("n.censor" %in% names(td)) td$n.censor > 0 else rep(FALSE, nrow(td)),
+       risk = list(time = at$time, strata = as.character(at$strata), n_risk = at$n.risk))
 }
 
 write_results <- function(payload, name, seed = NULL) {

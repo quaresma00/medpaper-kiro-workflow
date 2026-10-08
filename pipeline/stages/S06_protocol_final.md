@@ -22,8 +22,12 @@ the effect size and the data's limits are known. This is the last cheap exit.
 .\.venv\Scripts\python.exe tools/reproduce.py run
 ```
    It copies `02_data/` (except `derived/`, which is rebuilt) and `03_analysis/code/` into a
-   sandbox, re-runs every top-level analysis script in filename order and compares every
-   results JSON (timestamps ignored). `00_input/` and `01_protocol/` are not available there,
+   sandbox, re-runs every top-level analysis script in the order declared by
+   `03_analysis/analysis_manifest.json` (`{"schema": 1, "scripts": [{"path", "inputs",
+   "outputs", "after"}]}`, every top-level script listed once; without it, filename order with
+   a warning) and compares every results JSON (timestamps ignored). After a passing proof,
+   `reproduce.py run --affected-only` re-runs only the scripts the changed inputs reach through
+   the dependency closure and carries the rest from that proof (a data change re-runs all). `00_input/` and `01_protocol/` are not available there,
    absolute paths are forbidden, and acquisition is never re-run (only an acquisition-written
    `dataset_summary.json` is carried over). A mismatch names the file and JSON path: make the
    script deterministic (seed it), or, for genuine floating-point reduction noise only, declare

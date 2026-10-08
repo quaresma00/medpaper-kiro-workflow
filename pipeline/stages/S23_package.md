@@ -116,18 +116,23 @@ unlooked-at.
 Guideline: STROBE
 Manuscript: 08_submission/manuscript/full_manuscript.md
 
-| Item | Status | Location | Reason |
-|---|---|---|---|
-| 1a | Reported | Title; Abstract | |
-| 12e | Reported | Supplementary Methods > Sensitivity analyses | |
-| 14c | Not applicable | | Cross-sectional design; there is no follow-up time to summarise. |
-| 22 | Reported | Title page; Statements > Funding | |
+| Item | Status | Location | Evidence | Reason |
+|---|---|---|---|---|
+| 1a | Reported | Title; Abstract | A retrospective cohort study of 1,204 adults | |
+| 12e | Reported | Supplementary Methods > Sensitivity analyses | We repeated the primary model after excluding deaths within 30 days | |
+| 14c | Not applicable | | | Cross-sectional design; there is no follow-up time to summarise. |
+| 22 | Reported | Title page; Statements > Funding | This study received no specific funding | |
 ```
    Status is `Reported` or `Not applicable` (with a reason of >= 20 characters). A location is
    one or more `;`-separated tokens: a heading of the variant's `full_manuscript.md`, `Title`,
    `<document> > <heading>` (`Supplementary Methods`, `Title page`, `Statements`), or a bare
-   document name. `reporting_checklist_complete` (non-overridable) resolves every token; a
-   "Reported" row pointing at text that does not exist is a fabricated compliance claim. The
+   document name. Evidence is the sentence that actually reports the item, copied verbatim
+   (>= 25 characters) from inside that location; the gate finds it there after normalising
+   whitespace, case and emphasis markup. A quote reused for more than 3 items is refused - it
+   cannot be specific to each. A heading is not evidence: if no sentence reports the item, fix
+   the manuscript or justify Not applicable. `reporting_checklist_complete` (non-overridable)
+   resolves every token and quote; a "Reported" row pointing at text that does not exist is a
+   fabricated compliance claim. The
    `check-reporting` skill may assist read-only. `analysis_reproduces` is re-checked here too,
    so the package is never built on numbers that no longer re-execute.
 

@@ -59,8 +59,66 @@ items = [
 
 [guideline.CONSORT]
 full_name = "Consolidated Standards of Reporting Trials"
+version = "2025"
+# Hopewell S et al. CONSORT 2025 statement. BMJ 2025;388:e081123 (also JAMA, Lancet, Nat Med,
+# PLOS Med, 14 Apr 2025). 30 numbered items / 42 sub-items. Item IDs cross-checked in v1.7.1
+# against a published completed CONSORT 2025 checklist (PLOS supplement, items 1a-9) and a
+# full secondary item table; re-check titles against the official checklist before relying on
+# them. Bare "CONSORT" means the current statement; a paper reported against 2010 must say
+# "CONSORT 2010".
+aliases = ["CONSORT", "CONSORT 2025"]
+source = "https://www.consort-spirit.org/ (Hopewell et al. BMJ 2025;388:e081123)"
+verify = false
+items = [
+  { id = "1a", title = "Title identifies a randomised trial" },
+  { id = "1b", title = "Structured abstract" },
+  { id = "2", title = "Trial registration" },
+  { id = "3", title = "Protocol and statistical analysis plan access" },
+  { id = "4", title = "Data sharing" },
+  { id = "5a", title = "Funding and funder role" },
+  { id = "5b", title = "Author conflicts of interest" },
+  { id = "6", title = "Background and rationale" },
+  { id = "7", title = "Objectives (benefits and harms)" },
+  { id = "8", title = "Patient and public involvement" },
+  { id = "9", title = "Trial design and allocation ratio" },
+  { id = "10", title = "Changes to methods after commencement" },
+  { id = "11", title = "Settings and locations" },
+  { id = "12a", title = "Participant eligibility" },
+  { id = "12b", title = "Site and intervention-deliverer eligibility" },
+  { id = "13", title = "Interventions in replicable detail" },
+  { id = "14", title = "Outcomes, how and when assessed" },
+  { id = "15", title = "Harms definition and assessment" },
+  { id = "16a", title = "Sample size" },
+  { id = "16b", title = "Interim analyses and stopping" },
+  { id = "17a", title = "Sequence generation" },
+  { id = "17b", title = "Type of randomisation and restriction" },
+  { id = "18", title = "Allocation concealment" },
+  { id = "19", title = "Implementation of assignment" },
+  { id = "20a", title = "Who was blinded" },
+  { id = "20b", title = "How blinding was achieved" },
+  { id = "21a", title = "Statistical methods for outcomes and harms" },
+  { id = "21b", title = "Analysis populations" },
+  { id = "21c", title = "Missing data handling" },
+  { id = "21d", title = "Additional analyses" },
+  { id = "22a", title = "Participant flow per group" },
+  { id = "22b", title = "Losses and exclusions" },
+  { id = "23a", title = "Recruitment and follow-up dates" },
+  { id = "23b", title = "Why the trial ended" },
+  { id = "24a", title = "Intervention delivery and adherence" },
+  { id = "24b", title = "Concomitant care" },
+  { id = "25", title = "Baseline characteristics" },
+  { id = "26", title = "Outcome results with effect size and precision" },
+  { id = "27", title = "Harms by group" },
+  { id = "28", title = "Other analyses" },
+  { id = "29", title = "Interpretation" },
+  { id = "30", title = "Limitations" },
+]
+
+[guideline.CONSORT-2010]
+full_name = "Consolidated Standards of Reporting Trials (superseded 2010 statement)"
 version = "2010"
-aliases = ["CONSORT", "CONSORT 2010"]
+# Superseded by CONSORT 2025. Kept only for journals that still name the 2010 checklist.
+aliases = ["CONSORT 2010"]
 source = "https://www.consort-spirit.org/"
 verify = false
 items = [
@@ -396,14 +454,6 @@ version = "2.0"
 aliases = ["SQUIRE", "SQUIRE 2.0"]
 case_sensitive = true
 source = "https://www.squire-statement.org/"
-verify = true
-items = []
-
-[guideline.CONSORT-2025]
-full_name = "CONSORT 2025"
-version = "2025"
-aliases = ["CONSORT 2025"]
-source = "https://www.consort-spirit.org/"
 verify = true
 items = []
 

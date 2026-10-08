@@ -2,7 +2,18 @@
 
 一套面向医学与临床研究的 Kiro 工作流。它把“研究想法”推进为经过数据、文献、统计结果、图表、人工复核和期刊规则共同校验的投稿包，而不是只让 AI 一次性写出一篇看似完整的论文。
 
-当前版本：`1.7.0`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE + R 4.3+
+当前版本：`1.7.1`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE + R 4.3+
+
+## 1.7.1 变化（采纳外部审阅）
+
+- **全文身份只看首页**：PDF 只在首页/参考文献标题之前的正文中找身份证据，须同时具备本文 DOI 与标题相似度（≥0.8）或第一作者姓氏+年份；目标 DOI 只出现在参考文献中判为“另一篇文章”（mismatch），证据不足为 indeterminate（S15 不通过）。1.7.0 及以前按“DOI 出现在任意位置”接受的记录须重新 `fulltext.py verify --all-retrieved`。
+- **报告清单要证据**：清单表改为 `Item | Status | Location | Evidence | Reason`；每条 Reported 须给出 ≥25 字、在所写位置原文中确实存在的引文（忽略空白/大小写/强调符号），同一引文最多复用 3 条。目录中 `CONSORT` 改为 CONSORT 2025（30 项/42 子项），旧版须写 `CONSORT 2010`。
+- **复现按声明依赖**：`03_analysis/analysis_manifest.json` 声明脚本顺序与输入输出；`reproduce.py run --affected-only` 只重跑依赖闭包受影响的脚本，其余从上次通过的证明延续。无 manifest 时沿用文件名顺序并警告。
+- **作图不重拟合**：`recipe_km`/`recipe_cif` 默认绘制分析脚本用 `curve_table_km()`/`curve_table_cif()` 写入结果 JSON 的曲线表；只有 `refit = TRUE` 且 `analysis_n` 与完整病例数一致时才在图中拟合。sidecar 记录 `population`，qc 校验 N 与 source_results 一致。
+- **R 结果全精度**：`write_results()` 与 sidecar 改用 `digits = I(17)`，双精度可无损往返（1/3、π、2^53 在 1.7.0 中会被截为 15 位）。
+- **按需环境检查**：`wf doctor` 只把作图核心包与本论文 R 脚本实际用到的包列为必需，其余统计包仅作提示。
+- **当前论文提示**：每条 `wf` 命令在 stderr 打印所操作的论文及其来源；全局 `wf use` 标记与之不同、或当前目录属于另一篇论文时给出提示/警告。
+- **进行中论文须做**：R 写出的结果需用 `wf run-script` 重跑后再 `reproduce.py run`；S23 之后的论文按新表头补全 Evidence 列；已通过 S15 的 PDF 运行一次 `fulltext.py verify --all-retrieved`。
 
 ## 1.7.0 变化
 
@@ -27,7 +38,7 @@
 
 - **论文在引擎之外**：引擎目录是纯净的母版工作流，只用于维护，任何论文都不能放在其中、在其中被选中或向其中写文件。论文统一放在论文根目录（优先 `MEDPAPER_PAPERS_ROOT`，其次 `~/.medpaper/config.toml` 的 `papers_root`，默认 `<引擎上级目录>/medpaper_papers`）。`wf new <slug>` 在那里创建论文并写入该论文自己的 `.kiro/` 适配文件（以绝对路径调用引擎），之后把这个论文文件夹作为独立的 Kiro 工作区打开。解析顺序：`MEDPAPER_PROJECT` → 当前目录或其上级中已初始化的论文 → `wf use` 选中的论文（用户级标记 `~/.medpaper/active`）。在引擎目录中运行 `wf status` 只显示维护横幅，驱动论文的命令一律拒绝；`wf doctor` 把引擎中的任何论文产物报告为 BROKEN。
 - **Python/R 分工**：见 `reference/language_policy.toml`。Python 负责数据获取、清洗、三线表 xlsx、Word 和全部门禁；R 负责作图（默认，`tools/figures/R/medfig.R` 的 `save_medpaper()` 与 `recipes.R` 中的 KM、竞争风险、森林图、ROC、校准、DCA、火山图）以及生存分析、竞争风险、列线图/校准/DCA、多重插补、倾向性评分、复杂抽样、混合模型、Meta 分析和 Table 1 统计。`save_medpaper()` 按目标栏宽精确出图，自动统一外边距，并写出与 Python 相同格式的 QC 记录，`qc.py` 对两种引擎一视同仁。`wf config set figure_engine python` 可改回 matplotlib。
-- **分析复现门禁**：S06 运行 `python tools/reproduce.py run`，在沙箱中按文件名顺序重跑 `03_analysis/code/` 下的全部顶层脚本，要求结果 JSON 完全一致（仅忽略时间戳）；重跑结果保存在 `.wf/repro/rerun/` 作为证据。`analysis_reproduces` 在 S06、S17、S23、S25 复核，任何分析代码、原始数据或结果的后续修改都会使证明失效。
+- **分析复现门禁**：S06 运行 `python tools/reproduce.py run`，在沙箱中按 `analysis_manifest.json` 声明的顺序（1.7.1；无声明时按文件名）重跑 `03_analysis/code/` 下的全部顶层脚本，要求结果 JSON 完全一致（仅忽略时间戳）；重跑结果保存在 `.wf/repro/rerun/` 作为证据。`analysis_reproduces` 在 S06、S17、S23、S25 复核，任何分析代码、原始数据或结果的后续修改都会使证明失效。
 - **环境回执**：结果 JSON 只能由 `write_results()`（Python `tools/analysis/results.py`，R `tools/R/medresults.R`）写出，自动附带语言与版本、程序包版本、随机种子、脚本及其 SHA-256。回执中的数字不计入数字溯源。
 - **报告规范清单**：S23 生成 `08_submission/reporting_checklist.md`，把方案中 `Guideline:` 行声明的报告规范（`reference/reporting_guidelines.toml`）逐条对应到期刊稿中真实存在的位置；`reporting_checklist_complete` 在 S23、S24、S25 阻断，未收录条目清单的规范（`verify = true`）不会被凭空编造。
 

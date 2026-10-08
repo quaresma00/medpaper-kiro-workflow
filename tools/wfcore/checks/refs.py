@@ -527,6 +527,13 @@ def deepread_complete(ctx: Ctx) -> Result:
                     problems.append(
                         f"{ck}: never proven to be the requested article "
                         f"(identity={identity or 'unchecked'})")
+                elif record.get("identity_basis") == "pdf-doi-present":
+                    # <=1.7.0 accepted a PDF because our DOI occurred anywhere, including the
+                    # reference list of a different article. Re-check from the front matter.
+                    problems.append(
+                        f"{ck}: identity was accepted by the pre-1.7.1 'DOI anywhere in the PDF' "
+                        f"rule; re-verify from the front matter (fulltext.py verify "
+                        f"--all-retrieved)")
         notes = item.get("notes")
         if not notes:
             problems.append(f"{ck}: no notes file")
