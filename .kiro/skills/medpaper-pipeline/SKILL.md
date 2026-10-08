@@ -69,10 +69,10 @@ packages, seed, script and its sha256. Those receipt numbers never count as prov
 `python tools/reproduce.py run` re-executes every top-level `03_analysis/code` script in a
 sandbox, in the order `03_analysis/analysis_manifest.json` declares (filename order with a
 warning when absent; `--affected-only` re-runs just the affected scripts), and requires
-identical results; `analysis_reproduces` re-checks that proof at S17, S23 and S25. At S23
-`08_submission/reporting_checklist.md` maps every item of the protocol's reporting guideline
-(`reference/reporting_guidelines.toml`) to a location that exists plus a verbatim evidence
-quote found there. KM/CIF figures draw the curve table the analysis exported
+identical results; `analysis_reproduces` re-checks that proof at S17, S23 and S25. No study registration and no reporting
+checklist are prepared pre-emptively: a checklist is filled at S23 only when the chosen journal
+requires one (`journal_requires_checklist` in `target_journal.json`, set at S20), or PRISMA for
+a meta-analysis, which also registers on PROSPERO before screening. KM/CIF figures draw the curve table the analysis exported
 (`curve_table_km()`/`curve_table_cif()`), not a refit.
 
 ## Customise one paper without changing the engine
@@ -232,8 +232,8 @@ red with nothing that can satisfy it:
 | `find-journal`, `sync-submission` | S20, S23 |
 | `write-protocol`, `analyze-stats` | S03/S06, S05 |
 
-Complementary and worth using inside a stage: `check-reporting` (read-only help filling the
-S23 reporting checklist that `reporting_checklist_complete` verifies), `self-review` / `peer-review` / `revise` (post
+Complementary and worth using inside a stage: `check-reporting` (read-only help when the journal
+requires a reporting checklist at S23), `self-review` / `peer-review` / `revise` (post
 submission), `deidentify` / `generate-codebook` / `clean-data` at S04, `calc-sample-size` /
 `design-study` / `define-variables` at S03, and the imaging/ML skills, which are a different
 domain entirely.
@@ -267,7 +267,7 @@ tools/package_*.py           submission package build, content check, review fre
 tools/hooks/skill_guard.py   refuses skills that would replace a stage
 reference/                   figure, table and Methods standards; archetypes; skill policy
 reference/language_policy.toml      Python/R division of labour and required R packages
-reference/reporting_guidelines.toml reporting-guideline item lists for the S23 checklist
+reference/reporting_guidelines.toml reporting-guideline item lists for an on-demand S23 checklist
 <papers root>/<slug>/        the paper being written (its own Kiro workspace); state in .wf/
 ```
 

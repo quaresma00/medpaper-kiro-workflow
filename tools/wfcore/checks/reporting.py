@@ -1,4 +1,10 @@
-"""Reporting-guideline checklist gate (S06 early warning; S23/S24/S25 blocking)."""
+"""Reporting-guideline checklist gate (S23/S24/S25), on demand only.
+
+Since 1.7.3 no checklist is chosen or filled pre-emptively. The gate enforces one only when the
+chosen journal's author guidelines require it (target_journal.json `journal_requires_checklist`,
+recorded at S20), or PRISMA for a systematic review / meta-analysis; otherwise it passes as not
+required.
+"""
 from __future__ import annotations
 
 import re
@@ -10,6 +16,7 @@ from .. import paths
 
 REGISTRY_REL = "reporting_guidelines.toml"
 CHECKLIST_REL = "08_submission/reporting_checklist.md"
+JOURNAL_REL = "08_submission/target_journal.json"
 MANUSCRIPT_REL = "08_submission/manuscript/full_manuscript.md"
 DEFAULT_DOCUMENTS = {
     "Supplementary Methods": "08_submission/manuscript/supplementary_methods.md",
@@ -231,44 +238,77 @@ def section_text(text: str, wanted: str) -> str:
     return "\n".join(out)
 
 
+_META = re.compile(r"meta[\s-]?analy|systematic\s+review", re.I)
+_NONE = {"", "none", "no", "not required", "n/a", "na", "false"}
+
+
+def _design_text(ctx: Ctx) -> str:
+    for rel in ("01_protocol/protocol_final.md", "01_protocol/protocol_v1.md"):
+        if ctx.p(rel).is_file():
+            text = ctx.read(rel)
+            body = section_text(text, "design")
+            return body if body.strip() else ""
+    return ""
+
+
+def is_meta_analysis(ctx: Ctx) -> bool:
+    """A systematic review / meta-analysis, read from the protocol's Design section."""
+    return bool(_META.search(_design_text(ctx)))
+
+
+def journal_requirement(ctx: Ctx) -> str | None:
+    """The checklist the chosen journal demands (target_journal.json), or None."""
+    import json
+    p = ctx.p(JOURNAL_REL)
+    if not p.is_file():
+        return None
+    try:
+        value = json.loads(p.read_text(encoding="utf-8")).get("journal_requires_checklist")
+    except (OSError, ValueError, AttributeError):
+        return None
+    if value is None or value is False:
+        return None
+    value = str(value).strip()
+    return None if value.casefold() in _NONE else value
+
+
 @check("reporting_checklist_complete")
 def reporting_checklist_complete(ctx: Ctx) -> Result:
+    """On demand only (1.7.3): enforced when the target journal requires a checklist
+    (`journal_requires_checklist` in target_journal.json), or PRISMA for a meta-analysis.
+    Otherwise it passes as not required."""
     name = "reporting_checklist_complete"
     sev = ctx.spec.get("severity", "fail")
+    required = journal_requirement(ctx)
+    if required is None and not is_meta_analysis(ctx):
+        return Result(True, name, "not required: the target journal requires no reporting "
+                                  "checklist (journal_requires_checklist unset)")
     try:
         reg = load_registry()
     except (OSError, tomllib.TOMLDecodeError) as exc:
         return Result(False, name, f"reference/{REGISTRY_REL} unreadable: {exc}", severity=sev)
-    proto_rel = "01_protocol/protocol_final.md"
-    if not ctx.p(proto_rel).is_file():
-        return Result(False, name, f"{proto_rel} missing", severity=sev)
-    section = protocol_section(ctx.read(proto_rel))
-    if section is None:
-        return Result(False, name, f"{proto_rel} has no 'Reporting guideline' section",
-                      severity=sev)
-    ids, problems = protocol_guidelines(section, reg)
-    if problems:
-        return Result(False, name, "; ".join(problems), severity=sev)
-    if not ids:
-        snippet = " ".join(section.split())[:80]
-        return Result(False, name, f"protocol names no registered guideline: {snippet}; register "
-                      "it in reference/reporting_guidelines.toml from the engine workspace",
-                      severity=sev)
+    if required is None:
+        ids, problems, source = ["PRISMA"], [], "meta-analysis design"
+    else:
+        ids, bad = split_guidelines(required, reg)
+        problems = [f"unregistered guideline in journal_requires_checklist: {b}" for b in bad]
+        source = f"{JOURNAL_REL} journal_requires_checklist"
+    if problems or not ids:
+        return Result(False, name, "; ".join(problems) or f"{source}: no guideline named",
+                      ["Use a name from reference/reporting_guidelines.toml, or add the "
+                       "journal's checklist there from the engine workspace."], severity=sev)
     unverified = [g for g in ids if reg[g].get("verify")]
     if unverified:
         return Result(False, name, "; ".join(
             f"item list for {g} is not shipped (verify = true); populate it from "
             f"{reg[g].get('source', 'the official checklist')} in the engine workspace and set "
             "verify = false" for g in unverified), severity=sev)
-    if ctx.spec.get("guideline_only"):
-        return Result(True, name, f"protocol declares {', '.join(ids)} (registered, item lists "
-                                  "shipped)")
 
     rel = ctx.spec.get("path", CHECKLIST_REL)
     if not ctx.p(rel).is_file():
-        return Result(False, name, f"{rel} missing", ["Write it at S23 against the journal "
-                      "variant: one `Guideline: <name>` line and an Item | Status | Location | "
-                      "Evidence | Reason table per guideline."], severity=sev)
+        return Result(False, name, f"{rel} missing (required by {source})", ["Write it at S23 "
+                      "against the journal variant: one `Guideline: <name>` line and an Item | "
+                      "Status | Location | Evidence | Reason table per guideline."], severity=sev)
     man_rel = ctx.spec.get("manuscript", MANUSCRIPT_REL)
     if not ctx.p(man_rel).is_file():
         return Result(False, name, f"{man_rel} missing (open the journal variant first)",
@@ -334,8 +374,8 @@ def reporting_checklist_complete(ctx: Ctx) -> Result:
                 continue
             gid_rows.setdefault(gid, []).append(dict(r, item=m.group(2)))
     if set(gid_rows) != set(ids):
-        problems.append(f"checklist blocks do not match the protocol: checklist "
-                        f"{sorted(gid_rows)}, protocol {sorted(ids)}")
+        problems.append(f"checklist blocks do not match the requirement: checklist "
+                        f"{sorted(gid_rows)}, required {sorted(ids)} ({source})")
     unresolved_all = []
     no_evidence: list[str] = []
     not_found: list[str] = []

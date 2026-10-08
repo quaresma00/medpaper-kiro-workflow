@@ -25,7 +25,6 @@ later stage argues against the same target instead of a remembered paraphrase.
   "covariates_proposed": [],
   "claimed_novelty": "one sentence: what is not yet known that this would establish",
   "data_source_candidates": [{"name": "", "access": "public | licensed | institutional | to-be-collected", "why": ""}],
-  "reporting_guideline_candidate": "STROBE + RECORD | STROBE-MR | TRIPOD | TRIPOD+AI | PRISMA | STROBE | CONSORT | STARD | CARE | ...",
   "open_questions": ["every ambiguity you had to leave unresolved"]
 }
 ```

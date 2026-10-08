@@ -95,7 +95,8 @@ the chosen journal's current official instructions.
 - `PASS` is required to complete the pipeline. Portal-only user tasks may be listed, but an
   unmet required local upload or unresolved cross-file mismatch is not a pass.
 - `analysis_reproduces` and `reporting_checklist_complete` must pass here, so the audit may
-  state that the submitted numbers re-execute and every guideline item is located.
+  state that the submitted numbers re-execute and, when a checklist is required, every item
+  is located.
 
 ## Close
 ```

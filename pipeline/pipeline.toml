@@ -14,7 +14,7 @@
 
 [meta]
 name = "medpaper"
-version = "1.7.2"
+version = "1.7.3"
 schema = 1
 description = "Medical/clinical research pipeline: idea -> feasibility -> data -> analysis -> artifacts -> manuscript -> submission package."
 
@@ -177,7 +177,7 @@ check = "outputs_exist"
 [[stage.gate]]
 check = "md_sections"
 path = "01_protocol/protocol_v1.md"
-headings = ["Objective", "Design", "Population and eligibility", "Variables", "Statistical analysis plan", "Sample size / power", "Reporting guideline", "Ethics"]
+headings = ["Objective", "Design", "Population and eligibility", "Variables", "Statistical analysis plan", "Sample size / power", "Ethics"]
 [[stage.gate]]
 check = "md_sections"
 path = "02_data/acquisition_plan.md"
@@ -261,15 +261,10 @@ check = "results_have_environment"
 # must be identical. Re-checked at S17, S23 and S25 against the current files.
 [[stage.gate]]
 check = "analysis_reproduces"
-# Early warning only: the guideline named in the protocol must be registered with its item list.
-[[stage.gate]]
-check = "reporting_checklist_complete"
-guideline_only = true
-severity = "warn"
 [[stage.gate]]
 check = "md_sections"
 path = "01_protocol/protocol_final.md"
-headings = ["Objective", "Design", "Population and eligibility", "Variables", "Statistical analysis plan", "Sample size / power", "Reporting guideline", "Ethics", "Deviations from protocol v1"]
+headings = ["Objective", "Design", "Population and eligibility", "Variables", "Statistical analysis plan", "Sample size / power", "Ethics", "Deviations from protocol v1"]
 [[stage.gate]]
 check = "decision_recorded"
 name = "analysis_converged"
@@ -748,7 +743,7 @@ check = "variant_preserves_science"
 id = "S23_package"
 title = "Build and visually verify the journal-ready Word submission package"
 card = "stages/S23_package.md"
-outputs = ["08_submission/cover_letter.md", "08_submission/bundle/SUBMISSION_CHECKLIST.md", "08_submission/bundle/manifest.json", "08_submission/package_content_baseline.json", "08_submission/submission_qc.md", "08_submission/reporting_checklist.md"]
+outputs = ["08_submission/cover_letter.md", "08_submission/bundle/SUBMISSION_CHECKLIST.md", "08_submission/bundle/manifest.json", "08_submission/package_content_baseline.json", "08_submission/submission_qc.md"]
 [[stage.gate]]
 check = "outputs_exist"
 [[stage.gate]]

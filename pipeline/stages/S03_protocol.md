@@ -5,21 +5,15 @@ Commit to a design before seeing the data, so that later choices are visibly
 pre-specified rather than fitted to whatever happened to be significant.
 
 ## Procedure
-1. Pick the reporting guideline that governs this design (STROBE, CONSORT, STARD,
-   TRIPOD+AI, PRISMA, CARE...). State it explicitly; it dictates what the Methods must
-   contain and what the artifact plan must include (e.g. a flow diagram). The
-   `Reporting guideline` section holds one `Guideline: <name>` line per applicable guideline
-   (e.g. `Guideline: STROBE`); S23's checklist gate reads that line, and prose mentions
-   ("CONSORT does not apply") are ignored once it exists. Registered names:
-   `reference/reporting_guidelines.toml`. Typical public-database mapping:
-   - database cohort / cross-sectional (NHANES, MIMIC, SEER, UK Biobank, claims/EHR):
-     `Guideline: STROBE + RECORD`
-   - Mendelian randomisation: `Guideline: STROBE-MR`
-   - prediction model / nomogram: `TRIPOD` (classic regression) or `TRIPOD+AI` (machine learning)
-   - meta-analysis / systematic review: `PRISMA`
+1. No study registration and no reporting checklist are chosen or filled here. Retrospective
+   database / registry / own-centre retrospective studies need no registration; a checklist is
+   written only at S23 if the chosen journal requires one. Exception - systematic review /
+   meta-analysis: register the protocol on PROSPERO before screening, record the registration
+   ID in `Ethics`; if not registered, say so in Methods. Its PRISMA flow diagram and checklist
+   are part of the normal flow.
 2. Write `project/01_protocol/protocol_v1.md` with exactly these headings:
    `Objective`, `Design`, `Population and eligibility`, `Variables`,
-   `Statistical analysis plan`, `Sample size / power`, `Reporting guideline`, `Ethics`.
+   `Statistical analysis plan`, `Sample size / power`, `Ethics`.
    - `Variables`: for every exposure, outcome and covariate give the operational
      definition, the source field, the unit, and the handling of missing values.
      If a cutoff is used, say where the cutoff comes from (cite it).
@@ -72,5 +66,5 @@ pre-specified rather than fitted to whatever happened to be significant.
 ## Close
 ```
 .\.venv\Scripts\python.exe tools/wf.py check
-.\.venv\Scripts\python.exe tools/wf.py advance --note "protocol v1 fixed; guideline=<x>; primary model=<y>; data route=<z>"
+.\.venv\Scripts\python.exe tools/wf.py advance --note "protocol v1 fixed; primary model=<y>; data route=<z>"
 ```

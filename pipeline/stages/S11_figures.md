@@ -110,8 +110,8 @@ save(fig, PROJECT / "05_figures/out/Figure1", width="double", archetype="box_jit
    `Figure N | removed text | now in legend`. Never grey text down. Keep each legend within
    the 180-word ceiling, and never restate Results in it. Panel text that stays: axis titles
    and units, tick labels, panel letters, group labels, legend entries, significance markers,
-   key data values (n, HR with CI, AUC), and guideline-mandated content (KM risk tables,
-   CONSORT/PRISMA box text, scale bars).
+   key data values (n, HR with CI, AUC), and required content (KM risk tables,
+   flow-diagram box text, scale bars).
 8. Write `project/05_figures/manifest.json`:
 ```json
 {"built_at": "", "figures": [{"id": "Figure 1", "script": "", "png": "", "tiff": "",

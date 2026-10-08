@@ -55,8 +55,8 @@ first keep panels from filling up with explanatory text later.
    `"renderer_reason"` of at least 20 characters. Never refit a confirmed model just to draw
    it in R. `source_results` lists the result files the figure is drawn from; the R render
    receipt binds to exactly that list.
-   If the reporting guideline requires a flow diagram (STROBE/CONSORT/STARD/PRISMA),
-   it is Figure 1.
+   A participant-selection flow diagram (PRISMA flow for a meta-analysis), if planned,
+   is Figure 1.
 
 3. **Declare each figure's archetype.** Pick it from `reference/archetypes.toml` and read
    that entry before planning the figure - it lists the elements that chart type must have,

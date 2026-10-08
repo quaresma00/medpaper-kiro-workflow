@@ -2,7 +2,11 @@
 
 一套面向医学与临床研究的 Kiro 工作流。它把“研究想法”推进为经过数据、文献、统计结果、图表、人工复核和期刊规则共同校验的投稿包，而不是只让 AI 一次性写出一篇看似完整的论文。
 
-当前版本：`1.7.2`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE + R 4.3+
+当前版本：`1.7.3`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE + R 4.3+
+
+## 1.7.3 变化
+
+- **取消预先注册与报告清单**：非 Meta 研究不再要求注册，方案不再有 `Reporting guideline` 节；报告清单仅当 S20 在 `target_journal.json` 写入 `journal_requires_checklist`（期刊要求时）才在 S23 填写，否则 gate 按“不需要”通过。Meta 分析保留 PROSPERO 注册建议与 PRISMA。进行中的论文无需操作，迁移时记录事件。
 
 ## 1.7.2 变化
 
@@ -44,7 +48,7 @@
 - **Python/R 分工**：见 `reference/language_policy.toml`。Python 负责数据获取、清洗、三线表 xlsx、Word 和全部门禁；R 负责作图（默认，`tools/figures/R/medfig.R` 的 `save_medpaper()` 与 `recipes.R` 中的 KM、竞争风险、森林图、ROC、校准、DCA、火山图）以及生存分析、竞争风险、列线图/校准/DCA、多重插补、倾向性评分、复杂抽样、混合模型、Meta 分析和 Table 1 统计。`save_medpaper()` 按目标栏宽精确出图，自动统一外边距，并写出与 Python 相同格式的 QC 记录，`qc.py` 对两种引擎一视同仁。`wf config set figure_engine python` 可改回 matplotlib。
 - **分析复现门禁**：S06 运行 `python tools/reproduce.py run`，在沙箱中按 `analysis_manifest.json` 声明的顺序（1.7.1；无声明时按文件名）重跑 `03_analysis/code/` 下的全部顶层脚本，要求结果 JSON 完全一致（仅忽略时间戳）；重跑结果保存在 `.wf/repro/rerun/` 作为证据。`analysis_reproduces` 在 S06、S17、S23、S25 复核，任何分析代码、原始数据或结果的后续修改都会使证明失效。
 - **环境回执**：结果 JSON 只能由 `write_results()`（Python `tools/analysis/results.py`，R `tools/R/medresults.R`）写出，自动附带语言与版本、程序包版本、随机种子、脚本及其 SHA-256。回执中的数字不计入数字溯源。
-- **报告规范清单**：S23 生成 `08_submission/reporting_checklist.md`，把方案中 `Guideline:` 行声明的报告规范（`reference/reporting_guidelines.toml`）逐条对应到期刊稿中真实存在的位置；`reporting_checklist_complete` 在 S23、S24、S25 阻断，未收录条目清单的规范（`verify = true`）不会被凭空编造。
+- **报告规范清单**（1.7.3 起按需）：仅当目标期刊要求（或 Meta 分析的 PRISMA）时，S23 生成 `08_submission/reporting_checklist.md`，逐条对应到期刊稿中真实存在的位置；未收录条目清单的规范（`verify = true`）不会被凭空编造。
 
 ## 这套工作流解决什么问题
 

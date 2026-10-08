@@ -2126,7 +2126,7 @@ def run_codex_integration() -> None:
                f"card must name `{agent}` so the work is not done in the main context")
 
     record("pipeline and skill versions agree",
-           pipe["meta"]["version"] == "1.7.2" and 'version: "2.1.0"' in skill,
+           pipe["meta"]["version"] == "1.7.3" and 'version: "2.1.0"' in skill,
            f'pipeline={pipe["meta"]["version"]}, skill=2.1.0 (Kiro adapter revision)')
     record("all 25 stage cards exist",
            len(pipe["stage"]) == 25 and
@@ -5077,7 +5077,7 @@ def run_v160(tmp: Path) -> None:
            any(g["check"] == "reader_review_coverage" for g in s18["gate"])
            and "reader-inputs" in (ROOT / "pipeline/stages/S18_independent_review.md")
            .read_text(encoding="utf-8"))
-    record("pipeline version is 1.7.2", pipe.meta.get("version") == "1.7.2")
+    record("pipeline version is 1.7.3", pipe.meta.get("version") == "1.7.3")
 
 
 def run_v170(tmp: Path) -> None:
@@ -5397,8 +5397,17 @@ def run_reporting_checklist(tmp: Path) -> None:
     (P / "01_protocol").mkdir(exist_ok=True)
     (P / "08_submission/manuscript").mkdir(parents=True)
 
-    def protocol(body: str):
-        (P / "01_protocol/protocol_final.md").write_text(f"# Protocol\n\n## Reporting guideline\n{body}\n\n## Ethics\nx\n", encoding="utf-8")
+    def protocol(design: str = "Retrospective cohort study using NHANES."):
+        (P / "01_protocol/protocol_final.md").write_text(
+            f"# Protocol\n\n## Design\n{design}\n\n## Ethics\nx\n", encoding="utf-8")
+
+    def require(value):
+        """What S20 records when the journal's author guidelines demand a checklist."""
+        data = {"journal": "Fixture Journal"}
+        if value is not None:
+            data["journal_requires_checklist"] = value
+        (P / "08_submission/target_journal.json").write_text(json.dumps(data), encoding="utf-8")
+    protocol()
     heads = ["Introduction", "2.1 Study design", "Methods", "Results", "Discussion"]
     items = [i["id"] for i in reg["STROBE"]["items"]]
 
@@ -5425,7 +5434,16 @@ def run_reporting_checklist(tmp: Path) -> None:
 
     def gate(**spec):
         return _gate("reporting_checklist_complete", P, stage="S23_package", **spec)
-    protocol("Guideline: STROBE")
+    g = gate()
+    record("no journal requirement: the gate passes as not required, no checklist file needed",
+           g.ok and "not required" in g.detail
+           and not (P / "08_submission/reporting_checklist.md").exists(), g.detail[:120])
+    require("none")
+    record("journal_requires_checklist = none also counts as not required", gate().ok)
+    require("STROBE")
+    g = gate()
+    record("N: journal requires STROBE and no checklist exists -> the gate enforces",
+           not g.ok and "missing" in g.detail, g.detail[:120])
     checklist()
     g = gate()
     record("a complete checklist against the variant passes", g.ok, g.detail[:120])
@@ -5478,11 +5496,11 @@ def run_reporting_checklist(tmp: Path) -> None:
     man.write_text(man_before.replace("## Results", "## Data sources\n"
                    + " ".join(rev.values()) + "\n\n## Results"), encoding="utf-8")
     rrows = [(i, "Reported", "Data sources", rev[i], "") for i in ritems]
-    protocol("Guideline: STROBE + RECORD")
+    require("STROBE + RECORD")
     checklist()
     g = gate()
     record("N: STROBE + RECORD with only the STROBE block fails",
-           not g.ok and "do not match the protocol" in g.detail, g.detail[:160])
+           not g.ok and "do not match the requirement" in g.detail, g.detail[:160])
     cl = P / "08_submission/reporting_checklist.md"
 
     def rec_block(rows):
@@ -5509,23 +5527,29 @@ def run_reporting_checklist(tmp: Path) -> None:
     record("N: unprefixed items in a combined block fail",
            not g.ok and "needs a guideline prefix" in g.detail, g.detail[:160])
     man.write_text(man_before, encoding="utf-8")
-    protocol("Guideline: SQUIRE")
+    require("SQUIRE")
     g = gate()
-    w = _gate("reporting_checklist_complete", P, stage="S06_protocol_final", guideline_only=True, severity="warn")
-    record("N: an unverified guideline fails, and the S06 variant only warns",
-           not g.ok and "verify = true" in g.detail and not w.ok and w.severity == "warn")
-    protocol("Guideline: PRISMA-ScR")
-    record("N: an unregistered Guideline: line fails", "unregistered guideline on a Guideline: line" in gate().detail)
-    protocol("We follow PRISMA-ScR.")
-    record("N: a protocol naming no registered guideline fails", "names no registered guideline" in gate().detail)
-    protocol("Guideline: STROBE\n\nCONSORT does not apply as this is not a trial.")
+    record("N: a journal-required but unverified guideline fails", not g.ok and "verify = true" in g.detail)
+    require("PRISMA-ScR")
+    record("N: an unregistered journal_requires_checklist name fails",
+           "unregistered guideline in journal_requires_checklist" in gate().detail)
+    # Meta-analysis keeps PRISMA in its normal flow even when the journal names none.
+    require(None)
+    protocol("Systematic review and meta-analysis of cohort studies.")
     checklist()
-    ok1 = gate().ok
-    protocol("STROBE applies. CONSORT does not apply as this is not a trial.")
-    g2 = gate()
-    record("explicit Guideline: lines win over prose; prose fallback detects both",
-           ok1 and not g2.ok and "do not match the protocol" in g2.detail)
-    protocol("Guideline: STROBE")
+    g = gate()
+    record("N: a meta-analysis is held to PRISMA without a journal requirement",
+           not g.ok and "PRISMA" in g.detail and "meta-analysis design" in g.detail, g.detail[:160])
+    pitems = [i["id"] for i in reg["PRISMA"]["items"]]
+    man.write_text(man_before.replace("## Results", "## Review methods\n" + " ".join(
+        f"PRISMA item {i} is reported in this sentence." for i in pitems) + "\n\n## Results"),
+        encoding="utf-8")
+    checklist([(i, "Reported", "Review methods", f"PRISMA item {i} is reported in this sentence.",
+                "") for i in pitems], guideline="PRISMA")
+    record("a meta-analysis with a complete PRISMA checklist passes", gate().ok, gate().detail[:160])
+    man.write_text(man_before, encoding="utf-8")
+    protocol()
+    require("STROBE")
     rows = [(items[0], "Reported", "Title", "A retrospective cohort study title", ""),
             (items[1], "Reported", "Study design", "This is a retrospective cohort design", "")
             ] + base[2:]
@@ -5552,6 +5576,33 @@ def run_reporting_checklist(tmp: Path) -> None:
            absent and present and not gate().ok, g.detail[:160])
     record("the checklist is journal-downstream (cleared on a journal switch)",
            "08_submission/reporting_checklist.md" in scifreeze.JOURNAL_DOWNSTREAM)
+    # 1.7.3: nothing pre-emptive in the default cards; registration only for meta-analysis.
+    import re
+    import tomllib
+    from wfcore.state import State
+    cards = {p.stem: p.read_text(encoding="utf-8") for p in (ROOT / "pipeline/stages").glob("S*.md")}
+    named = sorted(k for k, t in cards.items()
+                   if re.search(r"STROBE|TRIPOD|CONSORT|STARD|RECORD \d|Guideline:", t)
+                   and k not in ("S20_journal", "S23_package"))
+    record("no default stage card names a reporting checklist (only S20/S23 on demand)",
+           not named, str(named))
+    reg_words = sorted(k for k, t in cards.items()
+                       if re.search(r"\bOSF\b|osf\.io|pre-?regist|trial registration|ClinicalTrials|ChiCTR", t, re.I))
+    s03 = cards["S03_protocol"]
+    record("non-meta studies carry no registration requirement; meta-analysis prompts PROSPERO",
+           not reg_words and "need no registration" in s03 and "PROSPERO before screening" in s03,
+           str(reg_words))
+    pdoc = tomllib.loads((ROOT / "pipeline/pipeline.toml").read_text(encoding="utf-8"))
+    heads = [g.get("headings", []) for s in pdoc["stage"] for g in s.get("gate", [])
+             if str(g.get("path", "")).startswith("01_protocol/protocol")]
+    record("protocols no longer require a Reporting guideline section",
+           heads and not any("Reporting guideline" in h for h in heads))
+    mig = State(tmp / "mig173", ".wf")
+    mig.create("medpaper", "1.7.2", "S23_package")
+    mig.migrate_pipeline("1.7.3", ["S23_package"])
+    kinds = [e.get("kind") for e in mig.data.get("events", [])]
+    record("migrating an in-flight 1.7.2 paper records the relaxed-requirements event",
+           kinds.count("requirements_relaxed") == 1, str(kinds))
 
 
 def run_new_wiring() -> None:
@@ -5571,7 +5622,6 @@ def run_new_wiring() -> None:
                 ("S06_protocol_final", "results_have_environment"), ("S06_protocol_final", "analysis_reproduces"),
                 ("S17_assemble", "analysis_reproduces"), ("S23_package", "analysis_reproduces"),
                 ("S25_submission_audit", "analysis_reproduces"),
-                ("S06_protocol_final", "reporting_checklist_complete"),
                 ("S23_package", "reporting_checklist_complete"),
                 ("S24_package_human_review", "reporting_checklist_complete"),
                 ("S25_submission_audit", "reporting_checklist_complete")}
@@ -5587,13 +5637,13 @@ def run_new_wiring() -> None:
     record("overrides cannot relax the new gates or skip their stages", relax_refused and skip_refused)
     s06 = next(s for s in pipe["stage"] if s["id"] == "S06_protocol_final")
     s23 = next(s for s in pipe["stage"] if s["id"] == "S23_package")
-    record("S06 declares the reproducibility report, S23 the checklist, [freeform] the tolerance file",
+    record("S06 declares the reproducibility report, [freeform] the tolerance file; the "
+           "on-demand checklist is not a required S23 output",
            "03_analysis/reproducibility_report.json" in s06["outputs"]
-           and "08_submission/reporting_checklist.md" in s23["outputs"]
+           and "08_submission/reporting_checklist.md" not in s23["outputs"]
            and "03_analysis/reproducibility.toml" in pipe["freeform"]["globs"])
-    warn = next(g for g in s06["gate"] if g["check"] == "reporting_checklist_complete")
-    record("the S06 checklist gate is the guideline_only warn variant",
-           warn.get("guideline_only") is True and warn.get("severity") == "warn")
+    record("S06 no longer carries a checklist gate",
+           not any(g["check"] == "reporting_checklist_complete" for g in s06["gate"]))
 
 
 

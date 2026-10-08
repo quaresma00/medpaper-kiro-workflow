@@ -722,8 +722,9 @@ def cmd_advance(args) -> int:
             print("--force cannot waive environment receipts. Write every results file with "
                   "write_results() from a top-level 03_analysis/code script via wf run-script.")
         if "reporting_checklist_complete" in failed_names:
-            print("--force cannot waive the reporting checklist. Every item of the protocol's "
-                  "guideline needs a row whose location exists in the submitted documents.")
+            print("--force cannot waive a journal-required reporting checklist. Every item of "
+                  "the required guideline needs a row whose location exists in the submitted "
+                  "documents.")
         return 2
     if not ok and not args.force:
         print(f"refusing to advance: {blocking} blocking issue(s) in {stage.id}")

@@ -30,6 +30,10 @@ then freeze its actual author instructions and Word-format rules.
    `target_journal.json` to `central` by default. Use `local_required` only when the official
    guide explicitly requires definitions within every table/figure, and put the exact guide
    URL and rule in `abbreviation_rule_source`.
+   Reporting checklist and registration are on demand: only if the official instructions
+   require a checklist, set `"journal_requires_checklist": "<name, e.g. STROBE>"` in
+   `target_journal.json` (S23 then fills it); otherwise leave it unset. Likewise a
+   registration statement is written only if the journal demands one.
 7. Write `project/08_submission/docx_style.json`. Use the journal's explicit requirements
    for font size, spacing, margins and paper size. All text is always black and external
    hyperlinks are always removed. If the journal is silent, use these medical-manuscript

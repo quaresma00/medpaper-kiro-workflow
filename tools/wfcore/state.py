@@ -96,8 +96,25 @@ class State:
             self.event("pipeline_migration",
                        f"{old_version} -> {pipeline_version}; current {current} -> {self.data['current']}")
             self._note_legacy_revision()
+            self._note_on_demand_checklist(old_version)
             self.save()
         return changed
+
+    def _note_on_demand_checklist(self, old_version: str) -> None:
+        """1.7.3: no pre-emptive registration or reporting checklist. Nothing to convert - the
+        checklist gate now passes as not required unless the journal (or a meta-analysis)
+        demands one, and the protocol no longer needs a Reporting guideline section."""
+        try:
+            old = tuple(int(x) for x in old_version.split(".")[:3])
+        except ValueError:
+            old = (0,)
+        if old >= (1, 7, 3) or self.data.get("on_demand_checklist_noted"):
+            return
+        self.data["on_demand_checklist_noted"] = True
+        self.event("requirements_relaxed",
+                   "1.7.3: registration not required (meta-analysis: PROSPERO recommended); "
+                   "reporting checklist only when target_journal.json journal_requires_checklist "
+                   "is set or PRISMA for a meta-analysis")
 
     def _note_legacy_revision(self) -> None:
         """1.7.0 rounds are scoped (schema 2). A round opened earlier keeps its rewind flow.

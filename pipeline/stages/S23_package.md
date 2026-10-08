@@ -107,8 +107,10 @@ unlooked-at.
 10. Write `submission_qc.md` with `Rendered files inspected`, `Citation and cross-reference
    checks`, `Typography and hyperlinks`, `Tables and figures`, `Defects resolved`. Record
    `submission_files_visually_confirmed YES`, then clean temporary/orphaned files.
-11. Write `project/08_submission/reporting_checklist.md` against this journal variant, one
-   block per guideline named on the protocol's `Guideline:` lines, every item of
+11. Only if `target_journal.json` sets `journal_requires_checklist` (or the study is a
+   meta-analysis: PRISMA), write `project/08_submission/reporting_checklist.md` as a
+   submission file; otherwise skip this step - the gate passes as not required. One
+   block per required guideline, every item of
    `reference/reporting_guidelines.toml` exactly once (`STROBE + RECORD`: either a separate
    `Guideline: RECORD` block, or one `Guideline: STROBE + RECORD` block whose Item cells are
    prefixed, e.g. `STROBE 7`, `RECORD 7.1`):
@@ -144,7 +146,7 @@ Manuscript: 08_submission/manuscript/full_manuscript.md
 - `08_submission/bundle/manifest.json`
 - `08_submission/package_content_baseline.json`
 - `08_submission/submission_qc.md`
-- `08_submission/reporting_checklist.md`
+- `08_submission/reporting_checklist.md` (only when required, step 11)
 - the journal-required Word, figure, table and supplementary upload files
 
 ## Hard rules
