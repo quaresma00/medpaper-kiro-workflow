@@ -28,6 +28,27 @@ AI_TELLS = [
     "in the realm of", "shedding light upon", "robust and comprehensive",
 ]
 
+# Backstage language: the pipeline's own review/revision history leaking into the paper. An
+# editor reads "added after independent review" as a rejected or unstable manuscript.
+BACKSTAGE_RE = re.compile(
+    r"\bindependent\s+(?:publishability\s+)?review(?:er)?s?\b|"
+    r"\b(?:earlier|previous|prior|original|first)\s+drafts?\b|\boriginal\s+submission\b|"
+    r"\b(?:earlier|previous|prior)\s+versions?\s+of\s+(?:this|the|our)\s+"
+    r"(?:manuscript|paper|article|analysis|study|draft)\b|"
+    r"\b(?:requested|suggested|raised|noted|flagged)\s+by\s+(?:the\s+)?(?:independent\s+)?reviewers?\b|"
+    r"\bat\s+(?:the\s+)?reviewers?'?s?\s+request\b|"
+    r"\bin\s+response\s+to\s+(?:the\s+)?(?:reviewers?|review|reviewer\s+comments)\b|"
+    r"\b(?:added|revised|corrected|updated|changed)\s+(?:after|following)\s+(?:the\s+)?"
+    r"(?:independent\s+|internal\s+)?review\b|"
+    r"\b(?:this|the)\s+revised\s+(?:manuscript|version|draft)\b|\bwrongly\s+(?:kept|included|excluded)\b|"
+    r"\b(?:pipeline|workflow)\s+(?:stage|step|gate)\b",
+    re.I)
+
+
+def backstage_hits(text: str) -> list[str]:
+    return sorted({m.group(0) for m in BACKSTAGE_RE.finditer(_body(text))})
+
+
 FORBIDDEN_VISIBLE_SYMBOLS = {
     "\u2193": "down arrow (use words such as 'lower' or 'decreased')",
 }
@@ -162,6 +183,13 @@ def no_ai_boilerplate(ctx: Ctx) -> Result:
             f"{rel} still contains placeholder text: " + ", ".join(sorted(set(hard))),
             ["Resolve every placeholder from real data or delete the sentence."],
         )
+    leaks = backstage_hits(raw)
+    if leaks:
+        return Result(
+            False, "no_ai_boilerplate",
+            f"{rel} describes the pipeline's own review/draft history: " + "; ".join(leaks[:5]),
+            ["Delete it. A real change of plan is reported as a protocol deviation or post hoc "
+             "analysis, never by reference to an internal review or an earlier draft."])
     soft = [ph for ph in AI_TELLS if ph in low]
     if soft:
         return Result(

@@ -224,9 +224,38 @@ def build_freeze(project: Path) -> dict:
     return payload
 
 
+def _s19_approval_at(project: Path) -> str | None:
+    """Timestamp of the S19 NO_FURTHER_REVIEW decision, or None when there is none."""
+    try:
+        state = json.loads((project / ".wf/state.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    decision = state.get("decisions", {}).get("manuscript_human_reviewed") or {}
+    return str(decision.get("at", "")) if decision.get("value") == "NO_FURTHER_REVIEW" else None
+
+
 def write_freeze(project: Path, *, force: bool = False) -> Path:
     path = freeze_path(project)
     if path.exists() and not force:
+        # Identical science needs no --force: re-capturing after a re-recorded S19 approval only
+        # re-stamps the time, so the freeze no longer predates the approval (1.8.0).
+        try:
+            old = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            old = {}
+        new = build_freeze(project)
+        if (old.get("files") == new.get("files")
+                and old.get("review_package_id") == new.get("review_package_id")):
+            approved = _s19_approval_at(project)
+            if approved and str(old.get("frozen_at", "")) < approved:
+                old.setdefault("restamps", []).append(
+                    {"from": old.get("frozen_at"), "to": new["frozen_at"],
+                     "reason": "identical content re-captured after the S19 approval"})
+                old["frozen_at"] = new["frozen_at"]
+                tmp = path.with_suffix(".json.tmp")
+                tmp.write_text(json.dumps(old, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+                tmp.replace(path)
+            return path
         raise SystemExit(
             f"{FREEZE_REL} already exists. Re-freezing discards the record that review closed "
             f"on this exact text.\n"
@@ -457,13 +486,24 @@ def variant_meta(project: Path) -> dict:
         return {}
 
 
-def _facts(text: str) -> dict:
+KEY_RE = re.compile(r"@([A-Za-z0-9_][\w:.#$%&+?<>~/-]*?)(?=[\s;,\]]|$)")
+SUPP_LEGEND_RE = re.compile(r"(?ms)^#{2,6}\s+(?:Figure|Fig\.?)\s+S\d+\b.*?(?=^#{1,6}\s|\Z)")
+
+
+def _facts(text: str, aliases: dict | None = None) -> dict:
+    """Numbers, citekeys and artifact references. Citekeys are compared as a multiset whatever
+    the grouping, so '[@a] [@b]' and the collapsible '[@a; @b]' are the same citations; a
+    journal alias ('Online Resource 2') counts as the canonical ids it stands for; and
+    supplementary legend blocks are ignored because 1.8.0 moves them to the supplementary file."""
+    from . import journalspec
+    text = SUPP_LEGEND_RE.sub(" ", text)
+    if aliases:
+        text = journalspec.expand_aliases(text, aliases)
     stripped = CITE_RE.sub(" ", text)
     stripped = ART_RE.sub(" ", stripped)
     return {
         "numbers": NUM_RE.findall(stripped),
-        "citekeys": [k.strip() for group in CITE_RE.findall(text)
-                     for k in group.split(";") if k.strip()],
+        "citekeys": [k for group in CITE_RE.findall(text) for k in KEY_RE.findall("@" + group)],
         "artifacts": [f"{kind.lower()} {num.upper()}" for kind, num in ART_RE.findall(text)],
     }
 
@@ -479,6 +519,8 @@ def variant_delta(project: Path) -> tuple[bool, list[str], dict]:
     if not variant_exists(project):
         return False, [f"{VARIANT_DIR}/full_manuscript.md missing; no variant has been opened"], {}
     problems, summary = [], {}
+    from . import journalspec
+    aliases = journalspec.project_aliases(project)
     for name in ADAPTED_TEXT_FILES:
         src, var = project / SOURCE_DIR / name, project / VARIANT_DIR / name
         if not var.is_file():
@@ -491,7 +533,7 @@ def variant_delta(project: Path) -> tuple[bool, list[str], dict]:
             continue
         before = src.read_text(encoding="utf-8", errors="replace")
         after = var.read_text(encoding="utf-8", errors="replace")
-        fb, fa = _facts(before), _facts(after)
+        fb, fa = _facts(before), _facts(after, aliases)
         entry = {"words_before": len(before.split()), "words_after": len(after.split())}
         for field in ("numbers", "citekeys", "artifacts"):
             lost = Counter(fb[field]) - Counter(fa[field])

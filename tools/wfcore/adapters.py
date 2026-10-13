@@ -150,9 +150,18 @@ def render_adapters(wf_cmd: str, tool_prefix: str, *, engine_workspace: bool,
         "gate unsatisfiable (write-paper, orchestrate, make-figures, search-lit and others), and "
         "asks for confirmation on skills that merely overlap a stage. Decisions come from "
         "reference/skill_policy.toml.", guard, 30, matcher="disclose_context")
+    frozen_cmd = ("python tools/hooks/frozen_guard.py" if engine_workspace
+                  else f'python "{tool_prefix}hooks/frozen_guard.py"')
+    frozen_guard = _hook(
+        "medpaper: stop edits to frozen or certified sources", "PreToolUse",
+        "Refuses a file write to a scientifically frozen or revision-certified source (for "
+        "example a figure script at S23) unless an open revision round covers it, and names the "
+        "rework.py command that opens one.", frozen_cmd, 30,
+        matcher="fs_write|str_replace|fsWrite|strReplace|fsAppend|editCode")
     return [(".kiro/steering/medpaper-pipeline.md", steering),
             (".kiro/hooks/medpaper-status.json", status),
-            (".kiro/hooks/medpaper-skill-guard.json", skill_guard)]
+            (".kiro/hooks/medpaper-skill-guard.json", skill_guard),
+            (".kiro/hooks/medpaper-frozen-guard.json", frozen_guard)]
 
 
 def engine_adapters() -> list[tuple[str, str]]:

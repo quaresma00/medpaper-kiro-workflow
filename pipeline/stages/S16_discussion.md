@@ -24,6 +24,10 @@ Interpret the finding against the literature you actually read. One file, this s
       deviation from `protocol_diff.md`, residual confounding, generalisability limits,
       power, and measurement error. State the direction each bias would push the estimate.
    6. **Conclusion** - two or three sentences, no stronger than the Results support.
+   Write these as **continuous prose with no subheadings**: each move opens with a topic
+   sentence that carries the transition. Subheadings appear only if the journal guide frozen
+   at S20 requires them (`discussion_subheadings: true`); `manuscript_structure` rejects them
+   otherwise. Adjacent citations go in one group, `[@a; @b; @c]`, so they render as [1-3].
 2. Write `project/07_manuscript/discussion.md` with pandoc citations `[@key]`.
 3. Check the counts: `.\.venv\Scripts\python.exe tools/wf.py check` (word and reference targets, and that every
    deep-read paper is cited).
@@ -33,6 +37,8 @@ Interpret the finding against the literature you actually read. One file, this s
 
 ## Hard rules
 - ONE section file this stage.
+- Never mention the pipeline's own history (independent review, earlier draft, previous
+  version, reviewer). A change of analysis is a "protocol deviation" or "post hoc analysis".
 - No new results. Any number here must already be in `results.md` and in a results JSON.
 - No causal language for an observational design. "Associated with", not "leads to".
 - Limitations are not a list of generic caveats. "Single-centre design" alone is not a

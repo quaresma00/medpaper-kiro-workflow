@@ -50,6 +50,10 @@ def main() -> int:
         for rel in sorted(freeze["files"]):
             print(f"  {rel}")
         print(f"\n{len(freeze['files'])} file(s) frozen at {freeze['frozen_at']}.")
+        if scifreeze._s19_approval_at(proj) is None:
+            print("note: no S19 manuscript_human_reviewed=NO_FURTHER_REVIEW decision yet. Order: "
+                  "approval first, then capture; re-running capture on identical content "
+                  "re-stamps it after the approval without --force.")
         print("Journal requirements are now applied to a copy, never to these files:")
         print(wfpaths.localize_commands(
             "  tools/manuscript/scientific_freeze.py open-variant --journal \"<name>\"", proj))

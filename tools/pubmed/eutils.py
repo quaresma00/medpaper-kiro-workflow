@@ -341,6 +341,9 @@ def _one_record(art, cache_file: str) -> dict:
         "volume": _text(art, ".//JournalIssue/Volume"),
         "issue": _text(art, ".//JournalIssue/Issue"),
         "pages": _text(art, ".//Pagination/MedlinePgn") or _text(art, ".//Pagination/StartPage"),
+        # Article number for online-only journals with no page range (cited as the locator).
+        "elocator": next(((el.text or "").strip() for el in _own_elocation_ids(art)
+                          if el.get("EIdType") == "pii" and (el.text or "").strip()), ""),
         "publication_types": ptypes,
         "mesh": [(_m.text or "").strip() for _m in art.findall(".//MeshHeading/DescriptorName")],
         "flags": flags,

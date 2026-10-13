@@ -247,6 +247,11 @@ def _normalize_for_facts(s: str) -> str:
 
 def facts(text: str) -> dict:
     b = FENCE_RE.sub(" ", text)
+    try:  # journal alias names ("Online Resource 2") count as the ids they stand for
+        from wfcore import journalspec
+        b = journalspec.expand_aliases(b, journalspec.project_aliases(project_root()))
+    except (Exception, SystemExit):  # noqa: BLE001 - must work without a selected paper
+        pass
     keys = sorted({k for grp in CITE_RE.findall(b) for k in KEY_RE.findall(grp)})
     arts = sorted({re.sub(r"\s+", " ", a).lower().replace("fig.", "figure").replace("fig ", "figure ")
                    for a in ART_RE.findall(b)})
@@ -285,6 +290,16 @@ def lint_structure(rel: str, text: str) -> list[dict]:
 
     def flag(kind: str, detail: str, severity: str = "advisory") -> None:
         out.append({"file": rel, "kind": kind, "detail": detail, "severity": severity})
+
+    try:
+        from wfcore.checks.text import backstage_hits
+        leaks = backstage_hits(text)
+    except ImportError:  # pragma: no cover - engine layout broken
+        leaks = []
+    if leaks:
+        flag("backstage_language",
+             "mentions the pipeline's review/draft history: " + "; ".join(leaks[:4]) +
+             " - report real changes as protocol deviations or post hoc analyses", "blocking")
 
     em = len(re.findall(r"\u2014|\s--\s", b))
     if em / nwords * 1000 > 4:
@@ -445,12 +460,92 @@ def lint_spelling(docs: list[tuple[str, str]]) -> list[dict]:
     return out
 
 
-def lint_abbreviations(docs: list[tuple[str, str]]) -> list[dict]:
-    """Define once, on first use, then use consistently. Abstract has its own scope."""
+def _abbreviation_scopes(docs: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Abstract, body and each display item are separate definition scopes.
+
+    The canonical full_manuscript.md holds the abstract too, so it is split by its level-1
+    headings: an abbreviation defined only in the abstract is undefined in the body.
+    """
+    scopes: list[tuple[str, str]] = []
+    body_parts: list[str] = []
+    for rel, text in docs:
+        if rel.endswith("full_manuscript.md"):
+            heads = list(re.finditer(r"(?m)^#\s+([^#\n].*)$", text))
+            for i, m in enumerate(heads):
+                end = heads[i + 1].start() if i + 1 < len(heads) else len(text)
+                name = m.group(1).strip().casefold()
+                block = text[m.end():end]
+                if name == "abstract":
+                    scopes.append(("abstract", re.sub(r"(?mi)^Keywords\s*:.*$", "", block)))
+                elif name in ("introduction", "methods", "results", "discussion",
+                              "conclusion", "conclusions"):
+                    body_parts.append(block)
+        elif rel.endswith("abstract.md"):
+            scopes.append(("abstract", text))
+        elif not rel.endswith(("title_page.md", "statements.md")):
+            body_parts.append(text)
+    if body_parts:
+        scopes.append(("body", "\n".join(body_parts)))
+    return scopes
+
+
+def lint_display_abbreviations(blocks: list[tuple[str, str]]) -> list[dict]:
+    """A display item's local 'Abbreviations:' list may define only terms that item uses."""
     out = []
-    for scope, files in (("abstract", ["07_manuscript/abstract.md"]),
-                         ("body", [f for f, _ in docs if "abstract" not in f])):
-        text = "\n".join(body(t) for f, t in docs if f in files)
+    for label, text in blocks:
+        # A figure's terms live in the rendered image, which text cannot see; tables are
+        # checked against caption + workbook text.
+        if not label.lower().startswith("table"):
+            continue
+        for m in re.finditer(r"(?i)\bAbbreviations?\s*:\s*([^\n]+)", text):
+            rest = text[:m.start()] + text[m.end():]
+            for term in re.findall(r"(?:^|;)\s*([A-Za-z][A-Za-z0-9-]{1,24})\s*[,=:]", m.group(1)):
+                if not re.search(rf"(?<![\w]){re.escape(term)}(?![\w])", rest):
+                    out.append({"file": f"({label})", "kind": "abbrev_defined_unused",
+                                "severity": "blocking",
+                                "detail": f"'{term}' is defined in {label} but not used there"})
+    return out
+
+
+def display_blocks() -> list[tuple[str, str]]:
+    """Each figure legend and table caption (plus that table's workbook text) as one scope."""
+    proj = project_root()
+    files: dict[str, str] = {}
+    try:
+        plan = json.loads((proj / "01_protocol/artifact_plan.json").read_text(encoding="utf-8"))
+        for group in ("main_tables", "supp_tables"):
+            for e in plan.get(group, []):
+                files[re.sub(r"\s+", " ", str(e.get("id", ""))).casefold()] = str(e.get("file", ""))
+    except (OSError, json.JSONDecodeError):
+        pass
+    out = []
+    for rel in ("05_figures/legends.md", "04_tables/table_captions.md"):
+        path = proj / rel
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        heads = list(re.finditer(r"(?m)^#{2,6}\s+((?:Figure|Fig\.?|Table)\s+S?\d+)\.?.*$", text))
+        for i, m in enumerate(heads):
+            end = heads[i + 1].start() if i + 1 < len(heads) else len(text)
+            block = text[m.start():end]
+            wb = files.get(re.sub(r"\s+", " ", m.group(1)).casefold())
+            if wb and (proj / wb).is_file():
+                try:
+                    from wfcore import xlsxlite
+                    book = xlsxlite.Workbook(proj / wb)
+                    block += "\n" + "\n".join(v for s in book.sheets for v in s.values())
+                except Exception:  # noqa: BLE001 - malformed workbooks are reported elsewhere
+                    pass
+            out.append((m.group(1), block))
+    return out
+
+
+def lint_abbreviations(docs: list[tuple[str, str]]) -> list[dict]:
+    """Define once, on first use, then use consistently - separately in the abstract, the body
+    and each display item."""
+    out = []
+    for scope, text in _abbreviation_scopes(docs):
+        text = body(text)
         if not text.strip():
             continue
         defined: dict[str, int] = {}
@@ -468,7 +563,12 @@ def lint_abbreviations(docs: list[tuple[str, str]]) -> list[dict]:
                 out.append({"file": f"({scope})", "kind": "abbrev_used_before_defined",
                             "severity": "blocking",
                             "detail": f"'{abbr}' is used before it is defined in the {scope}"})
-            if len(uses) <= 2 and abbr not in NO_DEF_NEEDED:
+            if len(uses) <= 1 and abbr not in NO_DEF_NEEDED:
+                out.append({"file": f"({scope})", "kind": "abbrev_defined_unused",
+                            "severity": "blocking",
+                            "detail": f"'{abbr}' is defined in the {scope} but never used "
+                                      "there afterwards - spell it out"})
+            elif len(uses) <= 2 and abbr not in NO_DEF_NEEDED:
                 out.append({"file": f"({scope})", "kind": "abbrev_barely_used",
                             "severity": "advisory",
                             "detail": f"'{abbr}' is defined but used only "
@@ -562,6 +662,7 @@ def cmd_lint(args) -> int:
     style += lint_spelling(docs)
     if not args.file:
         style += lint_abbreviations(docs)
+        style += lint_display_abbreviations(display_blocks())
 
     tier_a = [x for x in ai if x["tier"] == "A"]
     tier_b = [x for x in ai if x["tier"] == "B"]

@@ -1333,6 +1333,23 @@ def cmd_run_script(args) -> int:
     if not script.is_file():
         print(f"paper script not found (or not .py/.R): {script}")
         return 2
+    from . import revision as _revision
+    drift = _revision.certified_drift(proj)
+    if drift:
+        # Caught at render time, not at the next review gate (1.8.0).
+        print("refused: frozen or round-certified source(s) were edited outside a revision round:")
+        for rel in drift[:10]:
+            print(f"  {rel}")
+        layout = [r for r in drift if r.startswith(("05_figures/", "04_tables/"))]
+        if layout and len(layout) == len(drift):
+            print("A figure/table layout change: open a controlled layout round first, e.g.\n  "
+                  + _loc(f'{wf().replace("wf.py", "rework.py")} layout '
+                         + " ".join(f"--source {r}" for r in layout)
+                         + ' --why "<what moves and why>"', proj))
+        else:
+            print("Route the change through tools/rework.py (batch --plan ...; --merge or "
+                  "--priority if a round is open), or restore the certified version.")
+        return 2
     print(f"paper  {proj}")
     print(f"cwd    {proj}")
     print(f"run    {' '.join(cmd)}")

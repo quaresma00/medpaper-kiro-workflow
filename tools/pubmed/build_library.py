@@ -79,6 +79,7 @@ def _entry_from_record(rec: dict, taken: set[str]) -> dict:
         "volume": rec.get("volume", ""),
         "issue": rec.get("issue", ""),
         "pages": rec.get("pages", ""),
+        "elocator": rec.get("elocator", ""),
         "publication_types": rec.get("publication_types", []),
         "mesh": rec.get("mesh", [])[:15],
         "flags": rec.get("flags", []),
@@ -126,21 +127,67 @@ def _bib_escape(s: str) -> str:
     return "".join(out)
 
 
+def protect_title(title: str) -> str:
+    """Brace proper nouns and acronyms so a sentence-case CSL cannot lowercase them.
+
+    PubMed titles are sentence case, so any capital after the first word marks a proper noun
+    (da {Vinci}, {Food} and {Drug} {Administration}) and any internal capital an acronym
+    ({MAUDE}, {COVID}-19, {mRNA}).
+    """
+    out = []
+    for i, tok in enumerate(re.split(r"(\s+)", title)):
+        core = tok.strip("()[]:;,.\"'")
+        if tok.isspace() or not core or "{" in tok:
+            out.append(tok)
+            continue
+        upper_inside = any(ch.isupper() for ch in core[1:])
+        if (i > 0 and core[:1].isupper()) or upper_inside:
+            start = tok.find(core)
+            out.append(tok[:start] + "{" + core + "}" + tok[start + len(core):])
+        else:
+            out.append(tok)
+    return "".join(out)
+
+
+def expand_pages(pages: str) -> str:
+    """'123-9' -> '123--129'; keep article numbers ('e12345') and full ranges consistent."""
+    pages = (pages or "").strip()
+    m = re.fullmatch(r"([A-Za-z]?)(\d+)\s*[-\u2013]+\s*([A-Za-z]?)(\d+)", pages)
+    if not m:
+        return pages
+    p1, a, p2, b = m.groups()
+    if len(b) < len(a):
+        b = a[:len(a) - len(b)] + b
+    return f"{p1}{a}--{p2 or p1}{b}"
+
+
+def bib_name(author: dict) -> str:
+    last = author.get("last", "")
+    if author.get("collective"):
+        return "{" + last + "}"
+    first = author.get("first") or author.get("initials", "")
+    # Particles (de, van der, da) belong to the family name; brace so BibTeX/CSL keep "de Souza".
+    if " " in last.strip() or re.match(r"^[a-z]", last):
+        last = "{" + last + "}"
+    return f"{last}, {first}".strip(", ")
+
+
 def to_bibtex(entries: list[dict]) -> str:
     chunks = ["% Generated from library.json. Do not edit by hand - regenerate with --export.\n"]
     for e in entries:
-        authors = " and ".join(
-            (a["last"] if a.get("collective") else f"{a['last']}, {a.get('first') or a.get('initials', '')}".strip(", "))
-            for a in e.get("authors", []) if a.get("last")
-        )
+        authors = " and ".join(bib_name(a) for a in e.get("authors", []) if a.get("last"))
+        eloc = str(e.get("elocator", "") or "")
+        pages = expand_pages(e.get("pages", "") or "") or (
+            eloc if re.fullmatch(r"[A-Za-z]?\d{1,8}", eloc) else "")
         fields = [
             ("author", authors),
-            ("title", _bib_escape(e.get("title", ""))),
+            ("title", protect_title(_bib_escape(e.get("title", "")))),
             ("journal", _bib_escape(e.get("journal", ""))),
+            ("shortjournal", _bib_escape(e.get("journal_abbrev", "") or e.get("journal", ""))),
             ("year", e.get("year", "")),
             ("volume", e.get("volume", "")),
             ("number", e.get("issue", "")),
-            ("pages", (e.get("pages", "") or "").replace("-", "--")),
+            ("pages", pages),
             ("doi", e.get("doi", "")),
             ("pmid", e.get("pmid", "")),
         ]

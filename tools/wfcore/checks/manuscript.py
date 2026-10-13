@@ -10,6 +10,7 @@ import zipfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
+from .. import docxaudit, journalspec
 from . import Ctx, Result, check
 
 
@@ -42,13 +43,14 @@ def _figure_ids(ctx: Ctx) -> list[str] | None:
         plan = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return None
+    # Main-text Figure legends hold main figures only; supplementary legends go with the
+    # supplementary file (build_docx appends them from legends.md).
     return [str(item.get("id", "")).strip()
-            for group in ("main_figures", "supp_figures")
-            for item in plan.get(group, []) if str(item.get("id", "")).strip()]
+            for item in plan.get("main_figures", []) if str(item.get("id", "")).strip()]
 
 
 def _canon_figure_id(value: str) -> str:
-    return re.sub(r"\s+", " ", value.strip().rstrip(".")).casefold()
+    return docxaudit.canon_figure_id(value)
 
 
 def _markdown_legend_problems(text: str, expected: list[str], cap: int) -> list[str]:
@@ -56,7 +58,7 @@ def _markdown_legend_problems(text: str, expected: list[str], cap: int) -> list[
     if section is None:
         return ["Figure legends section cannot be parsed"]
     body = section.group(1)
-    matches = list(re.finditer(r"(?mi)^#{2,6}\s+(Figure\s+S?\d+)\.?\s*(.*)$", body))
+    matches = list(re.finditer(r"(?mi)^#{2,6}\s+((?:Figure|Fig\.?)\s+S?\d+)\.?\s*(.*)$", body))
     blocks: dict[str, tuple[int, int]] = {}
     for i, match in enumerate(matches):
         end = matches[i + 1].start() if i + 1 < len(matches) else len(body)
@@ -84,9 +86,39 @@ def _markdown_legend_problems(text: str, expected: list[str], cap: int) -> list[
             problems.append(f"{display} legend is only {chars} characters")
         if words > cap:
             problems.append(f"{display} legend is {words} words (maximum {cap})")
-    extras = sorted(set(blocks) - set(wanted))
+    supp = sorted(k for k in set(blocks) - set(wanted) if re.match(r"figure s\d", k))
+    if supp:
+        problems.append("supplementary legend(s) in the main-text Figure legends: "
+                        + ", ".join(supp) + " - remove them; build_docx appends them to the "
+                        "supplementary file from legends.md")
+    extras = sorted(set(blocks) - set(wanted) - set(supp))
     if extras:
         problems.append("unplanned figure legend(s): " + ", ".join(extras))
+    return problems
+
+
+def _subsections(block: str) -> list[str]:
+    return [m.group(1).strip() for m in re.finditer(r"(?m)^##\s+([^#\n].*)$", block)]
+
+
+def declaration_and_discussion_problems(ctx: Ctx, text: str) -> list[str]:
+    """Declarations follow the journal (default Springer Nature) order in the manuscript and on
+    the title page; the Discussion is continuous prose unless the frozen guide demands headings."""
+    target = journalspec.load(ctx.project)
+    order = journalspec.declarations_order(target)
+    secs = journalspec.markdown_sections(text)
+    problems = journalspec.declaration_order_problems(
+        _subsections(secs.get("declarations and statements", "")), order, "Declarations")
+    title_rel = ctx.src("07_manuscript/title_page.md")
+    if ctx.p(title_rel).is_file():
+        problems += journalspec.declaration_order_problems(
+            _subsections(ctx.read(title_rel)), order, "title page")
+    if not journalspec.discussion_subheadings_allowed(target):
+        heads = _subsections(secs.get("discussion", ""))
+        if heads:
+            problems.append("Discussion has subheadings (" + ", ".join(heads[:4]) + "); write it as "
+                            "continuous prose unless target_journal.json sets "
+                            "discussion_subheadings=true from the official guide")
     return problems
 
 
@@ -188,6 +220,7 @@ def manuscript_structure(ctx: Ctx) -> Result:
     elif "figure legends" in positions:
         problems.extend(_markdown_legend_problems(
             text, planned, int(ctx.target("figure_legend_words_max", 180))))
+    problems.extend(declaration_and_discussion_problems(ctx, text))
     if problems:
         return Result(False, "manuscript_structure", "; ".join(problems[:8]),
                       ["Rebuild with tools/manuscript/assemble.py, then apply later edits without moving protected sections."])
@@ -288,58 +321,14 @@ def _docx_text(root) -> str:
                        for p in root.findall(".//w:p", NS))
 
 
-def _docx_legend_problems(root, expected: list[str], cap: int) -> list[str]:
-    paragraphs: list[tuple[str, str]] = []
-    for p in root.findall(".//w:p", NS):
-        text = "".join(t.text or "" for t in p.findall(".//w:t", NS)).strip()
-        pstyle = p.find("w:pPr/w:pStyle", NS)
-        style_id = "" if pstyle is None else pstyle.get(f"{{{W}}}val", "")
-        if text:
-            paragraphs.append((text, style_id))
-    try:
-        start = next(i for i, (text, _) in enumerate(paragraphs)
-                     if text.casefold() == "figure legends") + 1
-    except StopIteration:
-        return ["Figure legends heading is missing"]
-    headings = []
-    for i in range(start, len(paragraphs)):
-        text, style_id = paragraphs[i]
-        match = re.match(r"^(Figure\s+S?\d+)\.?\s*(.*)$", text, re.I)
-        if match and style_id == "SectionHeading":
-            headings.append((i, match.group(1), match.group(2)))
-    blocks: dict[str, tuple[int, int]] = {}
-    for j, (idx, figure_id, suffix) in enumerate(headings):
-        end = headings[j + 1][0] if j + 1 < len(headings) else len(paragraphs)
-        content = "\n".join([suffix] + [text for text, _ in paragraphs[idx + 1:end]]).strip()
-        blocks[_canon_figure_id(figure_id)] = (
-            len(content), len(re.findall(r"\b[A-Za-z][A-Za-z0-9'-]*\b", content)))
-    wanted = {_canon_figure_id(x): x for x in expected}
-    problems: list[str] = []
-    seen = [_canon_figure_id(item[1]) for item in headings]
-    duplicates = sorted({item for item in seen if seen.count(item) > 1})
-    if duplicates:
-        problems.append("duplicate figure legend heading(s): " + ", ".join(duplicates))
-    for idx, figure_id, _ in headings:
-        if idx + 1 < len(paragraphs) and re.match(
-                rf"^{re.escape(figure_id)}\b", paragraphs[idx + 1][0], re.I):
-            problems.append(f"{figure_id} is repeated at the start of its legend body")
-    for key, display in wanted.items():
-        if key not in blocks:
-            problems.append(f"DOCX Figure legends lacks {display}")
-            continue
-        chars, words = blocks[key]
-        if chars < 40:
-            problems.append(f"DOCX {display} legend is only {chars} characters")
-        if words > cap:
-            problems.append(f"DOCX {display} legend is {words} words (maximum {cap})")
-    extras = sorted(set(blocks) - set(wanted))
-    if extras:
-        problems.append("DOCX has unplanned figure legend(s): " + ", ".join(extras))
-    return problems
+def _docx_legend_problems(root, expected: list[str], cap: int,
+                          supplementary: list[str] | None = None) -> list[str]:
+    return docxaudit.legend_problems(root, expected, cap, "DOCX ", supplementary)
 
 
 def _audit_docx(path: Path, style: dict, role: str,
-                planned_figures: list[str] | None = None, legend_cap: int = 180) -> list[str]:
+                planned_figures: list[str] | None = None, legend_cap: int = 180,
+                spec: dict | None = None) -> list[str]:
     problems: list[str] = []
     try:
         with zipfile.ZipFile(path) as zf:
@@ -393,15 +382,18 @@ def _audit_docx(path: Path, style: dict, role: str,
         ppr = p.find("w:pPr", NS)
         pstyle = None if ppr is None else ppr.find("w:pStyle", NS)
         style_id = "" if pstyle is None else pstyle.get(f"{{{W}}}val", "")
+        is_code = style_id in docxaudit.CODE_STYLES
         allowed_pts = ({float(style["title_font_pt"])} if style_id == "ManuscriptTitle" else
                        {float(style["section_heading_font_pt"]),
                         float(style["subsection_heading_font_pt"])} if style_id == "SectionHeading" else
+                       {float(style.get("code_font_pt", 8))} if is_code else
                        {float(style["body_font_pt"])})
+        run_font = str(style.get("code_font_family", "Courier New")) if is_code else font
         paragraph_text = "".join(t.text or "" for t in p.findall(".//w:t", NS)).strip()
         spacing_node = None if ppr is None else ppr.find("w:spacing", NS)
+        line = str(int(round((1.0 if is_code else float(style["line_spacing"])) * 240)))
         if paragraph_text and (spacing_node is None or
-                spacing_node.get(f"{{{W}}}line") !=
-                str(int(round(float(style["line_spacing"]) * 240))) or
+                spacing_node.get(f"{{{W}}}line") != line or
                 spacing_node.get(f"{{{W}}}after", "0") !=
                 str(int(round(float(style["paragraph_spacing_after_pt"]) * 20)))):
             problems.append(f"{path.name}: inconsistent line/paragraph spacing")
@@ -412,8 +404,8 @@ def _audit_docx(path: Path, style: dict, role: str,
             rf = None if rpr is None else rpr.find("w:rFonts", NS)
             color = None if rpr is None else rpr.find("w:color", NS)
             size = None if rpr is None else rpr.find("w:sz", NS)
-            if rf is None or rf.get(f"{{{W}}}ascii") != font or rf.get(f"{{{W}}}hAnsi") != font:
-                problems.append(f"{path.name}: a text run does not explicitly use {font}")
+            if rf is None or rf.get(f"{{{W}}}ascii") != run_font or rf.get(f"{{{W}}}hAnsi") != run_font:
+                problems.append(f"{path.name}: a text run does not explicitly use {run_font}")
                 break
             if color is None or color.get(f"{{{W}}}val", "").upper() not in {"000000", "AUTO"}:
                 problems.append(f"{path.name}: a text run is not black")
@@ -443,7 +435,8 @@ def _audit_docx(path: Path, style: dict, role: str,
             problems.append(f"{path.name}: protected manuscript sections are out of order")
         if planned_figures is not None:
             problems.extend(f"{path.name}: {problem}" for problem in
-                            _docx_legend_problems(root, planned_figures, legend_cap))
+                            _docx_legend_problems(root, planned_figures, legend_cap,
+                                                  (spec or {}).get("supp_figures")))
     elif role == "figure_legends":
         count = sum(1 for line in raw_text.splitlines()
                     if line.strip().casefold() == "figure legends")
@@ -454,6 +447,8 @@ def _audit_docx(path: Path, style: dict, role: str,
             f"{path.name}: supplementary Methods contains a table instead of a separate "
             "three-line supplementary table"
         )
+    if role in TEXT_ROLES:
+        problems.extend(docxaudit.extra_problems(path.name, xmls, root, role, spec, legend_cap))
     return problems
 
 
@@ -474,6 +469,7 @@ def docx_bundle_ready(ctx: Ctx) -> Result:
     planned = _figure_ids(ctx)
     if planned is None:
         problems.append("01_protocol/artifact_plan.json is missing or invalid")
+    spec = docxaudit.audit_spec(ctx.project)
     for item in manifest.get("items", []):
         role = str(item.get("role", "")).casefold()
         raw = str(item.get("file", ""))
@@ -481,15 +477,22 @@ def docx_bundle_ready(ctx: Ctx) -> Result:
         roles.setdefault(role, []).append(path)
         if role in TEXT_ROLES and path.suffix.casefold() != ".docx":
             problems.append(f"{role}: narrative upload must be DOCX, got {path.name}")
+        if role == "supplementary_pdf" and (path.suffix.casefold() != ".pdf" or not path.is_file()):
+            problems.append(f"supplementary_pdf: {path.name} is not an existing PDF")
         if path.suffix.casefold() == ".docx":
             problems.extend(_audit_docx(path, style, role, planned,
-                                        int(ctx.target("figure_legend_words_max", 180))))
+                                        int(ctx.target("figure_legend_words_max", 180)), spec))
     for role in ("manuscript", "title_page", "cover_letter"):
         if not any(p.suffix.casefold() == ".docx" for p in roles.get(role, [])):
             problems.append(f"no DOCX for required role '{role}'")
     if ctx.psrc("07_manuscript/supplementary_methods.md").exists():
         if not any(p.suffix.casefold() == ".docx" for p in roles.get("supplementary", [])):
             problems.append("supplementary Methods exists but no supplementary DOCX is packaged")
+        target = journalspec.load(ctx.project)
+        if target and journalspec.si_format(target) == "pdf" and not roles.get("supplementary_pdf"):
+            problems.append("the journal takes supplementary files as PDF (si_format): build with "
+                            "build_docx.py --kind supplementary --pdf and list the PDF as role "
+                            "'supplementary_pdf'")
     if problems:
         return Result(False, "docx_bundle_ready", "; ".join(sorted(set(problems))[:10]),
                       ["Rebuild affected Word files with tools/manuscript/build_docx.py."])

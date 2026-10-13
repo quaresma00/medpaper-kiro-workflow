@@ -44,8 +44,10 @@ LIFECYCLE_FILES = {
     "08_submission/package_human_review.md", "08_submission/package_review_freeze.json",
     "08_submission/independent_submission_audit.md",
 }
+# 08_submission/notes/ is the declared place for the agent's own plans and check records
+# (1.8.0); like .wf/ and temp/ it is never a deliverable, so it is never an unplanned change.
 SNAPSHOT_SKIP = (".wf/", "temp/", "07_manuscript/review_packages/",
-                 "08_submission/journal_archives/")
+                 "08_submission/journal_archives/", "08_submission/notes/")
 SCIENCE_FILES = {"01_protocol/protocol_v1.md", "01_protocol/protocol_final.md"}
 S06_OUTPUTS = ("01_protocol/protocol_final.md", "01_protocol/protocol_diff.md",
                "03_analysis/reproducibility_report.json")
@@ -169,6 +171,63 @@ def guard_outputs(project: Path, outputs: list[Path]) -> None:
                              "only the planned dependency closure may be rebuilt (rework.py status)")
 
 
+def certified_hashes(project: Path) -> dict[str, tuple[str, str]]:
+    """rel -> (round id, sha256) for every file the newest closed rounds certified."""
+    directory = project / ".wf" / "revisions"
+    out: dict[str, tuple[str, str]] = {}
+    rounds = []
+    for path in sorted(directory.glob("R*.json")) if directory.is_dir() else []:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if data.get("status") == "complete":
+            rounds.append(data)
+    for data in rounds:
+        for item in data.get("items", []):
+            for receipt in item.get("changed_files", []) or []:
+                if isinstance(receipt, dict) and receipt.get("path") and not renewable(receipt["path"]):
+                    out[receipt["path"]] = (data.get("round_id", "?"), str(receipt.get("sha256", "")))
+    if rounds and rounds[-1].get("schema_version") == SCHEMA:
+        for rel, digest in rounds[-1].get("validation", {}).get("artifact_hashes", {}).items():
+            if not renewable(rel):
+                out[rel] = (rounds[-1].get("round_id", "?"), digest)
+    return out
+
+
+def certified_drift(project: Path) -> list[str]:
+    """Frozen or round-certified sources edited outside any open round's scope.
+
+    Detected the moment a render is attempted (wf run-script) instead of at the next S19/S24
+    gate, so a figure-layout tweak at S23 is routed into a layout round straight away.
+    """
+    from . import scifreeze
+    drift = []
+    for rel, (_, expected) in certified_hashes(project).items():
+        p = project / rel
+        if not p.is_file() or sha256(p).casefold() != expected.casefold():
+            drift.append(rel)
+    try:
+        current = json.loads((project / ".wf/state.json").read_text(encoding="utf-8")).get("current")
+    except (OSError, ValueError):
+        current = None
+    # At S19 the freeze is legitimately re-captured after a science round; S19 gates own it.
+    if scifreeze.is_frozen(project) and current != "S19_human_review":
+        try:
+            entries = scifreeze.load_freeze(project).get("files", {})
+        except SystemExit:
+            entries = {}
+        for rel, meta in entries.items():
+            p = project / rel
+            if not p.is_file() or scifreeze._sha256(p) != meta.get("sha256"):
+                drift.append(rel)
+    revision = active(project)
+    allowed = set(revision.get("allowed_files", [])) if is_scoped(revision) else set()
+    if revision and not is_scoped(revision):
+        return []  # a legacy rewind round re-runs every stage gate anyway
+    return sorted({r for r in drift if r not in allowed})
+
+
 def scope_problems(project: Path, revision: dict, files: dict | None = None) -> list[str]:
     before = revision.get("baseline", {})
     now = snapshot(project) if files is None else files
@@ -248,6 +307,9 @@ def plan_scope(project: Path, pipeline, state, revision: dict) -> None:
             stages.add("S12_reconcile")
     stages.update(revision.get("extra_validation_stages", []))
     stages = {s for s in stages if s not in NO_INPLACE_STAGES and _applicable(pipeline, state, s, review)}
+    if review == "S23_package":
+        # _applicable already drops S23 itself (index not below the review stage).
+        stages.discard("S23_package")
 
     checks = []
     for sid in sorted(stages, key=lambda s: pipeline.stage(s).index):
@@ -255,7 +317,8 @@ def plan_scope(project: Path, pipeline, state, revision: dict) -> None:
             if spec.get("check") not in LIFECYCLE_CHECKS:
                 checks.append({"stage": sid, "spec": spec})
     review_stage = pipeline.stage(review)
-    for spec in review_stage.gate:
+    # An S23 layout round runs mid-build: the package gates are S23's own exit, not the round's.
+    for spec in ([] if review == "S23_package" else review_stage.gate):
         name = spec.get("check")
         if review == "S19_human_review" and name in S19_CONSISTENCY:
             checks.append({"stage": review, "spec": spec})

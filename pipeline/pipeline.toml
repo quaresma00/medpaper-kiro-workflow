@@ -73,6 +73,8 @@ always_allowed = [
   ".kiro/**",
   # Previous journals' variants and packages, moved aside (never deleted) on a journal switch.
   "08_submission/journal_archives/**",
+  # The agent's own plans and check records (never deliverables, never round scope).
+  "08_submission/notes/**",
 ]
 
 # ------------------------------------------------------------------------------
@@ -121,6 +123,13 @@ visual_review_mode = "deferred"
 abbreviation_centralize_threshold = 8
 abbreviation_local_words_max = 50
 journal_source_age_days_max = 90
+# Drafting caps for S08-S17, before a journal is chosen (Word-compatible counts, numbers
+# included). S20 replaces them with the chosen journal's typed limits in target_journal.json.
+draft_main_words_max = 4000
+draft_abstract_words_max = 250
+# journal_limits_met keeps this share of a journal word cap as the effective ceiling, because
+# a portal's word counter rarely matches ours exactly.
+journal_limit_margin = 0.97
 reference_verification_age_days_max = 90
 
 # ==============================================================================
@@ -436,6 +445,8 @@ require_abstract = true
 require_verified = true
 [[stage.gate]]
 check = "bib_ris_match_library"
+[[stage.gate]]
+check = "bib_format_clean"
 
 [[stage]]
 id = "S14_introduction"
@@ -525,6 +536,8 @@ check = "data_acquisition_complete"
 check = "analysis_reproduces"
 [[stage.gate]]
 check = "manuscript_structure"
+[[stage.gate]]
+check = "draft_length_targets"
 [[stage.gate]]
 check = "supplementary_methods_clean"
 [[stage.gate]]
@@ -756,6 +769,10 @@ check = "reporting_checklist_complete"
 check = "bundle_complete"
 [[stage.gate]]
 check = "docx_bundle_ready"
+# S23 pre-audit: the same measured checks S25 confirms (final-DOCX word counts, references,
+# display items), so the independent audit is a confirmation rather than a first discovery.
+[[stage.gate]]
+check = "journal_limits_met"
 [[stage.gate]]
 check = "supplementary_methods_clean"
 [[stage.gate]]
@@ -876,6 +893,8 @@ check = "bundle_matches_freeze"
 [[stage.gate]]
 check = "submission_audit_matches_freeze"
 path = "08_submission/independent_submission_audit.md"
+[[stage.gate]]
+check = "journal_limits_met"
 [[stage.gate]]
 check = "revision_rounds_closed"
 [[stage.gate]]

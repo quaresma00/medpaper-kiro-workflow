@@ -32,7 +32,7 @@ except ImportError as exc:  # pragma: no cover - clear deployment failure
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
-from wfcore import paths as wfpaths, scifreeze  # noqa: E402
+from wfcore import docxaudit, journalspec, paths as wfpaths, scifreeze  # noqa: E402
 from wfcore.packagecontent import build_receipt_path  # noqa: E402
 
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -79,7 +79,19 @@ def _write_build_receipt(args, project: Path) -> Path:
                  getattr(args, "style_config", None)):
         if path is not None and path.is_file():
             auxiliaries.append(_receipt_file_record(path, project))
+    # Presentation inputs the builder reads besides --input (journal rules, supplementary legends).
+    extra = [journalspec.TARGET]
+    if args.kind == "supplementary":
+        extra.append("05_figures/legends.md")
+    for rel in extra:
+        if (project / rel).is_file():
+            auxiliaries.append(_receipt_file_record(project / rel, project))
+    pdf = output.with_suffix(".pdf")
+    payload_pdf = ({"pdf_output": pdf.relative_to(project.resolve()).as_posix(),
+                    "pdf_sha256": _file_sha256(pdf)}
+                   if getattr(args, "pdf", False) and pdf.is_file() else {})
     payload = {
+        **payload_pdf,
         "schema_version": 1,
         "built_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "kind": args.kind,
@@ -110,9 +122,10 @@ def planned_figure_ids(project: Path | None = None) -> list[str] | None:
         plan = json.loads(path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return None
+    # Main-text Figure legends carry main figures only (1.8.0); supplementary legends travel
+    # with the supplementary file.
     return [str(item.get("id", "")).strip()
-            for group in ("main_figures", "supp_figures")
-            for item in plan.get(group, []) if str(item.get("id", "")).strip()]
+            for item in plan.get("main_figures", []) if str(item.get("id", "")).strip()]
 
 
 def figure_legend_cap() -> int:
@@ -132,6 +145,7 @@ def load_style(path: Path) -> dict:
         "paragraph_spacing_after_pt": 0, "margins_in": 1.0,
         "paper_size": "A4", "all_text_black": True,
         "external_hyperlinks": False,
+        "code_font_family": "Courier New", "code_font_pt": 8,
     }
     defaults.update(data)
     return defaults
@@ -287,7 +301,74 @@ def _set_run(run, font: str, size: float) -> None:
             color.attrib.pop(qn(f"w:{attr}"), None)
 
 
-def normalize_docx(path: Path, style: dict, kind: str) -> None:
+def _format_references(doc, font: str, size: float) -> None:
+    """Number + TAB + hanging indent for every bibliography entry (EndNote/Zotero layout)."""
+    entries = [p for p in doc.paragraphs if p.style is not None and p.style.name == "Bibliography"]
+    for p in entries:
+        pf = p.paragraph_format
+        pf.left_indent = Inches(0.5)
+        pf.first_line_indent = Inches(-0.5)
+        pf.tab_stops.add_tab_stop(Inches(0.5))
+        # Pandoc writes the citation number and the entry as adjacent runs, with or without a
+        # space between them. Rebuild the lead as "N." + TAB.
+        runs = list(p.runs)
+        text = "".join(r.text for r in runs)
+        m = re.match(r"^\s*(\[\d+\]|\d+\.?)[ \t\u00a0]*", text)
+        if not m or not runs:
+            continue
+        label, cut = m.group(1), m.end()
+        for r in runs:
+            if cut <= 0:
+                break
+            n = len(r.text)
+            r.text = r.text[cut:] if n > cut else ""
+            cut -= n
+        # Dangling separators when a record has a volume but no pages/article number.
+        last = [r for r in p.runs if r.text]
+        if last:
+            last[-1].text = re.sub(r"(?<=[\d)])\s*[:;]\s*\.?\s*$", ".", last[-1].text)
+        for r in p.runs:
+            r.text = re.sub(r"(?<=[\d)])\s*[:;]\s*\.?\s+(?=doi\b)", ". ", r.text, flags=re.I)
+        lead = p.runs[0]._r
+        new = deepcopy(lead)
+        for child in list(new):
+            if child.tag != qn("w:rPr"):
+                new.remove(child)
+        t = OxmlElement("w:t")
+        t.text = label
+        new.append(t)
+        new.append(OxmlElement("w:tab"))
+        lead.addprevious(new)
+
+
+def _add_page_numbers(doc, font: str, size: float) -> None:
+    """Automatic PAGE field in every section footer (page numbers are not 'field functions')."""
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    for section in doc.sections:
+        footer = section.footer
+        footer.is_linked_to_previous = False
+        p = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
+        if "PAGE" in "".join(n.text or "" for n in p._p.iter(qn("w:instrText"))):
+            continue
+        for r in list(p.runs):
+            r._r.getparent().remove(r._r)
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        for kind, value in (("begin", None), (None, " PAGE "), ("separate", None),
+                            ("text", "1"), ("end", None)):
+            run = p.add_run("1" if kind == "text" else "")
+            if kind in ("begin", "separate", "end"):
+                fc = OxmlElement("w:fldChar")
+                fc.set(qn("w:fldCharType"), kind)
+                run._r.append(fc)
+            elif kind is None:
+                it = OxmlElement("w:instrText")
+                it.set(qn("xml:space"), "preserve")
+                it.text = value
+                run._r.append(it)
+            _set_run(run, font, size)
+
+
+def normalize_docx(path: Path, style: dict, kind: str, *, legend_bold: bool = True) -> None:
     doc = Document(path)
     font = str(style["font_family"])
     body_pt = float(style["body_font_pt"])
@@ -296,6 +377,8 @@ def normalize_docx(path: Path, style: dict, kind: str) -> None:
     h2_pt = float(style["subsection_heading_font_pt"])
     spacing = float(style["line_spacing"])
     after = float(style["paragraph_spacing_after_pt"])
+    code_font = str(style.get("code_font_family", "Courier New"))
+    code_pt = float(style.get("code_font_pt", 8))
 
     body_style = _ensure_style(doc, "Manuscript Body", "Normal", font, body_pt)
     title_style = _ensure_style(doc, "Manuscript Title", "Normal", font, title_pt, bold=True)
@@ -341,6 +424,16 @@ def normalize_docx(path: Path, style: dict, kind: str) -> None:
             p.style = section_style
             size = h2_pt
             _remove_heading_metadata(p)
+            if not legend_bold and re.match(r"^(?:Figure|Fig\.?)\s+S?\d+", text):
+                for run in p.runs:
+                    run.font.bold = False
+        elif original == "Source Code":
+            # Exported code: small monospace, single spaced, so long rules stay on one line.
+            p.paragraph_format.line_spacing = 1.0
+            p.paragraph_format.space_after = Pt(after)
+            for run in p.runs:
+                _set_run(run, code_font, code_pt)
+            continue
         else:
             if original in {"Normal", "Body Text", "First Paragraph", "Compact"}:
                 p.style = body_style
@@ -349,6 +442,8 @@ def normalize_docx(path: Path, style: dict, kind: str) -> None:
         p.paragraph_format.space_after = Pt(after)
         for run in p.runs:
             _set_run(run, font, size)
+    _format_references(doc, font, body_pt)
+    _add_page_numbers(doc, font, body_pt)
 
     margin = Inches(float(style["margins_in"]))
     for section in doc.sections:
@@ -394,63 +489,17 @@ def docx_text(path: Path) -> str:
 
 
 def _canon_figure_id(value: str) -> str:
-    return re.sub(r"\s+", " ", value.strip().rstrip(".")).casefold()
+    return docxaudit.canon_figure_id(value)
 
 
-def _legend_problems(root, expected: list[str], cap: int) -> list[str]:
-    paragraphs: list[tuple[str, str]] = []
-    for paragraph in root.findall(".//w:p", NS):
-        paragraph_text = "".join(t.text or "" for t in paragraph.findall(".//w:t", NS)).strip()
-        pstyle = paragraph.find("w:pPr/w:pStyle", NS)
-        style_id = "" if pstyle is None else pstyle.get(f"{{{W}}}val", "")
-        if paragraph_text:
-            paragraphs.append((paragraph_text, style_id))
-    try:
-        start = next(i for i, (value, _) in enumerate(paragraphs)
-                     if value.casefold() == "figure legends") + 1
-    except StopIteration:
-        return ["Figure legends heading is missing"]
-    headings: list[tuple[int, str, str]] = []
-    for i in range(start, len(paragraphs)):
-        value, style_id = paragraphs[i]
-        match = re.match(r"^(Figure\s+S?\d+)\.?\s*(.*)$", value, re.I)
-        if match and style_id == "SectionHeading":
-            headings.append((i, match.group(1), match.group(2)))
-    blocks: dict[str, tuple[int, int]] = {}
-    for j, (idx, figure_id, suffix) in enumerate(headings):
-        end = headings[j + 1][0] if j + 1 < len(headings) else len(paragraphs)
-        content = "\n".join([suffix] + [value for value, _ in paragraphs[idx + 1:end]]).strip()
-        blocks[_canon_figure_id(figure_id)] = (
-            len(content), len(re.findall(r"\b[A-Za-z][A-Za-z0-9'-]*\b", content)))
-    wanted = {_canon_figure_id(value): value for value in expected}
-    problems: list[str] = []
-    seen = [_canon_figure_id(item[1]) for item in headings]
-    duplicates = sorted({item for item in seen if seen.count(item) > 1})
-    if duplicates:
-        problems.append("duplicate figure legend heading(s): " + ", ".join(duplicates))
-    for idx, figure_id, _ in headings:
-        if idx + 1 < len(paragraphs):
-            first_body = paragraphs[idx + 1][0]
-            if re.match(rf"^{re.escape(figure_id)}\b", first_body, re.I):
-                problems.append(f"{figure_id} is repeated at the start of its legend body")
-    for key, display in wanted.items():
-        if key not in blocks:
-            problems.append(f"Figure legends lacks {display}")
-            continue
-        chars, words = blocks[key]
-        if chars < 40:
-            problems.append(f"{display} legend is only {chars} characters")
-        if words > cap:
-            problems.append(f"{display} legend is {words} words (maximum {cap})")
-    extras = sorted(set(blocks) - set(wanted))
-    if extras:
-        problems.append("unplanned figure legend(s): " + ", ".join(extras))
-    return problems
+def _legend_problems(root, expected: list[str], cap: int,
+                     supplementary: list[str] | None = None) -> list[str]:
+    return docxaudit.legend_problems(root, expected, cap, supplementary=supplementary)
 
 
 def audit_docx(path: Path, style: dict, kind: str = "",
                planned_figures: list[str] | None = None,
-               legend_cap: int = 180) -> list[str]:
+               legend_cap: int = 180, spec: dict | None = None) -> list[str]:
     problems: list[str] = []
     if not path.is_file():
         return [f"missing DOCX: {path}"]
@@ -504,15 +553,18 @@ def audit_docx(path: Path, style: dict, kind: str = "",
         ppr = p.find("w:pPr", NS)
         pstyle = None if ppr is None else ppr.find("w:pStyle", NS)
         style_id = "" if pstyle is None else pstyle.get(f"{{{W}}}val", "")
+        is_code = style_id in docxaudit.CODE_STYLES
         allowed_pts = ({float(style["title_font_pt"])} if style_id == "ManuscriptTitle" else
                        {float(style["section_heading_font_pt"]),
                         float(style["subsection_heading_font_pt"])} if style_id == "SectionHeading" else
+                       {float(style["code_font_pt"])} if is_code else
                        {float(style["body_font_pt"])})
+        run_font = str(style["code_font_family"]) if is_code else expected_font
         paragraph_text = "".join(t.text or "" for t in p.findall(".//w:t", NS)).strip()
         spacing_node = None if ppr is None else ppr.find("w:spacing", NS)
+        line = str(int(round((1.0 if is_code else float(style["line_spacing"])) * 240)))
         if paragraph_text and (spacing_node is None or
-                spacing_node.get(f"{{{W}}}line") !=
-                str(int(round(float(style["line_spacing"]) * 240))) or
+                spacing_node.get(f"{{{W}}}line") != line or
                 spacing_node.get(f"{{{W}}}after", "0") !=
                 str(int(round(float(style["paragraph_spacing_after_pt"]) * 20)))):
             problems.append(f"{path.name}: inconsistent line/paragraph spacing")
@@ -523,8 +575,8 @@ def audit_docx(path: Path, style: dict, kind: str = "",
             rf = None if rpr is None else rpr.find("w:rFonts", NS)
             color = None if rpr is None else rpr.find("w:color", NS)
             size = None if rpr is None else rpr.find("w:sz", NS)
-            if rf is None or any(rf.get(f"{{{W}}}{a}") != expected_font for a in ("ascii", "hAnsi")):
-                problems.append(f"{path.name}: a text run does not explicitly use {expected_font}")
+            if rf is None or any(rf.get(f"{{{W}}}{a}") != run_font for a in ("ascii", "hAnsi")):
+                problems.append(f"{path.name}: a text run does not explicitly use {run_font}")
                 break
             if color is None or color.get(f"{{{W}}}val", "").upper() not in {"000000", "AUTO"}:
                 problems.append(f"{path.name}: a text run is not explicitly black")
@@ -559,7 +611,8 @@ def audit_docx(path: Path, style: dict, kind: str = "",
             problems.append(f"{path.name}: artifact_plan.json is missing or invalid")
         else:
             problems.extend(f"{path.name}: {problem}" for problem in
-                            _legend_problems(root, planned_figures, legend_cap))
+                            _legend_problems(root, planned_figures, legend_cap,
+                                             (spec or {}).get("supp_figures")))
     elif kind == "figure_legends":
         count = sum(1 for line in docx_text(path).splitlines()
                     if line.strip().casefold() == "figure legends")
@@ -570,7 +623,225 @@ def audit_docx(path: Path, style: dict, kind: str = "",
             f"{path.name}: supplementary Methods contains a table; package it as a separate "
             "three-line supplementary table"
         )
+    if kind in TEXT_ROLES:
+        problems.extend(docxaudit.extra_problems(path.name, xmls, root, kind, spec, legend_cap))
     return sorted(set(problems))
+
+
+# ---------------------------------------------------------------------------
+# 1.8.0 presentation layer: journal rules applied to a temporary render copy. The Markdown
+# sources (frozen science or the journal variant) are never rewritten by the builder.
+# ---------------------------------------------------------------------------
+_LEGEND_H_RE = re.compile(r"(?mi)^(#{2,6})\s+(?:Figure|Fig\.?)\s+(S?\d+)\.?[ \t]*(.*)$")
+
+
+def _legend_blocks(text: str) -> list[tuple[str, str]]:
+    """[(figure number, block text incl. heading)] of a '# Figure legends' style document."""
+    matches = list(_LEGEND_H_RE.finditer(text))
+    out = []
+    for i, m in enumerate(matches):
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        nxt = re.search(r"(?m)^#\s", text[m.end():end])
+        if nxt:
+            end = m.end() + nxt.start()
+        out.append((m.group(2).upper(), text[m.start():end].rstrip()))
+    return out
+
+
+def supplementary_legends(project: Path) -> str:
+    path = project / "05_figures/legends.md"
+    if not path.is_file():
+        return ""
+    blocks = [b for num, b in _legend_blocks(path.read_text(encoding="utf-8")) if num.startswith("S")]
+    if not blocks:
+        return ""
+    return "# Supplementary figure legends\n\n" + "\n\n".join(blocks) + "\n"
+
+
+def _style_legends(section: str, lstyle: dict) -> str:
+    prefix = lstyle.get("prefix", "Figure")
+    punct = lstyle.get("end_punctuation", "any")
+    case = lstyle.get("panel_label_case", "any")
+
+    def head(m):
+        rest = m.group(3).strip()
+        label = f"{prefix} {m.group(2)}"
+        if rest:
+            label = f"{label}. {rest}" if prefix == "Figure" else f"{label} {rest}"
+        if punct == "." and not label.endswith("."):
+            label += "."
+        elif punct == "none":
+            label = label.rstrip(".")
+        return f"{m.group(1)} {label}"
+
+    section = _LEGEND_H_RE.sub(head, section)
+    if case in ("lower", "upper"):
+        conv = str.lower if case == "lower" else str.upper
+        section = re.sub(r"\(([A-Ha-h])\)", lambda m: f"({conv(m.group(1))})", section)
+    return section
+
+
+def _figure_image(project: Path, entry: dict) -> Path | None:
+    raw = str(entry.get("file", "")).strip()
+    if not raw:
+        return None
+    path = project / raw
+    png = path.with_suffix(".png")
+    return png if png.is_file() else (path if path.is_file() else None)
+
+
+def _table_markdown(project: Path, entry: dict, caption: str) -> str:
+    """A main table as a Pandoc pipe table (first row = header) for journals wanting Word tables."""
+    from openpyxl import load_workbook
+    raw = str(entry.get("file", "")).strip()
+    path = project / raw
+    if not raw or not path.is_file():
+        raise ValueError(f"word_tables: {entry.get('id')} workbook missing ({raw})")
+    ws = load_workbook(path, data_only=True).worksheets[0]
+    rows = [["" if v is None else str(v).replace("|", "\\|").replace("\n", " ") for v in row]
+            for row in ws.iter_rows(values_only=True)]
+    rows = [r for r in rows if any(c.strip() for c in r)]
+    if not rows:
+        raise ValueError(f"word_tables: {entry.get('id')} workbook is empty")
+    width = max(len(r) for r in rows)
+    rows = [r + [""] * (width - len(r)) for r in rows]
+    lines = ["| " + " | ".join(rows[0]) + " |", "|" + "---|" * width]
+    lines += ["| " + " | ".join(r) + " |" for r in rows[1:]]
+    return f"## {entry.get('id')}. {caption}".rstrip() + "\n\n" + "\n".join(lines)
+
+
+def _table_captions(project: Path) -> dict[str, str]:
+    path = project / "04_tables/table_captions.md"
+    if not path.is_file():
+        return {}
+    text = path.read_text(encoding="utf-8")
+    out = {}
+    for m in re.finditer(r"(?mi)^#{2,6}\s+(Table\s+S?\d+)\.?[ \t]*(.*)$\n?((?:(?!#).*\S.*\n?)*)", text):
+        caption = m.group(2).strip() or " ".join(m.group(3).split())
+        out[docxaudit.canon_figure_id(m.group(1))] = caption
+    return out
+
+
+def _clean_pipeline_code(text: str) -> str:
+    """Drop engine plumbing from exported code and reduce local paths to file names."""
+    def fence(m):
+        kept = [ln for ln in m.group(2).splitlines()
+                if not re.search(r"wfcore|MEDPAPER_|project_dir\s*\(|sys\.path\.(?:insert|append)|"
+                                 r"medresults\.R|tools[/\\]", ln)]
+        return m.group(1) + "\n".join(kept) + "\n" + m.group(3)
+    text = re.sub(r"(?ms)^(```[^\n]*\n)(.*?)\n?(^```)", fence, text)
+    return re.sub(r"(?:(?<![\w])[A-Za-z]:[\\/]|(?<![\w./])/(?:Users|home)/)"
+                  r"(?:[^\s'\"`)]*[\\/])?([^\s'\"`)\\/]+)", r"\1", text)
+
+
+def _info_page(project: Path) -> str:
+    target = journalspec.load(project)
+    title_path = project / "07_manuscript/title.md"
+    title = re.sub(r"^#\s+", "", title_path.read_text(encoding="utf-8").strip()) \
+        if title_path.is_file() else ""
+    lines = ["# Supplementary information", ""]
+    if title:
+        lines += [f"Article title: {title}", ""]
+    if target.get("journal"):
+        lines += [f"Journal: {target['journal']}", ""]
+    try:
+        info = json.loads((project / "00_input/author_info.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        info = {}
+    names = []
+    for a in info.get("authors", []) if isinstance(info.get("authors"), list) else []:
+        names.append(a.get("name", "") if isinstance(a, dict) else str(a))
+    if any(names):
+        lines += ["Authors: " + ", ".join(n for n in names if n), ""]
+    corr = info.get("corresponding")
+    if isinstance(corr, dict):
+        corr = ", ".join(str(corr[k]) for k in ("name", "email", "affiliation") if corr.get(k))
+    if corr:
+        lines += [f"Corresponding author: {corr}", ""]
+    return "\n".join(lines) + "\n"
+
+
+def prepare_source(kind: str, inputs: list[Path], project: Path, workdir: Path) -> list[Path]:
+    """Apply the journal's presentation rules to a temporary copy handed to Pandoc."""
+    if kind not in ("manuscript", "supplementary"):
+        return inputs
+    text = "\n\n".join(p.read_text(encoding="utf-8", errors="replace") for p in inputs)
+    target = journalspec.load(project)
+    if kind == "manuscript":
+        m = re.search(r"(?mi)^#\s+Figure legends\s*$", text)
+        if m:
+            head, legends = text[:m.start()], text[m.start():]
+            legends = _style_legends(legends, journalspec.legend_style(target))
+            counts = docxaudit.plan_counts(project)
+            plan = counts["plan"]
+            if target.get("embed_figures") is True:
+                entries = {docxaudit.canon_figure_id(str(e.get("id", ""))): e
+                           for e in plan.get("main_figures", [])}
+                out, last = [], 0
+                blocks = list(_LEGEND_H_RE.finditer(legends))
+                for i, b in enumerate(blocks):
+                    end = blocks[i + 1].start() if i + 1 < len(blocks) else len(legends)
+                    out.append(legends[last:end].rstrip())
+                    img = _figure_image(project, entries.get(f"figure {b.group(2).lower()}", {}))
+                    if img is not None:
+                        out.append(f"![]({img.as_posix()}){{width=6in}}")
+                    last = end
+                out.append(legends[last:].rstrip())
+                legends = "\n\n".join(x for x in out if x) + "\n"
+            if target.get("word_tables") is True and plan.get("main_tables"):
+                caps = _table_captions(project)
+                tables = [_table_markdown(project, e, caps.get(
+                    docxaudit.canon_figure_id(str(e.get("id", ""))), ""))
+                    for e in plan.get("main_tables", [])]
+                head = head.rstrip() + "\n\n# Tables\n\n" + "\n\n".join(tables) + "\n\n"
+            text = head + legends
+    else:
+        text = _clean_pipeline_code(text)
+        if target:
+            text = _info_page(project) + "\n" + text
+        legends = supplementary_legends(project)
+        if legends:
+            text = text.rstrip() + "\n\n" + legends
+    out = workdir / f"render_{kind}.md"
+    out.write_text(text, encoding="utf-8")
+    return [out]
+
+
+def collapsing_csl(csl: Path | None, workdir: Path) -> Path | None:
+    """Copy of the CSL whose numeric citations collapse to ranges ([1-3, 7])."""
+    if csl is None or not csl.is_file():
+        return csl
+    xml = csl.read_text(encoding="utf-8")
+    m = re.search(r"<citation\b[^>]*>", xml)
+    if not m or "collapse=" in m.group(0) or 'citation-format="numeric"' not in xml:
+        return csl
+    patched = m.group(0)[:-1].rstrip("/") + ' collapse="citation-number">'
+    out = workdir / csl.name
+    out.write_text(xml[:m.start()] + patched + xml[m.end():], encoding="utf-8")
+    return out
+
+
+def _convert_pdf(docx_path: Path, pdf_path: Path) -> None:
+    """DOCX -> PDF with Microsoft Word (Windows) or LibreOffice; fails loudly if neither exists."""
+    pdf_path.unlink(missing_ok=True)
+    soffice = shutil.which("soffice") or shutil.which("libreoffice")
+    if os.name == "nt" and not soffice:
+        script = ("$w = New-Object -ComObject Word.Application; $w.Visible = $false; "
+                  "try { $d = $w.Documents.Open($env:MP_DOCX, $false, $true); "
+                  "$d.SaveAs([ref]$env:MP_PDF, [ref]17); $d.Close($false) } "
+                  "finally { $w.Quit() }")
+        env = {**os.environ, "MP_DOCX": str(docx_path.resolve()), "MP_PDF": str(pdf_path.resolve())}
+        subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+                       capture_output=True, text=True, env=env, timeout=300)
+    elif soffice:
+        subprocess.run([soffice, "--headless", "--convert-to", "pdf", "--outdir",
+                        str(pdf_path.parent), str(docx_path)], capture_output=True, timeout=300)
+        produced = pdf_path.parent / (docx_path.stem + ".pdf")
+        if produced != pdf_path and produced.is_file():
+            produced.replace(pdf_path)
+    if not pdf_path.is_file() or pdf_path.stat().st_size < 200:
+        raise RuntimeError("PDF conversion failed: install Microsoft Word or LibreOffice, or set "
+                           "si_format to 'docx' in target_journal.json if the journal accepts Word")
 
 
 def run_pandoc(inputs: list[Path], output: Path, bibliography: Path | None,
@@ -627,15 +898,24 @@ def build(args) -> int:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     receipt_path = build_receipt_path(project, args.output)
     receipt_path.unlink(missing_ok=True)
+    pdf_path = args.output.with_suffix(".pdf") if getattr(args, "pdf", False) else None
+    spec = docxaudit.audit_spec(project)
     try:
         source_problems = _source_problems(args.kind, args.input)
         if source_problems:
             raise ValueError("; ".join(source_problems))
-        run_pandoc(args.input, args.output, args.bibliography, args.csl)
-        normalize_docx(args.output, style, args.kind)
+        with tempfile.TemporaryDirectory(prefix="medpaper_render_") as work:
+            workdir = Path(work)
+            rendered = prepare_source(args.kind, args.input, project, workdir)
+            run_pandoc(rendered, args.output, args.bibliography,
+                       collapsing_csl(args.csl, workdir))
+        normalize_docx(args.output, style, args.kind,
+                       legend_bold=bool(spec["legend_style"].get("bold", True)))
         problems = audit_docx(args.output, style, args.kind,
                               planned_figure_ids() if args.kind == "manuscript" else None,
-                              figure_legend_cap())
+                              figure_legend_cap(), spec)
+        if not problems and pdf_path is not None:
+            _convert_pdf(args.output, pdf_path)
     except Exception as exc:  # noqa: BLE001
         args.output.unlink(missing_ok=True)
         receipt_path.unlink(missing_ok=True)
@@ -654,6 +934,8 @@ def build(args) -> int:
         print(f"DOCX build receipt failed: {exc}", file=sys.stderr)
         return 2
     print(f"built and audited {args.kind} -> {args.output}")
+    if pdf_path is not None:
+        print(f"PDF export -> {pdf_path}")
     print(f"build receipt -> {receipt}")
     return 0
 
@@ -673,6 +955,7 @@ def audit_manifest(args) -> int:
     roles: dict[str, list[Path]] = {}
     planned = planned_figure_ids()
     legend_cap = figure_legend_cap()
+    spec = docxaudit.audit_spec(project_root())
     for item in manifest.get("items", []):
         role = str(item.get("role", "")).strip()
         path = _resolve_manifest_file(args.manifest, str(item.get("file", "")))
@@ -680,7 +963,7 @@ def audit_manifest(args) -> int:
         if role in TEXT_ROLES and path.suffix.lower() != ".docx":
             problems.append(f"{role}: narrative upload must be DOCX, got {path.name}")
         if path.suffix.lower() == ".docx":
-            problems += audit_docx(path, style, role, planned, legend_cap)
+            problems += audit_docx(path, style, role, planned, legend_cap, spec)
     for role in ("manuscript", "title_page", "cover_letter"):
         if not any(p.suffix.lower() == ".docx" for p in roles.get(role, [])):
             problems.append(f"manifest lacks a DOCX item for role '{role}'")
@@ -706,6 +989,9 @@ def main() -> int:
     p.add_argument("--style-config", type=Path, required=True)
     p.add_argument("--bibliography", type=Path)
     p.add_argument("--csl", type=Path)
+    p.add_argument("--pdf", action="store_true",
+                   help="also export the audited DOCX to PDF (use for supplementary files "
+                        "unless target_journal.json sets si_format=docx)")
     p.set_defaults(fn=build)
     p = sub.add_parser("audit")
     p.add_argument("--manifest", type=Path, required=True)

@@ -36,8 +36,15 @@ unlooked-at.
    journal copy that was actually submitted. Every successful build also writes a deterministic
    source/output receipt under `08_submission/build_receipts/`; S23 refuses to capture a
    baseline without it. The receipt is evidence, not an upload item, and is frozen with S24.
+   The builder applies `target_journal.json` on a temporary render copy (sources are never
+   rewritten): automatic page numbers in every footer, references as number + TAB with a
+   hanging indent, numeric citations collapsed to ranges, `legend_style`, `embed_figures`,
+   `word_tables`. Main-text Figure legends hold main figures only; the supplementary build
+   appends the Figure S* legends from `legends.md`, an information page (title, journal,
+   authors, corresponding author) and strips engine plumbing and local paths from code.
    If supplementary Methods exists, build it (or the journal-mandated combined supplement)
-   as `.docx`. Convert every other narrative upload to `.docx`; do not leave cover letters,
+   as `.docx`; when `si_format` is `pdf` (the default) add `--pdf` and list the PDF in the
+   manifest with role `supplementary_pdf`. Convert every other narrative upload to `.docx`; do not leave cover letters,
    methods supplements or declarations as Markdown in the bundle. A journal-supplied fixed
    form may remain in the exact PDF/XLSX/DOCX format the journal requires.
 4. The builder applies journal-specified size and spacing, with the recorded fallback only
@@ -80,7 +87,9 @@ unlooked-at.
 ```
 .\.venv\Scripts\python.exe tools/figures/qc.py --crop "Figure 1" --cols 2 --cell B
 ```
-   Fix the plotting **script**, re-render, re-run `qc.py --all`, look again. Record each
+   Fix the plotting **script** - if it is frozen or certified by an earlier round, first open
+   `tools/rework.py layout --source <script> --why "..."` (edits outside a round are refused) -
+   re-render, re-run `qc.py --all`, look again. Record each
    figure you actually loaded, then lift the parked decision:
 ```
 .\.venv\Scripts\python.exe tools/figures/qc.py --confirm "Figure 1" --note "<what you saw / changed>"

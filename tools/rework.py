@@ -326,8 +326,12 @@ def _cmd_batch(args, project: Path, pipe, state: State, kinds: list[str]) -> int
             print("legacy (schema-1) round is active: extending it with the pre-1.7.0 rewind flow")
             return _cmd_batch_rewind(args, project, pipe, state, kinds)
         if revision.get("status") != "collecting":
-            raise ValueError(f"{revision['round_id']} is sealed; finish and close it, then put new "
-                             "feedback in the next round")
+            if getattr(args, "merge", False):
+                return _merge_into_sealed(args, project, pipe, state, kinds, round_path, revision)
+            raise ValueError(
+                f"{revision['round_id']} is sealed. Either add this feedback to it (batch --merge), "
+                "put it first and park the open round (batch --priority, e.g. science over an "
+                "unfinished layout round), or finish and close it first")
         review_stage = revision["review_stage"]
     else:
         if state.current not in REVIEW_STAGES:
@@ -431,6 +435,202 @@ def _seal_round(state: State, pipe, why: str) -> int:
           f"{', '.join(revision['validation_stages']) or 'review-stage checks only'}")
     print("next: edit only the listed files, then rework.py check / mark / close (status lists them)")
     return 0
+
+
+# ---------------------------------------------------------------------------
+# 1.8.0: merge, suspend/priority, resume with per-item progress, S23 layout rounds
+# ---------------------------------------------------------------------------
+def _merge_into_sealed(args, project: Path, pipe, state: State, kinds, round_path: Path,
+                       revision: dict) -> int:
+    """Fold new feedback into the sealed round and re-plan its scope (no second round)."""
+    if revision["review_stage"] != state.current:
+        raise ValueError("merge only at the round's own review stage; use batch --priority instead")
+    plan = _read_batch_plan(args.plan.resolve(), kinds, revision["review_stage"], pipe)
+    if any(u.get("feedback_sha256") == plan["feedback_sha256"] for u in revision["feedback_updates"]):
+        print("identical feedback already recorded; no duplicate items")
+        return 0
+    first_new = len(revision["items"]) + 1
+    for offset, item in enumerate(plan["items"]):
+        item["id"] = f"{revision['round_id']}-{first_new + offset:02d}"
+        revision["items"].append(item)
+    revision["feedback_updates"].append({
+        "at": _now(), "feedback_verbatim": plan["feedback_verbatim"],
+        "feedback_sha256": plan["feedback_sha256"], "interpretation": plan["interpretation"],
+        "merged_after_seal": True})
+    revision["earliest_stage"] = min((i["owning_stage"] for i in revision["items"]),
+                                     key=lambda sid: pipe.stage(sid).index)
+    scoped.plan_scope(project, pipe, state, revision)
+    revision.pop("validation", None)
+    revision["updated_at"] = _now()
+    _write_round(round_path, revision)
+    state.event("revision_round_merged", f"{revision['round_id']}: +{len(plan['items'])} item(s)")
+    names: set[str] = set()
+    for item in plan["items"]:
+        names.update(INVALIDATE_BY_KIND[item["kind"]] - {"journal_chosen"})
+    if revision["review_stage"] != "S19_human_review":
+        names.discard("manuscript_human_reviewed")
+    _clear_decisions(state, names)
+    scoped.drop_receipts(state)
+    state.save()
+    print(f"merged into {revision['round_id']}: now {len(revision['items'])} item(s); scope re-planned "
+          f"({len(revision['rebuild_files'])} affected file(s))")
+    return 0
+
+
+def _cmd_suspend(args, project: Path, state: State) -> int:
+    path, revision = _load_round(state)
+    if not scoped.is_scoped(revision):
+        raise ValueError("a legacy full-rewind round cannot be suspended")
+    if revision.get("review_stage") != state.current:
+        raise ValueError("this round has moved to another checkpoint; finish it there")
+    why = (args.why or "").strip()
+    if len(why) < 10:
+        raise ValueError("suspend requires --why (e.g. 'scientific feedback takes priority')")
+    revision["suspended"] = {"at": _now(), "why": why, "from_status": revision["status"],
+                             "snapshot": scoped.snapshot(project)}
+    revision["status"] = "suspended"
+    revision.pop("validation", None)
+    _write_round(path, revision)
+    state.data.pop("active_revision_round", None)
+    parked = state.data.setdefault("suspended_revision_rounds", [])
+    if revision["round_id"] not in parked:
+        parked.append(revision["round_id"])
+    state.event("revision_round_suspended", f"{revision['round_id']}: {why}")
+    scoped.drop_receipts(state)
+    state.save()
+    print(f"suspended {revision['round_id']} ({revision['suspended']['from_status']}); "
+          "a new round may open now. Resume later: rework.py resume --round "
+          f"{revision['round_id']}")
+    return 0
+
+
+def _reactivate(project: Path, pipe, state: State, round_id: str) -> None:
+    if state.data.get("active_revision_round"):
+        raise ValueError("close or suspend the active round before resuming another")
+    parked = state.data.get("suspended_revision_rounds", [])
+    if round_id not in parked:
+        raise ValueError(f"{round_id} is not suspended (suspended: {', '.join(parked) or 'none'})")
+    path = _round_path(state, round_id)
+    revision = json.loads(path.read_text(encoding="utf-8"))
+    info = revision.pop("suspended")
+    snap, now = info.pop("snapshot", {}), scoped.snapshot(project)
+    allowed = set(revision.get("allowed_files", []))
+    rebased = []
+    # Files another (closed) round changed while this one was parked become its new baseline;
+    # they are not this round's unplanned changes.
+    for rel in sorted(set(snap) | set(now)):
+        if snap.get(rel) != now.get(rel) and rel not in allowed:
+            if rel in now:
+                revision.setdefault("baseline", {})[rel] = now[rel]
+            else:
+                revision.get("baseline", {}).pop(rel, None)
+            rebased.append(rel)
+    revision["status"] = info["from_status"]
+    revision.setdefault("suspensions", []).append({**info, "resumed_at": _now(), "rebased": rebased})
+    if revision["status"] == "active":
+        scoped.plan_scope(project, pipe, state, revision)
+    _write_round(path, revision)
+    parked.remove(round_id)
+    state.data["active_revision_round"] = round_id
+    state.event("revision_round_resumed", f"{round_id}: {len(rebased)} file(s) rebased")
+    scoped.drop_receipts(state)
+    state.save()
+    print(f"resumed {round_id}; {len(rebased)} file(s) changed meanwhile by other rounds were rebased")
+
+
+def _cmd_progress(args, project: Path, state: State) -> int:
+    """Record that an item is partly done, so an interrupted run resumes from it."""
+    path, revision = _load_round(state)
+    item = next((i for i in revision["items"] if i["id"] == args.item), None)
+    if item is None:
+        raise ValueError(f"unknown item {args.item}")
+    if len((args.summary or "").strip()) < 10:
+        raise ValueError("progress needs --summary of what is done so far")
+    files = []
+    for rel in args.changed_file:
+        if not _valid_project_rel(rel) or not (project / rel).is_file():
+            raise ValueError(f"changed file does not exist: {rel}")
+        files.append({"path": Path(rel).as_posix(), "sha256": _sha256_file(project / rel)})
+    if item.get("status") != "done":
+        item["status"] = "in_progress"
+    item.setdefault("progress", []).append({"at": _now(), "note": args.summary.strip(), "files": files})
+    revision["updated_at"] = _now()
+    _write_round(path, revision)
+    print(f"progress recorded for {args.item}")
+    return 0
+
+
+def _print_resume(project: Path, state: State) -> int:
+    try:
+        _, revision = _load_round(state)
+    except ValueError:
+        parked = state.data.get("suspended_revision_rounds", [])
+        print("no active revision round" + (f"; suspended: {', '.join(parked)}" if parked else ""))
+        return 0
+    base = revision.get("baseline", {})
+    now = scoped.snapshot(project)
+    changed = sorted(r for r in set(base) | set(now) if base.get(r) != now.get(r))
+    print(f"{revision['round_id']}  status={revision['status']}  return={revision['review_stage']}")
+    claimed: set[str] = set()
+    for item in revision["items"]:
+        mine = [r for r in changed if r in item.get("affected_sources", [])]
+        claimed.update(mine)
+        print(f"  [{item.get('status')}] {item['id']} {item['kind']}: {item['request'][:80]}")
+        for note in item.get("progress", [])[-2:]:
+            print(f"      progress {note['at']}: {note['note'][:100]}")
+        print(f"      changed so far: {', '.join(mine) or 'none'}")
+    rest = [r for r in changed if r not in claimed]
+    if rest:
+        print("  changed in the closure, not yet attributed to an item: " + ", ".join(rest[:12]))
+    pending = [i["id"] for i in revision["items"] if i.get("status") != "done"]
+    print(f"next: finish {', '.join(pending)} then rework.py check / mark / close" if pending
+          else "next: rework.py check, then close")
+    parked = state.data.get("suspended_revision_rounds", [])
+    if parked:
+        print(f"suspended rounds waiting: {', '.join(parked)} (rework.py resume --round <id>)")
+    return 0
+
+
+def _cmd_layout(args, project: Path, pipe, state: State) -> int:
+    """S23/S24: a controlled layout round for an edit to a certified figure/table source."""
+    if state.current not in ("S23_package", "S24_package_human_review"):
+        raise ValueError("layout rounds are for S23/S24; earlier, edit within the owning stage")
+    if state.data.get("active_revision_round"):
+        raise ValueError("a round is open; add the file with batch --merge instead")
+    sources = [s.replace("\\", "/") for s in args.source]
+    if not sources or not all(_valid_project_rel(s) for s in sources):
+        raise ValueError("layout needs --source <paper-relative figure/table script>")
+    if any(s.endswith(".md") or not s.startswith(("05_figures/", "04_tables/")) for s in sources):
+        raise ValueError("layout rounds cover figure/table scripts and renders only; wording "
+                         "goes through a normal round")
+    why = (args.why or "").strip()
+    if len(why) < 20:
+        raise ValueError("layout needs --why describing the visual change (>= 20 characters)")
+    kind = "figure-layout" if all(s.startswith("05_figures/") for s in sources) else "table-layout"
+    round_id = _next_round_id(state)
+    item = {"kind": kind, "request": why, "owning_stage": ROUTES[kind], "change_type": "layout",
+            "affected_sources": sources, "status": "pending", "resolution": None,
+            "changed_files": [], "validated_by": [], "id": f"{round_id}-01",
+            "acceptance_criteria": ["deterministic QC passes on the re-render",
+                                    "the re-rendered display is visually re-confirmed"]}
+    revision = {
+        "schema_version": ROUND_SCHEMA, "round_id": round_id, "review_stage": state.current,
+        "origin_stage": state.current, "created_at": _now(), "status": "collecting",
+        "full_builds": 0, "items": [item], "earliest_stage": ROUTES[kind], "auto_layout": True,
+        "feedback_updates": [{"at": _now(), "feedback_verbatim": why,
+                              "feedback_sha256": _sha256_text(why),
+                              "interpretation": "controlled layout-only round opened by rework.py layout"}],
+        "baseline": scoped.snapshot(project), "baseline_documents": _baseline_documents(project),
+    }
+    # The edit may already be on disk: the baseline must hold the certified version.
+    for rel, (_, digest) in scoped.certified_hashes(project).items():
+        if rel in sources:
+            revision["baseline"][rel] = digest
+    _write_round(_round_path(state, round_id), revision)
+    state.data["active_revision_round"] = round_id
+    state.event("revision_round_opened", f"{round_id}: layout round for {', '.join(sources)}")
+    state.save()
+    return _seal_round(state, pipe, f"layout round opened at {state.current}: {why}")
 
 
 def _cmd_status(state: State, full: bool = False) -> int:
@@ -603,7 +803,15 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="plan, scope and persist user-requested medpaper revision rounds")
     parser.add_argument("command", choices=["plan", "start", "batch", "seal", "check", "build",
-                                            "refresh", "status", "mark", "close"])
+                                            "refresh", "status", "mark", "close", "suspend",
+                                            "resume", "progress", "layout"])
+    parser.add_argument("--merge", action="store_true",
+                        help="batch: add this feedback to the sealed open round and re-plan it")
+    parser.add_argument("--priority", action="store_true",
+                        help="batch: suspend the open round and open this feedback first")
+    parser.add_argument("--round", help="resume: the suspended round to reactivate")
+    parser.add_argument("--source", action="append", default=[],
+                        help="layout: certified figure/table source being changed (repeatable)")
     parser.add_argument("--kind", choices=kinds)
     parser.add_argument("--why", help="user instruction (seal) or reason (start/build)")
     parser.add_argument("--plan", type=Path,
@@ -633,7 +841,25 @@ def main() -> int:
                 raise ValueError("batch requires --plan <revision-plan.json>")
             if args.rewind:
                 return _cmd_batch_rewind(args, project, pipe, state, kinds)
+            if args.priority and state.data.get("active_revision_round"):
+                if state.current not in REVIEW_STAGES:
+                    raise ValueError("a priority round opens only at S19 or S24")
+                _read_batch_plan(args.plan.resolve(), kinds, state.current, pipe)  # validate first
+                args.why = args.why or "suspended: newer feedback was given priority"
+                _cmd_suspend(args, project, state)
             return _cmd_batch(args, project, pipe, state, kinds)
+        if args.command == "suspend":
+            return _cmd_suspend(args, project, state)
+        if args.command == "resume":
+            if args.round:
+                _reactivate(project, pipe, state, args.round)
+            return _print_resume(project, state)
+        if args.command == "progress":
+            if not args.item:
+                raise ValueError("progress requires --item and --summary")
+            return _cmd_progress(args, project, state)
+        if args.command == "layout":
+            return _cmd_layout(args, project, pipe, state)
         if args.command == "seal":
             return _seal_round(state, pipe, args.why or "")
         if args.command == "check":

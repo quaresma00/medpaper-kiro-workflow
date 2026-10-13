@@ -38,6 +38,9 @@ Everything the Introduction and Discussion say about the literature comes from h
 ```
 .\.venv\Scripts\python.exe tools/pubmed/build_library.py --export
 ```
+   The export brace-protects proper nouns/acronyms in titles, writes the ISO journal
+   abbreviation (`shortjournal`) and the article number when there are no pages, expands page
+   ranges and protects particle surnames (de, van der); `bib_format_clean` checks all of it.
 5. Read the abstracts. Update `03_analysis/notes.md` (`Introduction points`,
    `Discussion points`) with what the literature actually says, tagging each point with the
    citekey that supports it. The Introduction is written from these notes plus the

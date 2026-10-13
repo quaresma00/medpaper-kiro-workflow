@@ -414,6 +414,49 @@ def bib_ris_match_library(ctx: Ctx) -> Result:
     return Result(True, "bib_ris_match_library", f"library / bib / ris agree on {len(lib_keys)} records")
 
 
+BIB_FIELD_RE = re.compile(r"^\s*(\w+)\s*=\s*\{(.*)\},?\s*$", re.M)
+
+
+def bib_format_problems(text: str) -> list[str]:
+    """Patterns that render badly through CSL: unprotected proper nouns/acronyms, abbreviated
+    or single-hyphen page ranges, unbraced particle surnames, no journal abbreviation."""
+    problems: list[str] = []
+    for chunk in re.split(r"(?m)^@", text)[1:]:
+        key = chunk.split("{", 1)[1].split(",", 1)[0].strip() if "{" in chunk else "?"
+        fields = {k.casefold(): v for k, v in BIB_FIELD_RE.findall(chunk)}
+        title = re.sub(r"\{[^{}]*\}", "", fields.get("title", ""))
+        words = re.findall(r"[A-Za-z][\w'-]*", title)
+        bad = [w for i, w in enumerate(words) if (i > 0 and w[0].isupper()) or
+               any(c.isupper() for c in w[1:])]
+        if bad:
+            problems.append(f"{key}: title words not brace-protected: {', '.join(bad[:3])}")
+        pages = fields.get("pages", "")
+        m = re.fullmatch(r"[A-Za-z]?(\d+)(-{1,2})[A-Za-z]?(\d+)", pages)
+        if m and (m.group(2) == "-" or len(m.group(3)) < len(m.group(1))):
+            problems.append(f"{key}: page range '{pages}' is not a full 'first--last' range")
+        for name in re.split(r"\s+and\s+", fields.get("author", "")):
+            last = name.split(",", 1)[0].strip()
+            if " " in last and not last.startswith("{"):
+                problems.append(f"{key}: multi-part surname '{last}' is not brace-protected")
+                break
+        if fields.get("journal") and not fields.get("shortjournal"):
+            problems.append(f"{key}: no ISO journal abbreviation (shortjournal)")
+    return problems
+
+
+@check("bib_format_clean")
+def bib_format_clean(ctx: Ctx) -> Result:
+    if not ctx.p(BIB).is_file():
+        return Result(False, "bib_format_clean", f"{BIB} missing")
+    problems = bib_format_problems(ctx.read(BIB))
+    if problems:
+        return Result(False, "bib_format_clean", f"{len(problems)} entry problem(s): "
+                      + "; ".join(problems[:6]),
+                      ["Regenerate with tools/pubmed/build_library.py --export (it protects "
+                       "titles, expands page ranges and writes shortjournal); never hand-edit refs.bib."])
+    return Result(True, "bib_format_clean", "refs.bib titles, names, pages and journal abbreviations are CSL-safe")
+
+
 @check("pubmed_cache_fresh")
 def pubmed_cache_fresh(ctx: Ctx) -> Result:
     """Proof-of-retrieval: a real search happened and its payload is on disk."""

@@ -61,6 +61,24 @@ def validate_keywords(text: str) -> str:
     return "Keywords: " + ", ".join(items)
 
 
+LEGEND_HEAD_RE = re.compile(r"(?mi)^#{2,6}\s+(?:Figure|Fig\.?)\s+(S?\d+)\b.*$")
+
+
+def main_legends(text: str) -> str:
+    """Drop supplementary (Figure S*) legend blocks; they travel with the supplementary file."""
+    heads = list(LEGEND_HEAD_RE.finditer(text))
+    keep, last = [], 0
+    for i, m in enumerate(heads):
+        end = heads[i + 1].start() if i + 1 < len(heads) else len(text)
+        if m.group(1).upper().startswith("S"):
+            keep.append(text[last:m.start()])
+            last = end
+    if last == 0:
+        return text
+    keep.append(text[last:])
+    return re.sub(r"\n{3,}", "\n\n", "".join(keep)).strip()
+
+
 def assemble(project: Path) -> str:
     title = selected_title(read_required(project, "07_manuscript/title.md"))
     abstract = normalize_h1(read_required(project, "07_manuscript/abstract.md"), "Abstract")
@@ -75,7 +93,8 @@ def assemble(project: Path) -> str:
     if statements_path.is_file():
         statements = read_required(project, "07_manuscript/statements.md")
         sections.append(normalize_h1(statements, "Declarations and Statements"))
-    legends = normalize_h1(read_required(project, "05_figures/legends.md"), "Figure legends")
+    legends = main_legends(
+        normalize_h1(read_required(project, "05_figures/legends.md"), "Figure legends"))
     parts = [f"# {title}", abstract, keywords, *sections,
              "# References\n\n::: {#refs}\n:::", legends]
     return "\n\n".join(p.strip() for p in parts) + "\n"

@@ -163,3 +163,24 @@ reducing the requested work:
    artifact. If the context compacts, continue from the persisted round until every item is
    complete.
 
+## Open rounds, interruptions and S23 layout edits (1.8.0)
+
+- New feedback while a round is sealed: `batch --plan p.json --merge` folds it into the open
+  round (scope re-planned); `batch --plan p.json --priority` parks the open round
+  (`suspend`) and opens the new one first - e.g. science over an unfinished layout round.
+  `resume --round R00n` reactivates a parked round; files other rounds changed meanwhile are
+  rebased, not reported as its unplanned changes. A suspended round blocks
+  `revision_rounds_closed` until closed.
+- Interrupted runs: record partial work with `progress --item <id> --summary "..."
+  [--changed-file f]`; `resume` (no `--round`) lists every item with its status, notes and the
+  files changed so far, plus changed files not yet attributed to an item.
+- At S23/S24 an edit to a frozen or round-certified figure/table script is refused at once
+  (frozen-guard hook on file writes, and `wf run-script` before rendering). Open the controlled
+  layout round it names: `layout --source 05_figures/code/fig1.R --why "..."`, then edit,
+  re-render, `check`, `mark`, `close`.
+- Agent plans and check records go in `08_submission/notes/` (or `.wf/`, `temp/`); they are
+  never unplanned changes or orphans.
+- Revised prose never mentions the pipeline's history (independent review, earlier draft,
+  previous version, reviewer request). A genuine change of plan is written as a protocol
+  deviation or a post hoc analysis; `no_ai_boilerplate` and the S22 lint block such phrases.
+

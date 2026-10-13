@@ -152,49 +152,85 @@ def style_consistent(ctx: Ctx) -> Result:
                   + (f"; {len(advisory)} advisory note(s)" if advisory else ""))
 
 
+def _final_manuscript_docx(ctx: Ctx) -> Path | None:
+    """The built manuscript DOCX listed in the bundle manifest, if S23 has built it."""
+    try:
+        manifest = ctx.read_json("08_submission/bundle/manifest.json")
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+    for item in manifest.get("items", []):
+        if str(item.get("role", "")).casefold() == "manuscript":
+            path = ctx.p(str(item.get("file", "")))
+            if path.suffix.casefold() == ".docx" and path.is_file():
+                return path
+    return None
+
+
+def _display_counts(ctx: Ctx) -> tuple[int, int]:
+    try:
+        plan = ctx.read_json("01_protocol/artifact_plan.json")
+    except (FileNotFoundError, json.JSONDecodeError):
+        return 0, 0
+    return len(plan.get("main_figures", [])), len(plan.get("main_tables", []))
+
+
 @check("journal_limits_met")
 def journal_limits_met(ctx: Ctx) -> Result:
-    """Word and reference counts against the guidelines fetched at S20."""
-    gx = "08_submission/guidelines_extract.md"
-    if not ctx.p(gx).exists():
-        return Result(False, "journal_limits_met", f"{gx} missing - fetch the guidelines first")
-    text = ctx.read(gx)
-    rep = _report(ctx)
-    if isinstance(rep, Result):
-        return rep
-    counts = {Path(r["file"]).name: r["words"] for r in rep.get("readability", [])}
+    """Typed caps from target_journal.json against Word-compatible counts.
 
-    limits = _declared_limits(text)
-    if not limits:
-        return Result(
-            False,
-            "journal_limits_met",
-            "no word or reference limit could be found in guidelines_extract.md",
-            ["Quote the journal's actual limits under 'Word limits', e.g. "
-             "'Abstract: 250 words', 'Main text: 3500 words', 'References: max 50'.",
-             "If the journal states no limit, write 'no stated limit' explicitly."],
-        )
-
-    # The word cap applies to what is actually submitted, so measure the journal variant.
-    if ctx.psrc("07_manuscript/full_manuscript.md").exists():
-        sections = _canonical_section_counts(ctx.read(ctx.src("07_manuscript/full_manuscript.md")))
-        abstract_words = sections.get("abstract", 0)
-        body_words = sum(sections.get(k, 0) for k in
-                         ("introduction", "methods", "results", "discussion"))
+    Counts include numbers (Word does), cover the body from Introduction to Conclusions, and
+    keep a safety margin (journal_limit_margin, default 0.97) because a portal's counter rarely
+    matches ours exactly. Once S23 has built the manuscript DOCX, the final Word file is what
+    gets measured. Display-item and reference caps are exact.
+    """
+    from .. import journalspec
+    target = journalspec.load(ctx.project)
+    if not target:
+        return Result(False, "journal_limits_met", "08_submission/target_journal.json missing")
+    caps, schema = journalspec.limits(target)
+    if schema:
+        return Result(False, "journal_limits_met", "; ".join(schema),
+                      ['Add to target_journal.json: "limits": {"main_text_words": <int|null>, '
+                       '"abstract_words": <int|null>, "reference_limit": <int|null>, '
+                       '"display_items": <int|null>, "main_figures": <int|null>, '
+                       '"main_tables": <int|null>, "source": "<guide URL + quoted rule>"}',
+                       "Typed fields only; guideline prose is never parsed for numbers."])
+    scope = journalspec.word_count_scope(target)
+    docx = _final_manuscript_docx(ctx)
+    if docx is not None:
+        counts = journalspec.docx_counts(docx, scope)
+        refs, basis = counts["references"], f"final DOCX {docx.name}"
     else:
-        abstract_words = counts.get("abstract.md", 0)
-        body_words = sum(v for k, v in counts.items()
-                         if k in ("introduction.md", "methods.md", "results.md", "discussion.md"))
+        rel = ctx.src("07_manuscript/full_manuscript.md")
+        if ctx.p(rel).is_file():
+            text = ctx.read(rel)
+        else:  # component drafts before S17 assembles the canonical file
+            rel = "07_manuscript/<sections>"
+            text = "\n\n".join(
+                f"# {name.title()}\n\n" + ctx.read(ctx.src(f"07_manuscript/{name}.md"))
+                for name in ("abstract", "introduction", "methods", "results", "discussion")
+                if ctx.psrc(f"07_manuscript/{name}.md").is_file())
+        counts = journalspec.markdown_counts(text, scope)
+        refs, basis = _ref_count(ctx), f"{rel} (Word-compatible count)"
+    margin = float(ctx.target("journal_limit_margin", 0.97))
     problems, notes = [], []
-    for kind, cap in limits.items():
-        if kind == "abstract" and abstract_words:
-            got = abstract_words
-            (problems if got > cap else notes).append(f"abstract {got}/{cap} words")
-        elif kind == "main":
-            (problems if body_words > cap else notes).append(f"main text {body_words}/{cap} words")
-        elif kind == "references":
-            n = _ref_count(ctx)
-            (problems if n and n > cap else notes).append(f"references {n}/{cap}")
+    for key, label, got in (("main_text_words", "main text", counts["main"]),
+                            ("abstract_words", "abstract", counts["abstract"])):
+        cap = caps[key]
+        if cap is None:
+            continue
+        allowed = int(cap * margin)
+        (problems if got > allowed else notes).append(
+            f"{label} {got}/{cap} words (margin {allowed})")
+    nfig, ntab = _display_counts(ctx)
+    for key, label, got in (("reference_limit", "references", refs),
+                            ("display_items", "main display items", nfig + ntab),
+                            ("main_figures", "main figures", nfig),
+                            ("main_tables", "main tables", ntab)):
+        cap = caps[key]
+        if cap is not None:
+            (problems if got > cap else notes).append(f"{label} {got}/{cap}")
+    notes.append(f"measured on {basis}")
     if problems:
         return Result(
             False,
@@ -204,6 +240,28 @@ def journal_limits_met(ctx: Ctx) -> Result:
              "If cutting would remove something a reviewer needs, move it to the supplement."],
         )
     return Result(True, "journal_limits_met", "within journal limits: " + "; ".join(notes))
+
+
+@check("draft_length_targets")
+def draft_length_targets(ctx: Ctx) -> Result:
+    """Before a journal is chosen, the assembled draft keeps to common medical caps
+    (draft_main_words_max / draft_abstract_words_max) so S22 trims, not rewrites."""
+    from .. import journalspec
+    rel = ctx.src("07_manuscript/full_manuscript.md")
+    if not ctx.p(rel).is_file():
+        return Result(False, "draft_length_targets", f"{rel} missing")
+    counts = journalspec.markdown_counts(ctx.read(rel), list(journalspec.DEFAULT_SCOPE))
+    main_cap = int(ctx.target("draft_main_words_max", 4000))
+    abs_cap = int(ctx.target("draft_abstract_words_max", 250))
+    over = [f"{label} {got}/{cap} words" for label, got, cap in
+            (("body", counts["main"], main_cap), ("abstract", counts["abstract"], abs_cap))
+            if got > cap]
+    if over:
+        return Result(False, "draft_length_targets", "draft over the default target: " + "; ".join(over),
+                      ["Cut now rather than at S22; counts are Word-compatible (numbers included).",
+                       "A study that genuinely needs more space: `wf config set draft_main_words_max <n>`."])
+    return Result(True, "draft_length_targets",
+                  f"body {counts['main']}/{main_cap}, abstract {counts['abstract']}/{abs_cap} words")
 
 
 # ---------------------------------------------------------------------------
@@ -227,26 +285,6 @@ def _env(ctx: Ctx) -> dict:
             "MEDPAPER_PROJECT": str(ctx.project),
             "MEDPAPER_ROOT": str(Path(__file__).resolve().parents[3]),
             "PYTHONIOENCODING": "utf-8"}
-
-
-def _declared_limits(text: str) -> dict[str, int]:
-    """Pull numeric caps out of the quoted guidelines."""
-    out: dict[str, int] = {}
-    patterns = [
-        (r"abstract[^.\n]{0,60}?(\d{2,4})\s*words", "abstract"),
-        (r"(\d{2,4})\s*words[^.\n]{0,30}?abstract", "abstract"),
-        (r"(?:main\s+text|manuscript|body|article)[^.\n]{0,60}?(\d{3,5})\s*words", "main"),
-        (r"(\d{3,5})\s*words[^.\n]{0,40}?(?:main\s+text|manuscript|body|excluding)", "main"),
-        (r"references?[^.\n]{0,40}?(?:max(?:imum)?|limit(?:ed)?\s*to|up\s+to|no\s+more\s+than)"
-         r"[^.\n]{0,20}?(\d{1,3})", "references"),
-        (r"(?:max(?:imum)?|up\s+to|no\s+more\s+than)\s*(\d{1,3})\s*references?", "references"),
-    ]
-    low = text.lower()
-    for rx, kind in patterns:
-        m = re.search(rx, low)
-        if m and kind not in out:
-            out[kind] = int(m.group(1))
-    return out
 
 
 def _ref_count(ctx: Ctx) -> int:
@@ -274,5 +312,6 @@ def _canonical_section_counts(text: str) -> dict[str, int]:
         end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
         block = text[match.end():end]
         block = re.sub(r"(?m)^Keywords\s*:.*$", "", block, flags=re.I)
-        out[name] = len(re.findall(r"[A-Za-z][A-Za-z'-]*", block))
+        from .. import journalspec
+        out[name] = journalspec.word_count(block)
     return out

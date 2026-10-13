@@ -30,6 +30,30 @@ then freeze its actual author instructions and Word-format rules.
    `target_journal.json` to `central` by default. Use `local_required` only when the official
    guide explicitly requires definitions within every table/figure, and put the exact guide
    URL and rule in `abbreviation_rule_source`.
+   Record the journal's rules as **typed fields** in `target_journal.json`; checks and the Word
+   builder read these, never the prose of `guidelines_extract.md` (null = the guide is silent):
+```
+"article_type": "Original Article",
+"limits": {"main_text_words": 4000, "abstract_words": 250, "reference_limit": 45,
+           "display_items": 6, "main_figures": null, "main_tables": null,
+           "source": "<guide URL + quoted rule>"},
+"word_count_scope": ["Introduction", "Methods", "Results", "Discussion", "Conclusions"],
+"declarations_order": ["Funding", "Competing interests", "Ethics approval", "Consent to participate",
+                       "Consent for publication", "Data availability", "Code availability",
+                       "Author contributions", "Acknowledgements"],
+"discussion_subheadings": false,
+"embed_figures": false, "word_tables": false,
+"legend_style": {"prefix": "Figure", "bold": true, "panel_label_case": "any", "end_punctuation": "any"},
+"supplementary_aliases": {"Online Resource 1": ["Supplementary Methods", "Table S1"]},
+"si_format": "pdf",
+"evidence_sources": {"official": ["<publisher/Clarivate URL>"], "third_party": ["<e.g. LetPub URL>"]}
+```
+   `declarations_order` defaults to the Springer Nature order above when the guide is silent;
+   `discussion_subheadings` is true only if the guide requires them; `supplementary_aliases`
+   lets the variant say "Online Resource n" without failing fact preservation. Evidence: SCIE
+   and quartile come from an official source (publisher page, Clarivate MJL/JCR) when reachable;
+   a third-party mirror alone is acceptable only when the official source needs a login, and
+   must be listed under `third_party` with the official URL tried.
    Reporting checklist and registration are on demand: only if the official instructions
    require a checklist, set `"journal_requires_checklist": "<name, e.g. STROBE>"` in
    `target_journal.json` (S23 then fills it); otherwise leave it unset. Likewise a

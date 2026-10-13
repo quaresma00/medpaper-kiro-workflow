@@ -979,9 +979,15 @@ def run_scientific_freeze(proj: Path) -> None:
            not scifreeze.uncovered_required(freeze["files"])
            and "03_analysis/results/primary.json" in freeze["files"],
            f"{len(freeze['files'])} file(s)")
-    record("re-freezing without --force is refused",
+    record("re-capturing identical science needs no --force (1.8.0)",
+           not _raises(lambda: scifreeze.write_freeze(scoped)))
+    held = scoped / "07_manuscript/full_manuscript.md"
+    held_text = held.read_text(encoding="utf-8")
+    held.write_text(held_text + "\nA changed sentence.\n", encoding="utf-8")
+    record("re-freezing changed science without --force is refused",
            _raises(lambda: scifreeze.write_freeze(scoped)),
            "it would discard the record of what review closed on")
+    held.write_text(held_text, encoding="utf-8")
 
     r = run("scientific_freeze_intact", "S20_journal")
     record("the freeze holds immediately after capture", r.ok, r.detail)
@@ -3427,19 +3433,27 @@ def run_polish(proj: Path) -> None:
 
     section("polish: journal limits")
     (proj / "08_submission").mkdir(parents=True, exist_ok=True)
-    gx = proj / "08_submission/guidelines_extract.md"
-    gx.write_text("# Guidelines\n\n## Word limits\nAbstract: 250 words. Main text: 3500 words "
-                  "excluding references. References: maximum 50.\n", encoding="utf-8")
+    tj = proj / "08_submission/target_journal.json"
+    tj_before = tj.read_text(encoding="utf-8") if tj.is_file() else None
+    tj_data = json.loads(tj_before) if tj_before else {}
+
+    def limits(**caps):
+        tj.write_text(json.dumps({**tj_data, "limits": {"source": "guide URL; quoted rule",
+                                                        **caps}}), encoding="utf-8")
+    limits(abstract_words=250, main_text_words=3500, reference_limit=50)
     polish("lint")
     r = gate("journal_limits_met")
-    record("journal_limits_met parses the quoted caps and passes", r.ok, r.detail[:110])
-    gx.write_text("# Guidelines\n\n## Word limits\nAbstract: 250 words. Main text: 100 words "
-                  "excluding references. References: maximum 50.\n", encoding="utf-8")
+    record("journal_limits_met reads the typed caps and passes", r.ok, r.detail[:110])
+    limits(abstract_words=250, main_text_words=100, reference_limit=50)
     r = gate("journal_limits_met")
     record("journal_limits_met rejects an over-limit manuscript", not r.ok, r.detail[:110])
-    gx.write_text("# Guidelines\n\n## Word limits\nSee the website.\n", encoding="utf-8")
+    tj.write_text(json.dumps(tj_data), encoding="utf-8")
     r = gate("journal_limits_met")
-    record("journal_limits_met rejects unquoted limits", not r.ok, r.detail[:110])
+    record("journal_limits_met rejects a journal without typed limits", not r.ok, r.detail[:110])
+    if tj_before is None:
+        tj.unlink()
+    else:
+        tj.write_text(tj_before, encoding="utf-8")
 
     section("polish: allowlist escape hatch")
     disc.write_text(CLEAN + "\nThe guideline states that screening plays a crucial role.\n",
@@ -3451,7 +3465,7 @@ def run_polish(proj: Path) -> None:
     polish("lint")
     record("allowlisted phrase stops blocking", gate("ai_tells_clean").ok)
 
-    for f in (disc, abstract, gx, proj / "07_manuscript/polish_allowlist.tsv"):
+    for f in (disc, abstract, proj / "07_manuscript/polish_allowlist.tsv"):
         f.unlink(missing_ok=True)
     shutil.rmtree(proj / "07_manuscript/prepolish", ignore_errors=True)
     (proj / "07_manuscript/polish_report.json").unlink(missing_ok=True)
@@ -5731,6 +5745,8 @@ def main() -> int:
         run_reporting_checklist(tmp / "checklist_root")
         run_v160(tmp / "v160_root")
         run_v170(tmp / "v170_root")
+        import selftest_v180
+        selftest_v180.run(tmp / "v180_root", record, section)
         run_new_wiring()
         section("isolation")
         record("selftest did not touch the real papers root or user home",

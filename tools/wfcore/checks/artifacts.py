@@ -376,7 +376,9 @@ def artifact_refs_consistent(ctx: Ctx) -> Result:
         if not ctx.p(rel).exists():
             continue
         scanned.append(rel)
-        text = FENCE_RE.sub(" ", ctx.read(rel))
+        from .. import journalspec
+        text = journalspec.expand_aliases(FENCE_RE.sub(" ", ctx.read(rel)),
+                                          journalspec.project_aliases(ctx.project))
         for supp, kind, num in ART_CITE_RE.findall(text):
             cited.add(_canon(kind, num, bool(supp) or num.upper().startswith("S")))
     if not scanned:

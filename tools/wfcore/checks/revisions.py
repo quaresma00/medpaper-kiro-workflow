@@ -58,6 +58,10 @@ def revision_rounds_closed(ctx: Ctx) -> Result:
         except (OSError, json.JSONDecodeError) as exc:
             problems.append(f"{path.name}: unreadable ({exc})")
             continue
+        if revision.get("status") == "suspended":
+            problems.append(f"{path.name}: suspended round must be resumed and closed "
+                            f"(tools/rework.py resume --round {path.stem})")
+            continue
         if revision.get("schema_version") not in {1, 2} or revision.get("status") != "complete":
             problems.append(f"{path.name}: not a completed schema-1/2 revision round")
             continue
