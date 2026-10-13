@@ -669,11 +669,17 @@ def main() -> int:
     unproven = [k for k, r in results.items()
                 if r.get("fulltext") and not str(r["fulltext"]).startswith("http")
                 and r.get("identity") != "match"]
+    absent = [k for k in dict.fromkeys(keys) if k not in results or not results[k].get("fulltext")]
     print(f"\n{oa}/{len(results)} available open access.")
     if unproven:
         print(f"{len(unproven)} file(s) NOT proven to be the requested article: "
               f"{', '.join(unproven)}")
         print("The S15 gate blocks on these. A hash proves the bytes, not the paper.")
+    if absent:
+        # Codex 1.11: a failed retrieval stops here; never deep-read the abstract instead.
+        print(f"STOP: no full text for {', '.join(absent)}. Do not write notes from the abstract. "
+              "Ask the user for the PDF (then `register`) or choose another comparable paper.")
+        return 2
     print("Fill in every notes file, then record them in 06_refs/deepread/deepread_index.json.")
     print("Notes under 400 characters are rejected by the S15 gate.")
     return 0

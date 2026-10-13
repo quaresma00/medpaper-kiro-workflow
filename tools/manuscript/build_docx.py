@@ -855,7 +855,11 @@ def run_pandoc(inputs: list[Path], output: Path, bibliography: Path | None,
     if csl:
         cmd += [f"--csl={csl}"]
     cmd += ["--metadata=link-citations:false", "-o", str(output)]
-    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    try:  # bounded child process (Codex 1.10): a hung render fails, the old output is not touched
+        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                              errors="replace", timeout=600)
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("pandoc did not finish within 600 s") from exc
     combined = (proc.stdout or "") + (proc.stderr or "")
     if proc.returncode:
         raise RuntimeError(combined.strip() or f"pandoc exited {proc.returncode}")

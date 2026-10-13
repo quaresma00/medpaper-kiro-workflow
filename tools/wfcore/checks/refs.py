@@ -262,7 +262,10 @@ def citation_count(ctx: Ctx) -> Result:
     n = len(set(citekeys(ctx.read(rel))))
     lo, hi = ctx.spec_bound("min"), ctx.spec_bound("max")
     if lo is not None and n < lo:
-        return Result(False, "citation_count", f"{rel}: {n} distinct references, target >= {lo}")
+        # 1.8.0 (from Codex 1.11): cite what the argument needs, never to reach a count.
+        return Result(False, "citation_count", f"{rel}: {n} distinct references, below the usual {lo}",
+                      ["Check that every key claim has its source; do not add citations to fill a quota."],
+                      severity="warn")
     if hi is not None and n > hi:
         return Result(False, "citation_count", f"{rel}: {n} distinct references, target <= {hi}")
     return Result(True, "citation_count", f"{rel}: {n} distinct references (target {lo}-{hi})")

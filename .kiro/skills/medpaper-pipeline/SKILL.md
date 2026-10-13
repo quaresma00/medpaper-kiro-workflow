@@ -35,6 +35,10 @@ everything that matters.
 Never infer the current stage from the conversation, from which files exist, or from what you
 remember doing. Ask the CLI.
 
+Long gates (S17+, often over two minutes on Windows): run them in the background with
+`python tools/wf.py check --log temp/check.log` (same for `advance`) and poll the log until it
+ends with `[wf] finished rc=N`; do not restart a check that is still running.
+
 ## One engine, many papers
 
 ```

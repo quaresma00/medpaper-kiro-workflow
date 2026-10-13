@@ -119,7 +119,10 @@ def md_wordcount(ctx: Ctx) -> Result:
     lo = ctx.spec_bound("min")
     hi = ctx.spec_bound("max")
     if lo is not None and n < lo:
-        return Result(False, "md_wordcount", f"{rel}: {n} words, target >= {lo}")
+        # 1.8.0 (from Codex 1.11): a minimum is never a reason to pad; it only advises.
+        return Result(False, "md_wordcount", f"{rel}: {n} words, below the usual {lo}",
+                      ["Check that nothing the reader needs is missing; do not add filler."],
+                      severity="warn")
     if hi is not None and n > hi:
         return Result(
             False,

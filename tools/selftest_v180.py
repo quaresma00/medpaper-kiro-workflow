@@ -668,6 +668,18 @@ def run_runtime(tmp: Path, record, section) -> None:
     record("wf check --log writes a UTF-8 log ending with a completion marker",
            log.is_file() and "[wf] finished rc=" in log.read_text(encoding="utf-8"),
            chk.stdout[-200:].decode("utf-8", "replace"))
+    from wfcore.state import State
+    M = tmp / "mig"
+    M.mkdir()
+    mig = State(M, ".wf")
+    mig.create("medpaper", "1.7.3", "S23_package")
+    before = sorted(p.name for p in M.rglob("*") if ".wf" not in p.parts)
+    mig.migrate_pipeline("1.8.0", ["S23_package"])
+    mig.migrate_pipeline("1.8.0", ["S23_package"])
+    kinds = [e.get("kind") for e in mig.data.get("events", [])]
+    record("migrating a 1.7.3 paper records one requirements_added event and touches no paper file",
+           kinds.count("requirements_added") == 1
+           and sorted(p.name for p in M.rglob("*") if ".wf" not in p.parts) == before, str(kinds))
 
 
 def run_review(tmp: Path, record, section) -> None:

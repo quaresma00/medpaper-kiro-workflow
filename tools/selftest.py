@@ -2132,7 +2132,7 @@ def run_codex_integration() -> None:
                f"card must name `{agent}` so the work is not done in the main context")
 
     record("pipeline and skill versions agree",
-           pipe["meta"]["version"] == "1.7.3" and 'version: "2.1.0"' in skill,
+           pipe["meta"]["version"] == "1.8.0" and 'version: "2.1.0"' in skill,
            f'pipeline={pipe["meta"]["version"]}, skill=2.1.0 (Kiro adapter revision)')
     record("all 25 stage cards exist",
            len(pipe["stage"]) == 25 and
@@ -5091,7 +5091,7 @@ def run_v160(tmp: Path) -> None:
            any(g["check"] == "reader_review_coverage" for g in s18["gate"])
            and "reader-inputs" in (ROOT / "pipeline/stages/S18_independent_review.md")
            .read_text(encoding="utf-8"))
-    record("pipeline version is 1.7.3", pipe.meta.get("version") == "1.7.3")
+    record("pipeline version is 1.8.0", pipe.meta.get("version") == "1.8.0")
 
 
 def run_v170(tmp: Path) -> None:
@@ -5707,6 +5707,7 @@ def main() -> int:
     real_before = (_listing(real_root), _listing(real_home))
     os.environ["MEDPAPER_HOME"] = str(tmp / "home")
     os.environ["MEDPAPER_PAPERS_ROOT"] = str(tmp / "papers")
+    os.environ["PYTHONDONTWRITEBYTECODE"] = "1"  # child tools must not leave __pycache__ in the engine
     engine_top_before = sorted(x.name for x in ROOT.iterdir())
     os.environ["MEDPAPER_PROJECT"] = str(proj)
     os.environ["MEDPAPER_ROOT"] = str(ROOT)

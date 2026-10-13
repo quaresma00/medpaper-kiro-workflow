@@ -97,8 +97,25 @@ class State:
                        f"{old_version} -> {pipeline_version}; current {current} -> {self.data['current']}")
             self._note_legacy_revision()
             self._note_on_demand_checklist(old_version)
+            self._note_v180(old_version)
             self.save()
         return changed
+
+    def _note_v180(self, old_version: str) -> None:
+        """1.8.0: record what an in-flight paper must add; never rewrite its files."""
+        try:
+            old = tuple(int(x) for x in old_version.split(".")[:3])
+        except ValueError:
+            old = (0,)
+        if old >= (1, 8, 0) or self.data.get("v180_migration_noted"):
+            return
+        self.data["v180_migration_noted"] = True
+        self.event("requirements_added",
+                   "1.8.0: target_journal.json needs typed 'limits' (journal_limits_met no longer "
+                   "parses guideline prose); rebuild DOCX for page numbers/TAB references/main-only "
+                   "legends; regenerate SUBMISSION_CHECKLIST.md with tools/manuscript/submission_qc.py "
+                   "write; supplementary legends move to the supplementary file; papers before S03/S06 "
+                   "add 'Design precedent' lines. Paper files were not modified.")
 
     def _note_on_demand_checklist(self, old_version: str) -> None:
         """1.7.3: no pre-emptive registration or reporting checklist. Nothing to convert - the

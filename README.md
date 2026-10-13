@@ -2,7 +2,19 @@
 
 一套面向医学与临床研究的 Kiro 工作流。它把“研究想法”推进为经过数据、文献、统计结果、图表、人工复核和期刊规则共同校验的投稿包，而不是只让 AI 一次性写出一篇看似完整的论文。
 
-当前版本：`1.7.3`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE + R 4.3+
+当前版本：`1.8.0`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE + R 4.3+
+
+## 1.8.0 变化（实测反馈 27 条 + 借鉴 Codex 1.9–1.11）
+
+- **Word 构建**：所有 docx 页脚自动 PAGE 页码并审计；参考文献“编号 + Tab + 悬挂缩进”；数字引用合并为 [1–3]；正文图注只放主图，补充图注随补充文件输出；图注前缀/粗体/分图标签大小写/末尾标点、嵌入图、Word 表、补充材料别名（Online Resource n）均由 `target_journal.json` 控制；补充文件默认另出 PDF（`--pdf`），自动加信息页、清除流水线代码与本地路径、代码等宽小字号。
+- **期刊规则结构化**：`limits`（main_text_words、abstract_words、reference_limit、display_items…）取代从指南散文正则抽取；Word 兼容字数（含数字，正文 Introduction–Conclusions）、97% 余量，S23/S25 直接测量最终 docx；S17 起草默认上限（正文 4000、摘要 250）。声明顺序默认 Springer Nature，标题页与正文一致；Discussion 默认无子标题。
+- **refs.bib**：标题专有名词/缩写加 `{}`、ISO 期刊缩写（shortjournal）、文章号、页码完整范围、姓氏前缀保护；S13 新增 `bib_format_clean`。分组引用 `[@a; @b]` 在事实保持比较中等价。
+- **后台语言与缩写**：检测“independent review / earlier draft / reviewer request”等流水线历史表述；缩写分别在摘要、正文、每个表格内检查首次定义和“定义未用”。
+- **修订轮次**：`batch --merge` 并入已封存轮次、`--priority` 挂起当前轮次先做新反馈、`suspend`/`resume --round` 恢复并自动 rebase、`progress` + `resume` 显示中断后的逐条进度；S23 改动冻结/已认证的图表源码在写入（hook）和 `wf run-script` 时立即拦截，`rework.py layout` 开受控版式轮次；相同内容重新冻结无需 `--force`；`08_submission/notes/` 为代理记录目录。
+- **审阅与 QA**：`reader-inputs` 生成与哈希绑定的文本副本，`--delta` 增量复审；`submission_qc.py write` 由实测生成 SUBMISSION_CHECKLIST 和 QC 记录，`submission_checklist_measured` 在 S23/S24/S25 同一清单执行。
+- **设计与运行**：S03/S06 `design_precedent_recorded`（对照、分母、主要结局的先例或方法学理由）；S01/S21 收集编码者资质；输出强制 UTF-8；`wf check/advance --log`；自测解析全部阶段卡命令（修正 `wf loop --to`、删去 `--project project`）。
+- **借鉴 Codex**：最低字数/引用数改为提示不再阻断（不凑数），期刊显式上限仍严格；全文获取失败即停止；pandoc 子进程超时；最终 docx 计数。
+- **进行中的论文**：迁移只记录事件（`requirements_added`），不改论文文件。需要：在 `target_journal.json` 补 `limits`；重建 docx（页码、参考文献格式、主图注）；运行 `submission_qc.py write`；S03/S06 尚未完成的补 `Design precedent`。
 
 ## 1.7.3 变化
 
