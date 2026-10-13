@@ -1512,14 +1512,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("stage", nargs="?")
     p.set_defaults(fn=cmd_card)
 
+    log_help = ("also write the full output (UTF-8) to this file and end it with a "
+                "'[wf] finished rc=N' marker; poll the file when running in the background")
     p = sub.add_parser("check", help="run the gate for a stage without advancing")
     p.add_argument("stage", nargs="?")
     p.add_argument("--json", action="store_true")
+    p.add_argument("--log", type=Path, help=log_help)
     p.set_defaults(fn=cmd_check)
 
     p = sub.add_parser("advance", help="close the current stage and move to the next")
     p.add_argument("--note", help="handoff note (required unless already noted)")
     p.add_argument("--force", action="store_true", help="advance despite a red gate; recorded in state")
+    p.add_argument("--log", type=Path, help=log_help)
     p.set_defaults(fn=cmd_advance)
 
     p = sub.add_parser("loop", help="deliberately return to an earlier stage")
@@ -1575,6 +1579,43 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
+class _Tee:
+    def __init__(self, *streams):
+        self.streams = streams
+
+    def write(self, text):
+        for s in self.streams:
+            s.write(text)
+        return len(text)
+
+    def flush(self):
+        for s in self.streams:
+            s.flush()
+
+
+def _run_logged(args) -> int:
+    """Long gates on Windows are often cut off in the foreground; log to a file that ends with
+    a completion marker so a background run can be polled."""
+    from datetime import datetime, timezone
+    log = args.log.resolve()
+    log.parent.mkdir(parents=True, exist_ok=True)
+    rc = 1
+    with log.open("w", encoding="utf-8") as fh:
+        out, err = sys.stdout, sys.stderr
+        sys.stdout, sys.stderr = _Tee(out, fh), _Tee(err, fh)
+        try:
+            args.log = None
+            rc = args.fn(args)
+        except paths.EngineWorkspace as exc:
+            print(str(exc))
+            rc = 2
+        finally:
+            sys.stdout, sys.stderr = out, err
+            fh.write(f"\n[wf] finished rc={rc} at "
+                     f"{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}\n")
+    return rc
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = build_parser()
     args = ap.parse_args(argv)
@@ -1582,6 +1623,8 @@ def main(argv: list[str] | None = None) -> int:
         ap.error("config set needs KEY and VALUE")
     if args.cmd == "config" and args.action == "get" and not args.key:
         ap.error("config get needs KEY")
+    if getattr(args, "log", None):
+        return _run_logged(args)
     try:
         return args.fn(args)
     except paths.EngineWorkspace as exc:

@@ -10,7 +10,7 @@ the chosen journal's current official instructions.
 ## Procedure
 1. Before delegation, verify that the package still matches the user's freeze:
 ```
-.\.venv\Scripts\python.exe tools/package_review.py verify --project project
+.\.venv\Scripts\python.exe tools/package_review.py verify
 ```
    Stop and return to S24 if any file was added, removed or changed.
 2. Delegate to exactly one independent read-only subagent for this frozen package revision:
@@ -25,7 +25,11 @@ the chosen journal's current official instructions.
    - `08_submission/package_review_freeze.json` and every frozen file listed there;
    - the selected journal metadata, `guidelines_extract.md`, and the cached official author
      instructions;
-   - `bundle/manifest.json`, `SUBMISSION_CHECKLIST.md`, and `submission_qc.md`.
+   - `bundle/manifest.json`, `SUBMISSION_CHECKLIST.md`, and `submission_qc.md` (both measured
+     by `submission_qc.py`; the same rows already passed at S23, so this audit confirms);
+   - hash-bound text copies of every DOCX/XLSX upload for the read-only reviewer, regenerated
+     now: `.\.venv\Scripts\python.exe tools/package_review.py reader-copies` (each copy names
+     its source SHA-256; never hand over an older temp extract).
 3. Require the reviewer to inspect the actual upload files rather than trusting the manifest
    or earlier QA. It must perform all three lenses and report exact locations for every
    actionable finding:
@@ -71,7 +75,7 @@ the chosen journal's current official instructions.
 6. For `REVISE`, summarise the findings, return to S24, correct the package, revalidate it and
    obtain a new explicit user confirmation before auditing the changed freeze:
 ```
-.\.venv\Scripts\python.exe tools/wf.py loop S24_package_human_review --why "<material audit defects requiring correction and renewed user confirmation>"
+.\.venv\Scripts\python.exe tools/wf.py loop --to S24_package_human_review --why "<material audit defects requiring correction and renewed user confirmation>"
 ```
    For `BLOCKED`, ask only for the missing user-owned fact/file. If the package changes, use
    the same S24 loop. Do not repeat an independent audit of an unchanged freeze.

@@ -52,6 +52,8 @@ the effect size and the data's limits are known. This is the last cheap exit.
 - `03_analysis/reproducibility_report.json`
 
 ## Hard rules
+- Carry the `Design precedent` lines into `protocol_final.md` and update them if the final
+  comparator, denominator or primary outcome changed (`design_precedent_recorded`).
 - Do not retro-fit the protocol to make the result look pre-specified. The diff file
   exists so that this is impossible to do accidentally.
 - A `STOP` here is a real outcome. Report it to the user with the reasoning; do not

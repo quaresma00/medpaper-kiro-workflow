@@ -27,13 +27,22 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="versioned S19 scientific-review ZIP")
     parser.add_argument("command", choices=["build", "verify", "reader-inputs"])
     parser.add_argument("--project", type=Path, default=None)
+    parser.add_argument("--delta", action="store_true",
+                        help="reader-inputs: only files changed since the last passing review "
+                             "(plus dependants); unchanged files keep their hash-bound coverage")
     args = parser.parse_args()
     project = paths.paper_from_cli(args.project)
     try:
         if args.command == "reader-inputs":
             # S18: what the independent reviewer must be given, as the block its report embeds.
             from wfcore import readerreview
-            print(readerreview.evidence_block(project))
+            print(readerreview.evidence_block(project, delta=args.delta))
+            copies = readerreview.write_text_copies(project, readerreview.reader_inputs(project))
+            if copies:
+                print("\nRead-only reviewers: hash-bound text copies (regenerated now; the "
+                      "sha256 line must match the block above):")
+                for rel in copies:
+                    print(f"  {project / rel}")
             return 0
         if args.command == "build":
             stage = _current_stage(project)

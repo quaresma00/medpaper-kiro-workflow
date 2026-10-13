@@ -66,9 +66,16 @@ unlooked-at.
    Never omit the supplementary file. Supplementary Methods must contain prose only and no
    Markdown horizontal rules. Put every supplementary table in the separate three-line
    workbook under `04_tables/supplementary/` and list that workbook as a table upload; the
-   supplementary-Methods DOCX audit rejects embedded Word tables. Write
-   `SUBMISSION_CHECKLIST.md` and `manifest.json`;
-   every bundle file is listed with its role and the guideline rule that requires it.
+   supplementary-Methods DOCX audit rejects embedded Word tables. Write `manifest.json`;
+   every bundle file is listed with its role and the guideline rule that requires it. The
+   checklist is **measured, never hand-written**: after every (re)build run
+```
+.\.venv\Scripts\python.exe tools/manuscript/submission_qc.py write
+```
+   which writes `SUBMISSION_CHECKLIST.md` and the measured block of `submission_qc.md` (page
+   numbers, reference format, legends, declarations order, word/reference/display caps,
+   abbreviations, backstage language, SI format). `submission_checklist_measured` regenerates
+   it and fails on any FAIL row or stale/hand-edited file - the same list S25 confirms.
 7. Run the structural Word audit:
 ```
 .\.venv\Scripts\python.exe tools/manuscript/build_docx.py audit --manifest project/08_submission/bundle/manifest.json --style-config project/08_submission/docx_style.json
@@ -108,13 +115,15 @@ unlooked-at.
 9. After visual corrections are complete and the manifest and all DOCX files are final, bind
    their visible text to this legitimate S23 build:
 ```
-.\.venv\Scripts\python.exe tools/package_content.py capture --project project
+.\.venv\Scripts\python.exe tools/package_content.py capture
 ```
    When S23 is being rerun after a source-routed correction, use `--replace`. Capture is refused
    outside S23. This baseline permits later Word layout edits while detecting any direct text
    edit or an upstream source change that was not rebuilt.
 10. Write `submission_qc.md` with `Rendered files inspected`, `Citation and cross-reference
-   checks`, `Typography and hyperlinks`, `Tables and figures`, `Defects resolved`. Record
+   checks`, `Typography and hyperlinks`, `Tables and figures`, `Defects resolved` (your visual
+   findings; the measured block is maintained by `submission_qc.py write`). Plans and working
+   notes go in `08_submission/notes/`, never loose in `08_submission/`. Record
    `submission_files_visually_confirmed YES`, then clean temporary/orphaned files.
 11. Only if `target_journal.json` sets `journal_requires_checklist` (or the study is a
    meta-analysis: PRISMA), write `project/08_submission/reporting_checklist.md` as a

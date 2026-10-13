@@ -268,6 +268,30 @@ def run_word(tmp: Path, record, section) -> None:
            sdoc.is_file() and "Courier New" in _xml(sdoc) and 'w:line="240"' in _xml(sdoc))
     record("audit flags pipeline-internal code in a submission file",
            bool(docxaudit.pipeline_code_problems("import wfcore; MEDPAPER_PROJECT")))
+    # Measured checklist: generated from the files, stale or hand-edited copies fail.
+    from wfcore import submissionqc
+    (p / "08_submission/manuscript").mkdir(parents=True, exist_ok=True)
+    (p / "08_submission/manuscript/full_manuscript.md").write_text(_manuscript(good_decl), encoding="utf-8")
+    (p / "08_submission/bundle/manifest.json").write_text(json.dumps({"items": [
+        {"role": "manuscript", "file": "08_submission/bundle/manuscript.docx", "required_by": "guide"},
+        {"role": "supplementary", "file": "08_submission/bundle/supplementary.docx", "required_by": "guide"},
+        {"role": "checklist", "file": submissionqc.CHECKLIST_REL, "required_by": "guide"}]}),
+        encoding="utf-8")
+    wrote = subprocess.run([sys.executable, str(ROOT / "tools/manuscript/submission_qc.py"), "write"],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
+    ctx = Ctx(pipeline=pipe, state=State(p, ".wf").load(), project=p, stage=pipe.stage("S23_package"),
+              spec={"check": "submission_checklist_measured"})
+    after_write = submissionqc.verify(ctx)
+    cl = p / submissionqc.CHECKLIST_REL
+    text_cl = cl.read_text(encoding="utf-8") if cl.is_file() else ""
+    record("submission_qc.py writes a measured checklist (page numbers, references, legends ...)",
+           "Automatic page numbers in every DOCX footer | PASS" in text_cl
+           and "References: number + TAB" in text_cl
+           and not any("not the current measurement" in x or "stale" in x for x in after_write),
+           (wrote.stdout + wrote.stderr)[-300:] + str(after_write)[:200])
+    cl.write_text(text_cl.replace("| FAIL |", "| PASS |") + "\n- [x] page numbers added\n", encoding="utf-8")
+    record("a hand-ticked or stale checklist fails submission_checklist_measured",
+           any("not the current measurement" in x for x in submissionqc.verify(ctx)))
 
 
 def run_facts(tmp: Path, record, section) -> None:
@@ -553,8 +577,153 @@ def run_rework(tmp: Path, record, section) -> None:
            fz.get("restamps") and fz["restamps"][-1]["from"] == first, str(fz.get("restamps")))
 
 
+CARD_CMD_RE = __import__("re").compile(
+    r"^(?:\.\\\.venv\\Scripts\\python\.exe|python)\s+(tools[/\\][\w/\\.]+\.py)\s*(.*)$")
+
+
+def card_commands() -> list[tuple[str, str, str]]:
+    """(card, tool, argument string) for every engine command shown in a stage card."""
+    import re
+    out = []
+    for card in sorted((ROOT / "pipeline/stages").glob("*.md")):
+        text = card.read_text(encoding="utf-8")
+        lines = [ln.strip() for block in re.findall(r"```[^\n]*\n(.*?)```", text, re.S)
+                 for ln in block.splitlines()]
+        lines += re.findall(r"`(\.\\\.venv\\Scripts\\python\.exe tools/[^`]+)`", text)
+        for line in lines:
+            m = CARD_CMD_RE.match(line)
+            if m:
+                args = re.sub(r"\s+#\s.*$", "", m.group(2))  # trailing shell comment
+                out.append((card.name, m.group(1).replace("\\", "/"), args))
+    return out
+
+
+def parse_card_command(tool: str, argstr: str) -> str | None:
+    """Parse the arguments with the tool's real argparse definition; None when valid."""
+    import argparse
+    import contextlib
+    import io
+    import re
+    import runpy
+    import shlex
+    tokens = [re.sub(r"<[^>]*>", "X", t) for t in shlex.split(argstr.replace("\\", "/"))]
+
+    class Parsed(Exception):
+        pass
+    original = argparse.ArgumentParser.parse_args
+
+    def fake(self, args=None, namespace=None):
+        original(self, tokens, namespace)
+        raise Parsed
+    err = io.StringIO()
+    argparse.ArgumentParser.parse_args = fake
+    try:
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            if tool == "tools/wf.py":
+                from wfcore import cli
+                cli.main(tokens)
+            else:
+                runpy.run_path(str(ROOT / tool), run_name="cardcheck")["main"]()
+    except Parsed:
+        return None
+    except SystemExit:
+        return err.getvalue().strip().splitlines()[-1] if err.getvalue().strip() else "exit"
+    except Exception as exc:  # noqa: BLE001
+        return f"{type(exc).__name__}: {exc}"
+    finally:
+        argparse.ArgumentParser.parse_args = original
+    return "main() returned without parsing arguments"
+
+
+def run_runtime(tmp: Path, record, section) -> None:
+    section("1.8.0 runtime: stage-card commands match the CLI, UTF-8, --log")
+    cmds = card_commands()
+    bad = []
+    for card, tool, argstr in cmds:
+        if not (ROOT / tool).is_file():
+            bad.append(f"{card}: {tool} does not exist")
+            continue
+        problem = parse_card_command(tool, argstr)
+        if problem:
+            bad.append(f"{card}: {tool} {argstr[:60]} -> {problem[:120]}")
+    record(f"all {len(cmds)} engine commands in the stage cards parse with the real CLI",
+           len(cmds) > 40 and not bad, "; ".join(bad[:6]))
+    record("the S25 card returns to S24 with `wf loop --to` (no positional stage)",
+           "loop --to S24_package_human_review" in
+           (ROOT / "pipeline/stages/S25_submission_audit.md").read_text(encoding="utf-8"))
+    P = _rw_paper(tmp / "rt", "S03_protocol")
+    env = {**os.environ, "MEDPAPER_PROJECT": str(P), "MEDPAPER_ROOT": str(ROOT)}
+    env.pop("PYTHONIOENCODING", None)
+    why = "用户选择该期刊：范围匹配，近期发表过同类公开数据库研究，审稿周期可接受，费用在预算内。" * 2
+    log = P / "temp/check.log"
+    proc = subprocess.run([sys.executable, str(ROOT / "tools/wf.py"), "decide", "journal_note", "X",
+                           "--why", why], capture_output=True, env=env)
+    chk = subprocess.run([sys.executable, str(ROOT / "tools/wf.py"), "check", "--log", str(log)],
+                         capture_output=True, env=env)
+    handoff = (P / ".wf/state.json").read_text(encoding="utf-8")
+    record("Chinese --why text is stored and printed as UTF-8 even without PYTHONIOENCODING",
+           proc.returncode == 0 and why in handoff and
+           (why in proc.stdout.decode("utf-8", "strict") or proc.stdout.decode("utf-8", "strict") != ""),
+           proc.stdout[-200:].decode("utf-8", "replace"))
+    record("wf check --log writes a UTF-8 log ending with a completion marker",
+           log.is_file() and "[wf] finished rc=" in log.read_text(encoding="utf-8"),
+           chk.stdout[-200:].decode("utf-8", "replace"))
+
+
+def run_review(tmp: Path, record, section) -> None:
+    from wfcore import readerreview as rr
+    section("1.8.0 review: hash-bound text copies, delta re-review, design precedent")
+    p, _ = _paper(tmp / "review", None)
+    plan = json.loads((p / "01_protocol/artifact_plan.json").read_text(encoding="utf-8"))
+    plan["supp_figures"], plan["supp_tables"] = [], []
+    (p / "01_protocol/artifact_plan.json").write_text(json.dumps(plan), encoding="utf-8")
+    (p / "07_manuscript/full_manuscript.md").write_text("# T\n\nText.\n", encoding="utf-8")
+    sections = "".join(f"\n## {h}\n" + "The reviewer read the text, tables and figures carefully. " * 3 + "\n"
+                       for h in rr.SECTIONS)
+
+    def report(block: str) -> None:
+        (p / rr.REVIEW_REL).write_text("# Review\n\n## Verdict\nREADY\n" + sections + "\n" + block + "\n",
+                                       encoding="utf-8")
+    report(rr.evidence_block(p))
+    full_ok = not rr.verify(p)
+    copies = rr.write_text_copies(p, rr.reader_inputs(p))
+    txt = (p / copies[0]).read_text(encoding="utf-8") if copies else ""
+    record("reviewers get hash-bound text copies of workbooks",
+           copies and "# sha256: " in txt and "Characteristic" in txt, str(copies))
+    from openpyxl import load_workbook
+    wb = load_workbook(p / "04_tables/main/Table1.xlsx")
+    wb.active["B2"] = "62.4"
+    wb.save(p / "04_tables/main/Table1.xlsx")
+    stale = rr.verify(p)
+    delta = rr.delta_inputs(p)
+    report(rr.evidence_block(p, delta=True))
+    delta_ok = not rr.verify(p)
+    record("a small change re-reviews only the changed file; unchanged coverage is kept",
+           full_ok and stale and "04_tables/main/Table1.xlsx" in delta
+           and len(delta) < len(rr.reader_inputs(p)) and delta_ok,
+           f"{stale} {list(delta)}")
+    wb.active["B2"] = "62.9"
+    wb.save(p / "04_tables/main/Table1.xlsx")
+    record("a delta review that misses a changed file still fails", bool(rr.verify(p)))
+    rr.write_text_copies(p, [])
+    record("stale text copies are removed when regenerated", not list((p / rr.TEXT_DIR_REL).glob("*.txt")))
+    proto = p / "01_protocol/protocol_v1.md"
+    proto.write_text("# Design precedent\n- Comparator: precedent yes - PMID 31234567\n"
+                     "- Denominator: precedent no - justification: device-level reports have no exposure "
+                     "denominator, so proportions of reports are used\n", encoding="utf-8")
+    bad = _gate(p, "design_precedent_recorded", "S03_protocol", path="01_protocol/protocol_v1.md")
+    proto.write_text(proto.read_text(encoding="utf-8") +
+                     "- Primary outcome: precedent yes - [@alpha2020]\n", encoding="utf-8")
+    good = _gate(p, "design_precedent_recorded", "S03_protocol", path="01_protocol/protocol_v1.md")
+    record("design precedent: comparator, denominator and primary outcome each need precedent or defence",
+           not bad.ok and "primary outcome" in bad.detail.lower() and good.ok,
+           bad.detail + " | " + good.detail)
+
+
 def run(tmp: Path, record, section) -> None:
     tmp.mkdir(parents=True, exist_ok=True)
+    run_review(tmp, record, section)
+    run_runtime(tmp, record, section)
     run_rework(tmp, record, section)
     run_word(tmp, record, section)
     run_facts(tmp, record, section)

@@ -15,6 +15,11 @@ edits them. This is an independent scientific/editorial audit, not another writi
 ```
    It prints a fenced `json` block (`reviewed_artifacts`: path -> SHA-256). Give the reviewer
    exactly those files, figures included; a review that never saw the figures cannot pass.
+   For workbooks it also writes hash-bound text copies under `.wf/review_text/` (regenerated
+   every call; give the read-only reviewer these, never an older extract).
+   **Delta re-review** after a small revision: `reader-inputs --delta` lists only the files
+   changed since the last passing review plus their dependants (`"mode": "delta"`); the
+   reviewer reads those, and unchanged files keep the earlier coverage, bound by hash.
 2. Delegate to exactly one independent subagent - **the `medpaper-reviewer` agent** - which
    must not edit files, run commands or advance a stage. It is declared `tools: ["read"]`, so
    that is structural rather than a request; do not grant it more. Give it the frozen paths

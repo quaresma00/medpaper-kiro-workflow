@@ -166,6 +166,40 @@ def notes_populated(ctx: Ctx) -> Result:
     return Result(True, "notes_populated", f"{rel}: all {len(required)} note section(s) substantive")
 
 
+PRECEDENT_ITEMS = ("comparator", "denominator", "primary outcome")
+PRECEDENT_RE = re.compile(
+    r"(?im)^\s*[-*]?\s*(comparator|denominator|primary\s+outcome)[^:\n]*:\s*"
+    r"(precedent\s+yes|precedent\s+no|not\s+applicable)\b(.*)$")
+
+
+@check("design_precedent_recorded")
+def design_precedent_recorded(ctx: Ctx) -> Result:
+    """Key design choices carry a literature precedent or an explicit methodological defence."""
+    rel = ctx.spec["path"]
+    if not ctx.p(rel).is_file():
+        return Result(False, "design_precedent_recorded", f"{rel} missing")
+    found: dict[str, tuple[str, str]] = {}
+    for m in PRECEDENT_RE.finditer(ctx.read(rel)):
+        found[re.sub(r"\s+", " ", m.group(1).lower())] = (m.group(2).lower(), m.group(3))
+    problems = []
+    for item in PRECEDENT_ITEMS:
+        if item not in found:
+            problems.append(f"no '{item.capitalize()}: precedent yes|no' line")
+            continue
+        verdict, rest = found[item]
+        if verdict.endswith("yes") and not re.search(r"\b\d{7,8}\b|10\.\d{4,}/|\[@", rest):
+            problems.append(f"{item}: precedent yes needs a PMID, DOI or [@citekey]")
+        elif not verdict.endswith("yes") and len(re.sub(r"(?i)^\W*justification\s*:", "", rest).strip()) < 20:
+            problems.append(f"{item}: no precedent needs a methodological justification (>= 20 chars)")
+    if problems:
+        return Result(False, "design_precedent_recorded", f"{rel}: " + "; ".join(problems),
+                      ["Add a 'Design precedent' section: one line each for Comparator, Denominator "
+                       "and Primary outcome - 'precedent yes - <PMID/DOI>' or 'precedent no - "
+                       "justification: <why this choice is still sound>'."])
+    return Result(True, "design_precedent_recorded",
+                  "comparator, denominator and primary outcome each have a precedent or a defence")
+
+
 @check("no_ai_boilerplate")
 def no_ai_boilerplate(ctx: Ctx) -> Result:
     rel = ctx.spec["path"]

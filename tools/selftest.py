@@ -2172,7 +2172,7 @@ def run_codex_integration() -> None:
            "Freeze ID: <freeze_id>" in final_audit_card and
            "allowed = [\"PASS\"]" in
            (ROOT / "pipeline/pipeline.toml").read_text(encoding="utf-8") and
-           "loop S24_package_human_review" in final_audit_card,
+           "loop --to S24_package_human_review" in final_audit_card,
            "user confirmation -> immutable freeze -> one guideline audit -> PASS or S24 loop")
     final_headings = next(g for g in final_audit["gate"]
                           if g["check"] == "md_sections")["headings"]

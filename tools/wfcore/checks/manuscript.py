@@ -452,6 +452,20 @@ def _audit_docx(path: Path, style: dict, role: str,
     return problems
 
 
+@check("submission_checklist_measured")
+def submission_checklist_measured(ctx: Ctx) -> Result:
+    """SUBMISSION_CHECKLIST.md and the submission_qc.md measured block equal a fresh
+    measurement of the current files, and no measured row fails (S23 pre-audit = S25 list)."""
+    from .. import submissionqc
+    problems = submissionqc.verify(ctx)
+    if problems:
+        return Result(False, "submission_checklist_measured", "; ".join(problems[:6]),
+                      ["Fix the source or builder, rebuild, then: .venv/Scripts/python.exe "
+                       "tools/manuscript/submission_qc.py write", "Never tick a checklist item by hand."])
+    return Result(True, "submission_checklist_measured",
+                  "checklist and QC record match the current measured files; every row passes")
+
+
 @check("docx_bundle_ready")
 def docx_bundle_ready(ctx: Ctx) -> Result:
     manifest_rel = "08_submission/bundle/manifest.json"

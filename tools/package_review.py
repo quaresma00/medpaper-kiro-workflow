@@ -15,12 +15,25 @@ from wfcore.packagefreeze import FREEZE_REL, verify_freeze, write_freeze  # noqa
 def main() -> int:
     parser = argparse.ArgumentParser(description="freeze and verify final submission-review inputs")
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("freeze", "verify"):
+    for name in ("freeze", "verify", "reader-copies"):
         command = sub.add_parser(name)
         command.add_argument("--project", type=Path, default=None)
         command.add_argument("--freeze", type=Path)
     args = parser.parse_args()
     project = wfpaths.paper_from_cli(args.project)
+    if args.command == "reader-copies":
+        # S25: read-only auditors get hash-bound text copies of every DOCX/XLSX upload.
+        import json
+        from wfcore.readerreview import write_text_copies
+        try:
+            manifest = json.loads((project / "08_submission/bundle/manifest.json")
+                                  .read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            print(f"package review error: {exc}", file=sys.stderr)
+            return 2
+        for rel in write_text_copies(project, [str(i.get("file", "")) for i in manifest.get("items", [])]):
+            print(project / rel)
+        return 0
     try:
         freeze = (wfpaths.output_within(project, args.freeze) if args.freeze
                   else project / Path(FREEZE_REL))

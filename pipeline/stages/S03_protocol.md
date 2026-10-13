@@ -22,6 +22,15 @@ pre-specified rather than fitted to whatever happened to be significant.
      will run, and what constitutes the primary result. Pre-specify it now.
    - `Sample size / power`: if the dataset is fixed, state the precision it affords
      rather than pretending to a prospective calculation.
+   - `Design precedent` (one PubMed search, not a review): for the **comparator**, the
+     **denominator** and the **primary outcome definition** write one line each,
+     `- Comparator: precedent yes - <PMID/DOI/[@key]>` or
+     `- Comparator: precedent no - justification: <methodological reason>`. A choice with no
+     precedent is allowed; an undefended one is what reviewers attack at submission.
+     `design_precedent_recorded` checks the three lines here and again at S06.
+   - If any variable is coded or adjudicated by people, name each coder/adjudicator role with
+     specialty and years of experience under `Variables` now (they are needed in Methods and
+     cannot be reconstructed later).
 3. Write `project/02_data/acquisition_plan.md` with exactly these headings:
    `Source`, `Access route`, `Licence and ethics`, `Protocol-defined data universe`,
    `Exact retrieval steps`, `Pagination and completeness proof`, `Expected shape`,

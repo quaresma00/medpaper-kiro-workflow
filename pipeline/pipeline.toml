@@ -188,6 +188,9 @@ check = "md_sections"
 path = "01_protocol/protocol_v1.md"
 headings = ["Objective", "Design", "Population and eligibility", "Variables", "Statistical analysis plan", "Sample size / power", "Ethics"]
 [[stage.gate]]
+check = "design_precedent_recorded"
+path = "01_protocol/protocol_v1.md"
+[[stage.gate]]
 check = "md_sections"
 path = "02_data/acquisition_plan.md"
 headings = ["Source", "Access route", "Licence and ethics", "Protocol-defined data universe", "Exact retrieval steps", "Pagination and completeness proof", "Expected shape", "Known limitations"]
@@ -274,6 +277,9 @@ check = "analysis_reproduces"
 check = "md_sections"
 path = "01_protocol/protocol_final.md"
 headings = ["Objective", "Design", "Population and eligibility", "Variables", "Statistical analysis plan", "Sample size / power", "Ethics", "Deviations from protocol v1"]
+[[stage.gate]]
+check = "design_precedent_recorded"
+path = "01_protocol/protocol_final.md"
 [[stage.gate]]
 check = "decision_recorded"
 name = "analysis_converged"
@@ -774,6 +780,8 @@ check = "docx_bundle_ready"
 [[stage.gate]]
 check = "journal_limits_met"
 [[stage.gate]]
+check = "submission_checklist_measured"
+[[stage.gate]]
 check = "supplementary_methods_clean"
 [[stage.gate]]
 check = "reference_provenance"
@@ -832,6 +840,8 @@ headings = ["Package presented", "User modifications", "Revalidation", "User con
 check = "bundle_complete"
 [[stage.gate]]
 check = "docx_bundle_ready"
+[[stage.gate]]
+check = "submission_checklist_measured"
 [[stage.gate]]
 check = "reference_provenance"
 live = true
@@ -895,6 +905,8 @@ check = "submission_audit_matches_freeze"
 path = "08_submission/independent_submission_audit.md"
 [[stage.gate]]
 check = "journal_limits_met"
+[[stage.gate]]
+check = "submission_checklist_measured"
 [[stage.gate]]
 check = "revision_rounds_closed"
 [[stage.gate]]

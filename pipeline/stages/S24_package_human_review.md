@@ -39,7 +39,7 @@ approves the exact visible files.
    feedback history. Token pressure is not permission to reduce or skip requested work.
 3. When the user has already edited files, identify which bundle files changed and run:
 ```
-.\.venv\Scripts\python.exe tools/package_content.py verify --project project
+.\.venv\Scripts\python.exe tools/package_content.py verify
 ```
    A passing visible-text baseline proves a DOCX change was formatting-only. If it fails,
    reconcile the changed wording back to its owning source in a revision round, rebuild the
@@ -64,7 +64,7 @@ approves the exact visible files.
    Continue only after an explicit affirmative answer such as `OK`, `确认` or `可以`.
 8. Freeze the exact reviewed bundle and its journal/source evidence:
 ```
-.\.venv\Scripts\python.exe tools/package_review.py freeze --project project
+.\.venv\Scripts\python.exe tools/package_review.py freeze
 ```
    Record the package file count, freeze timestamp and `freeze_id` under `Frozen package`,
    then record:

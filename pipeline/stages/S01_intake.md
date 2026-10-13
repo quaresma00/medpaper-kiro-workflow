@@ -46,6 +46,9 @@ later stage argues against the same target instead of a remembered paraphrase.
 - `03_analysis/notes.md`
 
 ## Hard rules
+- If people will code, classify or adjudicate any variable, ask now in the same question who
+  they are: role, specialty and years of experience for each coder and the adjudicator.
+  Record it in `idea.json` (`human_coders`); Methods needs it and it cannot be reconstructed later.
 - No literature search yet. That is S02, and it must be recorded through the PubMed client.
 - Do not write any manuscript prose in this stage.
 
