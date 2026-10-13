@@ -64,7 +64,7 @@ def measure(ctx) -> list[dict]:
         text = "\n".join(t for t, _, _ in docxaudit.paragraphs(root))
         code += [f"{path.name}: {p}" for p in docxaudit.pipeline_code_problems(text)]
         if role == "manuscript":
-            refs += docxaudit.reference_problems(root)
+            refs += docxaudit.reference_problems(root, spec["reference_separator"])
             legends += docxaudit.legend_problems(root, spec["main_figures"], 10 ** 6,
                                                  supplementary=spec["supp_figures"])
             legends += docxaudit.legend_style_problems(root, spec["legend_style"])
@@ -72,7 +72,8 @@ def measure(ctx) -> list[dict]:
     names = ", ".join(f"{p.name}@{_sha(p)}" for _, p in docs)
     row("Automatic page numbers in every DOCX footer", pages, names or "no DOCX", na=not docs)
     has_ms = any(r == "manuscript" for r, _ in docs)
-    row("References: number + TAB, hanging indent, no dangling separators", refs,
+    row("References: number + one space (no TAB/hanging indent unless the journal sets "
+        "reference_separator \"tab\"), no dangling separators", refs,
         "manuscript references formatted", na=not has_ms)
     row("Figure legends: main figures only, journal legend style, display switches", legends,
         "consistent with target_journal.json", na=not has_ms)

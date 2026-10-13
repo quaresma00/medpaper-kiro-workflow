@@ -301,16 +301,19 @@ def _set_run(run, font: str, size: float) -> None:
             color.attrib.pop(qn(f"w:{attr}"), None)
 
 
-def _format_references(doc, font: str, size: float) -> None:
-    """Number + TAB + hanging indent for every bibliography entry (EndNote/Zotero layout)."""
+def _format_references(doc, font: str, size: float, separator: str = "space") -> None:
+    """Bibliography lead is "N. " + entry (one space, plain left-aligned paragraph). Only when
+    the journal sets reference_separator "tab": number + TAB + hanging indent."""
+    tab = separator == "tab"
     entries = [p for p in doc.paragraphs if p.style is not None and p.style.name == "Bibliography"]
     for p in entries:
-        pf = p.paragraph_format
-        pf.left_indent = Inches(0.5)
-        pf.first_line_indent = Inches(-0.5)
-        pf.tab_stops.add_tab_stop(Inches(0.5))
+        if tab:
+            pf = p.paragraph_format
+            pf.left_indent = Inches(0.5)
+            pf.first_line_indent = Inches(-0.5)
+            pf.tab_stops.add_tab_stop(Inches(0.5))
         # Pandoc writes the citation number and the entry as adjacent runs, with or without a
-        # space between them. Rebuild the lead as "N." + TAB.
+        # space (or TAB) between them. Rebuild the lead as "N. " (or "N." + TAB).
         runs = list(p.runs)
         text = "".join(r.text for r in runs)
         m = re.match(r"^\s*(\[\d+\]|\d+\.?)[ \t\u00a0]*", text)
@@ -335,9 +338,15 @@ def _format_references(doc, font: str, size: float) -> None:
             if child.tag != qn("w:rPr"):
                 new.remove(child)
         t = OxmlElement("w:t")
-        t.text = label
+        t.text = label if tab else label + " "
+        t.set(qn("xml:space"), "preserve")
         new.append(t)
-        new.append(OxmlElement("w:tab"))
+        if tab:
+            new.append(OxmlElement("w:tab"))
+        else:
+            for r in p.runs:  # the entry itself must not carry a TAB either
+                if "\t" in r.text:
+                    r.text = r.text.replace("\t", " ")
         lead.addprevious(new)
 
 
@@ -368,7 +377,8 @@ def _add_page_numbers(doc, font: str, size: float) -> None:
             _set_run(run, font, size)
 
 
-def normalize_docx(path: Path, style: dict, kind: str, *, legend_bold: bool = True) -> None:
+def normalize_docx(path: Path, style: dict, kind: str, *, legend_bold: bool = True,
+                   reference_separator: str = "space") -> None:
     doc = Document(path)
     font = str(style["font_family"])
     body_pt = float(style["body_font_pt"])
@@ -442,7 +452,7 @@ def normalize_docx(path: Path, style: dict, kind: str, *, legend_bold: bool = Tr
         p.paragraph_format.space_after = Pt(after)
         for run in p.runs:
             _set_run(run, font, size)
-    _format_references(doc, font, body_pt)
+    _format_references(doc, font, body_pt, reference_separator)
     _add_page_numbers(doc, font, body_pt)
 
     margin = Inches(float(style["margins_in"]))
@@ -914,7 +924,8 @@ def build(args) -> int:
             run_pandoc(rendered, args.output, args.bibliography,
                        collapsing_csl(args.csl, workdir))
         normalize_docx(args.output, style, args.kind,
-                       legend_bold=bool(spec["legend_style"].get("bold", True)))
+                       legend_bold=bool(spec["legend_style"].get("bold", True)),
+                       reference_separator=spec["reference_separator"])
         problems = audit_docx(args.output, style, args.kind,
                               planned_figure_ids() if args.kind == "manuscript" else None,
                               figure_legend_cap(), spec)

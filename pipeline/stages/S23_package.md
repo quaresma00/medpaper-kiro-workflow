@@ -37,8 +37,9 @@ unlooked-at.
    source/output receipt under `08_submission/build_receipts/`; S23 refuses to capture a
    baseline without it. The receipt is evidence, not an upload item, and is frozen with S24.
    The builder applies `target_journal.json` on a temporary render copy (sources are never
-   rewritten): automatic page numbers in every footer, references as number + TAB with a
-   hanging indent, numeric citations collapsed to ranges, `legend_style`, `embed_figures`,
+   rewritten): automatic page numbers in every footer, references as `1. Author...` (number,
+   period, one space; no TAB, no hanging indent unless the journal requires
+   `"reference_separator": "tab"`), numeric citations collapsed to ranges, `legend_style`, `embed_figures`,
    `word_tables`. Main-text Figure legends hold main figures only; the supplementary build
    appends the Figure S* legends from `legends.md`, an information page (title, journal,
    authors, corresponding author) and strips engine plumbing and local paths from code.

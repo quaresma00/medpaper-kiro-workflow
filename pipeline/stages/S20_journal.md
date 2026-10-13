@@ -45,6 +45,7 @@ then freeze its actual author instructions and Word-format rules.
 "embed_figures": false, "word_tables": false,
 "legend_style": {"prefix": "Figure", "bold": true, "panel_label_case": "any", "end_punctuation": "any"},
 "supplementary_aliases": {"Online Resource 1": ["Supplementary Methods", "Table S1"]},
+"reference_separator": "space",
 "si_format": "pdf",
 "evidence_sources": {"official": ["<publisher/Clarivate URL>"], "third_party": ["<e.g. LetPub URL>"]}
 ```

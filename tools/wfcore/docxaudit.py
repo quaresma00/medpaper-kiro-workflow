@@ -53,6 +53,7 @@ def audit_spec(project: Path) -> dict:
     target = journalspec.load(project)
     counts = plan_counts(project)
     return {"legend_style": journalspec.legend_style(target),
+            "reference_separator": journalspec.reference_separator(target),
             "embed_figures": target.get("embed_figures") is True,
             "word_tables": target.get("word_tables") is True,
             "main_figures": counts["main_figures"], "supp_figures": counts["supp_figures"],
@@ -156,11 +157,26 @@ def legend_style_problems(root, style: dict) -> list[str]:
     return sorted(set(problems))
 
 
-def reference_problems(root) -> list[str]:
-    """Numbered entries use number + TAB with a hanging indent; no dangling colon."""
+def reference_problems(root, separator: str = "space") -> list[str]:
+    """Numbered entries use "N. " + text (one space, no TAB) by default, or number + TAB with a
+    hanging indent when the journal sets reference_separator "tab"; no dangling colon."""
     problems: list[str] = []
     entries = [p for t, s, p in paragraphs(root) if t and s == "Bibliography"]
     if not entries:
+        return problems
+    if separator != "tab":
+        for p in entries:
+            if p.find(".//w:r/w:tab", NS) is not None or "\t" in _ptext(p):
+                problems.append("reference entries contain a TAB; use the number + one space")
+                break
+        for p in entries:
+            if re.match(r"^\s*(\[\d+\]|\d+\.)(?:\s{2,}|\u00a0)", _ptext(p)):
+                problems.append("reference number is followed by more than one space")
+                break
+        for p in entries:
+            if re.search(r"(?<=[\d)])\s*[:;]\s*\.?\s*(?:doi\b|$)", _ptext(p), re.I):
+                problems.append(f"reference has a dangling ':' or ';' with no pages: {_ptext(p)[:80]}")
+                break
         return problems
     for p in entries:
         ind = p.find("w:pPr/w:ind", NS)
@@ -232,7 +248,8 @@ def extra_problems(name: str, xmls: dict[str, bytes], root, role: str, spec: dic
     """Everything 1.8.0 added: page numbers, references, legends, displays, SI hygiene."""
     out = [f"{name}: {p}" for p in footer_page_problems(xmls)]
     if role == "manuscript":
-        out += [f"{name}: {p}" for p in reference_problems(root)]
+        out += [f"{name}: {p}" for p in reference_problems(
+            root, (spec or {}).get("reference_separator", "space"))]
         if spec is not None:
             out += [f"{name}: {p}" for p in legend_style_problems(root, spec["legend_style"])]
             out += [f"{name}: {p}" for p in display_problems(root, spec, role)]

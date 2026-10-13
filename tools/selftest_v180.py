@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import zipfile
@@ -193,9 +194,15 @@ def run_word(tmp: Path, record, section) -> None:
     record("every DOCX footer carries an automatic PAGE field",
            "PAGE" in _xml(out, "footers") and "footerReference" in doc)
     root = ET.fromstring(doc.encode("utf-8"))
-    record("reference entries are number + TAB with a hanging indent",
-           not docxaudit.reference_problems(root) and "w:hanging" in doc and "<w:tab/>" in doc,
-           str(docxaudit.reference_problems(root)))
+    bib = [bp for bp in root.iter(f"{{{docxaudit.W}}}p")
+           if bp.find(f"{{{docxaudit.W}}}pPr/{{{docxaudit.W}}}pStyle[@{{{docxaudit.W}}}val='Bibliography']")
+           is not None]
+    bib_xml = "".join(ET.tostring(bp, encoding="unicode") for bp in bib)
+    record("reference entries are 'N. ' + text: one space, no TAB, no hanging indent",
+           bool(bib) and not docxaudit.reference_problems(root) and "w:hanging" not in bib_xml
+           and "w:tab" not in bib_xml and "\t" not in bib_xml
+           and all(re.match(r"^\d+\. \S", docxaudit._ptext(bp)) for bp in bib),
+           str(docxaudit.reference_problems(root)) + " | " + (docxaudit._ptext(bib[0])[:40] if bib else "no entries"))
     record("adjacent citations collapse to a range through the CSL patch",
            "[1\u20133]" in text or "[1-3]" in text, [ln for ln in text.splitlines() if "[1" in ln][:2].__str__())
     record("legend label/panel style follows legend_style (Fig. 1, lower-case panels)",
@@ -217,9 +224,23 @@ def run_word(tmp: Path, record, section) -> None:
         '<w:p><w:pPr><w:pStyle w:val="Bibliography"/></w:pPr><w:r><w:t>1. Doe J. Title. '
         'J Med. 2020;12:.</w:t></w:r></w:p></w:body></w:document>')
     issues = docxaudit.reference_problems(bad_ref)
-    record("audit rejects space-separated numbers, no hanging indent and dangling colons",
-           any("hanging" in i for i in issues) and any("TAB" in i for i in issues)
-           and any("dangling" in i for i in issues), str(issues))
+    record("audit accepts 'N. ' + text and rejects dangling colons",
+           issues and all("dangling" in i for i in issues), str(issues))
+    def _ref(body):
+        return ET.fromstring(
+            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'
+            '<w:p><w:pPr><w:pStyle w:val="Bibliography"/></w:pPr>' + body + '</w:p></w:body></w:document>')
+    tabbed = _ref('<w:r><w:t>1.</w:t><w:tab/><w:t>Doe J. Title. J Med. 2020;12:1-9.</w:t></w:r>')
+    spaced = _ref('<w:r><w:t xml:space="preserve">1.   Doe J. Title. J Med. 2020;12:1-9.</w:t></w:r>')
+    record("audit rejects a TAB and multiple spaces after the reference number",
+           any("TAB" in i for i in docxaudit.reference_problems(tabbed))
+           and any("more than one space" in i for i in docxaudit.reference_problems(spaced)),
+           str(docxaudit.reference_problems(tabbed) + docxaudit.reference_problems(spaced)))
+    record("reference_separator 'tab' is opt-in and then needs number + TAB + hanging indent",
+           journalspec.reference_separator({}) == "space"
+           and journalspec.reference_separator({"reference_separator": "tab"}) == "tab"
+           and any("hanging" in i for i in docxaudit.reference_problems(tabbed, "tab"))
+           and any("not a TAB" in i for i in docxaudit.reference_problems(bad_ref, "tab")))
     # Supplementary legends travel with the supplementary file, never the main text.
     with_supp = _manuscript(good_decl) + "\n## Figure S1.\nSensitivity analysis layout for the supplementary comparison only.\n"
     root2 = ET.fromstring(doc.encode("utf-8"))
@@ -286,7 +307,7 @@ def run_word(tmp: Path, record, section) -> None:
     text_cl = cl.read_text(encoding="utf-8") if cl.is_file() else ""
     record("submission_qc.py writes a measured checklist (page numbers, references, legends ...)",
            "Automatic page numbers in every DOCX footer | PASS" in text_cl
-           and "References: number + TAB" in text_cl
+           and "References: number + one space" in text_cl
            and not any("not the current measurement" in x or "stale" in x for x in after_write),
            (wrote.stdout + wrote.stderr)[-300:] + str(after_write)[:200])
     cl.write_text(text_cl.replace("| FAIL |", "| PASS |") + "\n- [x] page numbers added\n", encoding="utf-8")

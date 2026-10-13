@@ -17,6 +17,7 @@ medical-journal default, so the same code serves every paper and journal.
       "legend_style": {"prefix": "Fig.", "bold": true, "panel_label_case": "lower",
                        "end_punctuation": "."},
       "supplementary_aliases": {"Online Resource 1": ["Supplementary Methods", "Table S1"]},
+      "reference_separator": "space",
       "si_format": "pdf",
       "evidence_sources": {"official": [...], "third_party": [...]}
     }
@@ -145,6 +146,12 @@ def legend_style(target: dict) -> dict:
     if style["prefix"] not in ("Figure", "Fig.", "Fig"):
         style["prefix"] = "Figure"
     return style
+
+
+def reference_separator(target: dict) -> str:
+    """'space' (default: "1. Author ...") or 'tab' (number + TAB + hanging indent) only when
+    the journal explicitly requires it."""
+    return "tab" if str(target.get("reference_separator", "")).strip().casefold() == "tab" else "space"
 
 
 def supplementary_aliases(target: dict) -> dict[str, list[str]]:

@@ -6,7 +6,7 @@
 
 ## 1.8.0 变化（实测反馈 27 条 + 借鉴 Codex 1.9–1.11）
 
-- **Word 构建**：所有 docx 页脚自动 PAGE 页码并审计；参考文献“编号 + Tab + 悬挂缩进”；数字引用合并为 [1–3]；正文图注只放主图，补充图注随补充文件输出；图注前缀/粗体/分图标签大小写/末尾标点、嵌入图、Word 表、补充材料别名（Online Resource n）均由 `target_journal.json` 控制；补充文件默认另出 PDF（`--pdf`），自动加信息页、清除流水线代码与本地路径、代码等宽小字号。
+- **Word 构建**：所有 docx 页脚自动 PAGE 页码并审计；参考文献“1. 作者……”（编号 + 句点 + 一个空格，不用 Tab、不悬挂缩进；仅期刊明确要求时 `target_journal.json` 设 `"reference_separator": "tab"`）；数字引用合并为 [1–3]；正文图注只放主图，补充图注随补充文件输出；图注前缀/粗体/分图标签大小写/末尾标点、嵌入图、Word 表、补充材料别名（Online Resource n）均由 `target_journal.json` 控制；补充文件默认另出 PDF（`--pdf`），自动加信息页、清除流水线代码与本地路径、代码等宽小字号。
 - **期刊规则结构化**：`limits`（main_text_words、abstract_words、reference_limit、display_items…）取代从指南散文正则抽取；Word 兼容字数（含数字，正文 Introduction–Conclusions）、97% 余量，S23/S25 直接测量最终 docx；S17 起草默认上限（正文 4000、摘要 250）。声明顺序默认 Springer Nature，标题页与正文一致；Discussion 默认无子标题。
 - **refs.bib**：标题专有名词/缩写加 `{}`、ISO 期刊缩写（shortjournal）、文章号、页码完整范围、姓氏前缀保护；S13 新增 `bib_format_clean`。分组引用 `[@a; @b]` 在事实保持比较中等价。
 - **后台语言与缩写**：检测“independent review / earlier draft / reviewer request”等流水线历史表述；缩写分别在摘要、正文、每个表格内检查首次定义和“定义未用”。
