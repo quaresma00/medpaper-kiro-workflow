@@ -8,10 +8,12 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from xml.etree import ElementTree as ET
 
 from . import journalspec
 
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 NS = {"w": W}
 CODE_STYLES = {"SourceCode"}
 LEGEND_HEAD_RE = re.compile(r"^((?:Figure|Fig\.?)\s+S?\d+)\.?\s*(.*)$", re.I)
@@ -57,7 +59,8 @@ def audit_spec(project: Path) -> dict:
             "embed_figures": target.get("embed_figures") is True,
             "word_tables": target.get("word_tables") is True,
             "main_figures": counts["main_figures"], "supp_figures": counts["supp_figures"],
-            "main_tables": counts["main_tables"]}
+            "main_tables": counts["main_tables"],
+            "table_orientation": table_overrides(project, counts["plan"])}
 
 
 def legend_problems(root, expected: list[str], cap: int, label: str = "",
@@ -207,15 +210,209 @@ def reference_problems(root, separator: str = "space") -> list[str]:
     return problems
 
 
+_PAGE_FIELD_RE = re.compile(rb'(?:w:instr="\s*PAGE\b|<w:instrText[^>]*>\s*PAGE\b)')
+
+
 def footer_page_problems(xmls: dict[str, bytes]) -> list[str]:
     document = xmls.get("word/document.xml", b"")
     if b"footerReference" not in document:
         return ["no footer is attached to the document (automatic page numbers missing)"]
-    for name, blob in xmls.items():
-        if name.startswith("word/footer") and name.endswith(".xml") and re.search(
-                rb'(?:w:instr="\s*PAGE\b|<w:instrText[^>]*>\s*PAGE\b)', blob):
-            return []
-    return ["footer has no PAGE field (automatic page numbers missing)"]
+    footers = {n: b for n, b in xmls.items() if n.startswith("word/footer") and n.endswith(".xml")}
+    if not any(_PAGE_FIELD_RE.search(b) for b in footers.values()):
+        return ["footer has no PAGE field (automatic page numbers missing)"]
+    # 1.8.1: every section shows the page number. Later sections inherit the first section's
+    # footer (no own reference) or reference a footer that also has PAGE; numbering continues.
+    try:
+        root = ET.fromstring(document)
+    except ET.ParseError:
+        return []
+    rels = {}
+    try:
+        for rel in ET.fromstring(xmls.get("word/_rels/document.xml.rels", b"<x/>")):
+            rels[rel.get("Id")] = "word/" + rel.get("Target", "").lstrip("/").removeprefix("word/")
+    except ET.ParseError:
+        pass
+    sects = root.findall(".//w:sectPr", NS)
+    problems = []
+    for i, sp in enumerate(sects):
+        refs = [r for r in sp.findall("w:footerReference", NS)
+                if r.get(f"{{{W}}}type", "default") == "default"]
+        if i == 0 and not refs:
+            problems.append("the first section has no footer (page numbers missing)")
+        for r in refs:
+            blob = footers.get(rels.get(r.get(f"{{{R}}}id", ""), ""), b"")
+            if rels and not _PAGE_FIELD_RE.search(blob):
+                problems.append(f"section {i + 1} footer has no PAGE field")
+        start = sp.find("w:pgNumType", NS)
+        if i and start is not None and start.get(f"{{{W}}}start"):
+            problems.append(f"section {i + 1} restarts page numbering")
+    return problems
+
+
+# ---------------------------------------------------------------------------
+# 1.8.1 Word tables: true three-line borders, one table per page, orientation per table.
+# ---------------------------------------------------------------------------
+TABLE_ID_RE = re.compile(r"^((?:Supplementary\s+)?Table\s+S?\d+)\b", re.I)
+TABLE_RULE_THICK, TABLE_RULE_THIN = 12, 6  # eighths of a point: 1.5 pt and 0.75 pt
+TABLE_CHAR_CAP = 40   # longer cells wrap; they do not widen the table further
+TABLE_MAX_PORTRAIT_COLUMNS = 7
+
+
+def table_width_estimate(col_chars: list[int], font_pt: float) -> int:
+    """Estimated natural table width in twips (average glyph ~0.5 em + default cell margins)."""
+    return int(sum(min(c, TABLE_CHAR_CAP) * font_pt * 10 + 216 for c in col_chars))
+
+
+def table_orientation(col_chars: list[int], font_pt: float, text_width: int,
+                      override: str = "auto") -> str:
+    if override in ("portrait", "landscape"):
+        return override
+    if (len(col_chars) > TABLE_MAX_PORTRAIT_COLUMNS
+            or table_width_estimate(col_chars, font_pt) > text_width):
+        return "landscape"
+    return "portrait"
+
+
+def table_overrides(project: Path, plan: dict | None = None) -> dict[str, str]:
+    """{canonical table id: portrait|landscape|auto} from artifact_plan entries
+    ("orientation") or target_journal.json tables.<id>.orientation; the plan wins."""
+    out: dict[str, str] = {}
+    target = journalspec.load(project)
+    tables = target.get("tables") if isinstance(target.get("tables"), dict) else {}
+    for key, val in tables.items():
+        if isinstance(val, dict) and val.get("orientation") in ("portrait", "landscape", "auto"):
+            out[canon_figure_id(str(key))] = val["orientation"]
+    plan = plan if plan is not None else plan_counts(project)["plan"]
+    for e in plan.get("main_tables", []) if isinstance(plan, dict) else []:
+        if isinstance(e, dict) and e.get("orientation") in ("portrait", "landscape", "auto"):
+            out[canon_figure_id(str(e.get("id", "")))] = e["orientation"]
+    return out
+
+
+def _cell_text(tc) -> str:
+    return " ".join(_ptext(p) for p in tc.findall("w:p", NS)).strip()
+
+
+def _span(tc) -> int:
+    node = tc.find("w:tcPr/w:gridSpan", NS)
+    return int(node.get(f"{{{W}}}val", "1")) if node is not None else 1
+
+
+def word_table_columns(tbl) -> list[int]:
+    """Max text length per grid column over unspanned cells (same rule the builder uses)."""
+    ncol = len(tbl.findall("w:tblGrid/w:gridCol", NS))
+    chars = [0] * ncol
+    for tr in tbl.findall("w:tr", NS):
+        col = 0
+        for tc in tr.findall("w:tc", NS):
+            span = _span(tc)
+            if span == 1 and col < ncol:
+                chars[col] = max(chars[col], len(_cell_text(tc)))
+            col += span
+    return chars
+
+
+def _side(tc, side: str) -> tuple[str, int]:
+    node = tc.find(f"w:tcPr/w:tcBorders/w:{side}", NS)
+    if node is None:
+        return "", 0
+    return node.get(f"{{{W}}}val", ""), int(node.get(f"{{{W}}}sz", "0") or 0)
+
+
+def _ruled(val: str) -> bool:
+    return val not in ("", "nil", "none")
+
+
+def _sect_orientation(sp) -> str:
+    pg = sp.find("w:pgSz", NS)
+    if pg is None:
+        return "portrait"
+    w, h = int(pg.get(f"{{{W}}}w", "0") or 0), int(pg.get(f"{{{W}}}h", "0") or 0)
+    if pg.get(f"{{{W}}}orient") == "landscape" and w > h:
+        return "landscape"
+    return "portrait" if w <= h and pg.get(f"{{{W}}}orient") != "landscape" else "mixed"
+
+
+def _text_width(sp) -> int:
+    pg, mar = sp.find("w:pgSz", NS), sp.find("w:pgMar", NS)
+    if pg is None:
+        return 9026
+    w = min(int(pg.get(f"{{{W}}}w", "11906")), int(pg.get(f"{{{W}}}h", "16838")))
+    if mar is None:
+        return w - 2880
+    return w - int(mar.get(f"{{{W}}}left", "1440")) - int(mar.get(f"{{{W}}}right", "1440"))
+
+
+def table_layout_problems(root, overrides: dict[str, str] | None = None) -> list[str]:
+    """Three-line borders, a page/section break before each table, orientation per table."""
+    body = root.find("w:body", NS)
+    if body is None:
+        return []
+    kids = [k for k in body if k.tag in (f"{{{W}}}p", f"{{{W}}}tbl")]  # skip bookmarks
+    body_sect = body.find("w:sectPr", NS)
+    text_width = _text_width(body_sect) if body_sect is not None else 9026
+    problems: list[str] = []
+    for i, tbl in enumerate(kids):
+        if tbl.tag != f"{{{W}}}tbl":
+            continue
+        # Caption (and the Tables heading) above the table, then a section break before them.
+        label, j = f"table {i}", i - 1
+        while j >= 0 and kids[j].tag == f"{{{W}}}p" and _ptext(kids[j]) \
+                and kids[j].find("w:pPr/w:sectPr", NS) is None and i - j <= 3:
+            m = TABLE_ID_RE.match(_ptext(kids[j]))
+            if m and label.startswith("table "):
+                label = m.group(1)
+            j -= 1
+        broken = j >= 0 and (kids[j].find("w:pPr/w:sectPr", NS) is not None
+                             or kids[j].find(".//w:br[@w:type='page']", NS) is not None)
+        if not broken:
+            problems.append(f"{label} does not start on a new page (no section/page break before it)")
+        tblb = tbl.find("w:tblPr/w:tblBorders", NS)
+        if tblb is not None and any(_ruled(n.get(f"{{{W}}}val", "")) for n in tblb):
+            problems.append(f"{label}: table-level borders are set; three-line rules must be cell borders")
+        rows = tbl.findall("w:tr", NS)
+        if not rows:
+            continue
+        nhead = 0
+        for tr in rows:
+            if tr.find("w:trPr/w:tblHeader", NS) is None:
+                break
+            nhead += 1
+        nhead = max(1, min(nhead, len(rows) - 1)) if len(rows) > 1 else 1
+        last = len(rows) - 1
+        for r, tr in enumerate(rows):
+            for tc in tr.findall("w:tc", NS):
+                top, bottom = _side(tc, "top"), _side(tc, "bottom")
+                if r == 0 and (not _ruled(top[0]) or top[1] < TABLE_RULE_THICK):
+                    problems.append(f"{label}: top rule missing on the header row")
+                if r == nhead - 1 and not _ruled(bottom[0]):
+                    problems.append(f"{label}: rule under the (last) header row missing")
+                if r == last and (not _ruled(bottom[0]) or bottom[1] < TABLE_RULE_THICK):
+                    problems.append(f"{label}: bottom rule missing on the last body row")
+                if r and _ruled(top[0]):
+                    problems.append(f"{label}: inner horizontal rule (top border on row {r + 1})")
+                if r not in (nhead - 1, last) and _ruled(bottom[0]):
+                    problems.append(f"{label}: inner horizontal rule (bottom border on row {r + 1})")
+                if any(_ruled(_side(tc, s)[0]) for s in ("left", "right", "start", "end",
+                                                          "insideV", "insideH")):
+                    problems.append(f"{label}: vertical/inner cell border present")
+        # Its own section: the next sectPr after the table closes the table's section.
+        close = next((k for k in kids[i + 1:] if k.tag == f"{{{W}}}tbl"
+                      or k.find("w:pPr/w:sectPr", NS) is not None), None)
+        if close is None or close.tag == f"{{{W}}}tbl":
+            problems.append(f"{label}: no section break after the table (next content shares its page)")
+            continue
+        sp = close.find("w:pPr/w:sectPr", NS)
+        font = 12.0
+        sz = tbl.find(".//w:r/w:rPr/w:sz", NS)
+        if sz is not None:
+            font = int(sz.get(f"{{{W}}}val", "24")) / 2
+        want = table_orientation(word_table_columns(tbl), font, text_width,
+                                 (overrides or {}).get(canon_figure_id(label), "auto"))
+        got = _sect_orientation(sp)
+        if got != want:
+            problems.append(f"{label}: page orientation {got}, expected {want}")
+    return sorted(set(problems))
 
 
 def display_problems(root, spec: dict, role: str) -> list[str]:
@@ -233,6 +430,8 @@ def display_problems(root, spec: dict, role: str) -> list[str]:
     ntab = len(spec.get("main_tables", []))
     if spec.get("word_tables") and tables < ntab:
         problems.append(f"journal requires Word tables: {tables}/{ntab} main tables present")
+    if spec.get("word_tables") and tables:
+        problems += table_layout_problems(root, spec.get("table_orientation"))
     return problems
 
 

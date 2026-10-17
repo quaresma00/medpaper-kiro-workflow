@@ -353,8 +353,11 @@ def _format_references(doc, font: str, size: float, separator: str = "space") ->
 def _add_page_numbers(doc, font: str, size: float) -> None:
     """Automatic PAGE field in every section footer (page numbers are not 'field functions')."""
     from docx.enum.text import WD_ALIGN_PARAGRAPH
-    for section in doc.sections:
+    for i, section in enumerate(doc.sections):
         footer = section.footer
+        if i:  # later sections (per-table pages) share the first footer; numbering continues
+            footer.is_linked_to_previous = True
+            continue
         footer.is_linked_to_previous = False
         p = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
         if "PAGE" in "".join(n.text or "" for n in p._p.iter(qn("w:instrText"))):
@@ -460,10 +463,15 @@ def normalize_docx(path: Path, style: dict, kind: str, *, legend_bold: bool = Tr
         section.top_margin = section.bottom_margin = margin
         section.left_margin = section.right_margin = margin
         if str(style["paper_size"]).upper() == "LETTER":
-            section.page_width, section.page_height = Inches(8.5), Inches(11)
+            short, long_ = Inches(8.5), Inches(11)
         else:
-            section.page_width, section.page_height = Inches(8.2677), Inches(11.6929)
-        section.orientation = WD_ORIENT.PORTRAIT
+            short, long_ = Inches(8.2677), Inches(11.6929)
+        # A landscape table section (1.8.1) keeps its orientation with the page size swapped.
+        if section.orientation == WD_ORIENT.LANDSCAPE:
+            section.page_width, section.page_height = long_, short
+        else:
+            section.page_width, section.page_height = short, long_
+            section.orientation = WD_ORIENT.PORTRAIT
 
     doc.save(path)
     _sanitize_package_xml(path, font)
@@ -700,24 +708,202 @@ def _figure_image(project: Path, entry: dict) -> Path | None:
     return png if png.is_file() else (path if path.is_file() else None)
 
 
-def _table_markdown(project: Path, entry: dict, caption: str) -> str:
-    """A main table as a Pandoc pipe table (first row = header) for journals wanting Word tables."""
+# 1.8.1: the workbook used to go through a Pandoc pipe table. Pandoc's built-in "Table" style
+# only rules the bottom of the header row, and the workbook's title and footnote rows were
+# pushed into the grid, so Word showed one middle line. Tables are now written as raw OOXML
+# with explicit three-line cell borders, each on its own page in a portrait or landscape section.
+_TITLE_RE = re.compile(r"^\s*(?:supplementary\s+)?table\s+S?\d+\s*[.:]\s*", re.I)
+_FOOTNOTE_RE = re.compile(r"^\s*(?:abbreviations?|notes?|data (?:are|were)|values (?:are|were)|"
+                          r"source|[*\u2020\u2021\u00a7\u00b6#]|[a-z]\s)", re.I)
+
+
+def _xlsx_table(path: Path, label: str) -> dict:
+    """{title, header: [[cell]], body: [[cell]], footnotes, ncol} from a three-line workbook.
+
+    cell = {text, span, vmerge (None|'restart'|'continue'), jc, bold}. Header rows end at the
+    first rule under a header row (xlsx bottom border) or, without borders, after row 1 plus
+    any vertically merged header cells; footnotes are the unruled rows after the last ruled row.
+    """
     from openpyxl import load_workbook
+    ws = load_workbook(path, data_only=True).worksheets[0]
+    grid = [list(r) for r in ws.iter_rows()]
+    text = [["" if c.value is None else " ".join(str(c.value).split()) for c in r] for r in grid]
+    used = [i for i, r in enumerate(text) if any(r)]
+    if not used:
+        raise ValueError(f"word_tables: {label} workbook is empty")
+    ncol = max(max((j + 1 for j, v in enumerate(text[i]) if v), default=1) for i in used)
+    merges = {}
+    for rng in ws.merged_cells.ranges:
+        r0, c0, r1, c1 = rng.min_row - 1, rng.min_col - 1, rng.max_row - 1, min(rng.max_col, ncol) - 1
+        for r in range(r0, r1 + 1):
+            for c in range(c0, c1 + 1):
+                merges[(r, c)] = (r0, c0, r1, c1)
+
+    def only_first(i):
+        return bool(text[i][0]) and not any(text[i][1:ncol])
+
+    def bottom(i):
+        # A vertically merged cell that continues below row i cannot end the header at row i.
+        return any(c.border is not None and c.border.bottom is not None
+                   and c.border.bottom.style not in (None, "none")
+                   and merges.get((i, j), (0, 0, i, 0))[2] <= i
+                   for j, c in enumerate(grid[i][:ncol]))
+
+    rows = list(used)
+    title = ""
+    if only_first(rows[0]) and _TITLE_RE.match(text[rows[0]][0]):
+        title = _TITLE_RE.sub("", text[rows[0]][0]).strip()
+        rows = rows[1:]
+    ruled = [i for i in rows if bottom(i)]
+    if len(ruled) >= 2:
+        head_end, body_end = ruled[0], ruled[-1]
+    else:
+        body_end = rows[-1]
+        while body_end != rows[0] and only_first(body_end) and (
+                (body_end, 0) in merges or _FOOTNOTE_RE.match(text[body_end][0])
+                or len(text[body_end][0]) > 60):
+            body_end = rows[rows.index(body_end) - 1]
+        head_end = max([rows[0]] + [m[2] for (r, c), m in merges.items()
+                                    if r == rows[0] and m[2] > m[0]])
+    head = [i for i in rows if i <= head_end]
+    body = [i for i in rows if head_end < i <= body_end]
+    if not body:
+        raise ValueError(f"word_tables: {label} has a header but no body rows")
+    footnotes = [text[i][0] for i in rows if i > body_end and text[i][0]]
+    region = set(head + body)
+
+    def cells(i, is_head):
+        out, c = [], 0
+        while c < ncol:
+            m = merges.get((i, c))
+            span, vm = 1, None
+            if m:
+                if m[1] != c:  # covered by a horizontal merge to the left
+                    c += 1
+                    continue
+                span = m[3] - m[1] + 1
+                if m[2] > m[0] and m[0] in region and m[2] in region:
+                    vm = "restart" if i == m[0] else "continue"
+            cell = grid[i][c] if c < len(grid[i]) else None
+            horiz = getattr(getattr(cell, "alignment", None), "horizontal", None)
+            jc = {"right": "right", "center": "center", "centerContinuous": "center",
+                  "left": "left"}.get(horiz or "", "left" if c == 0 else "center")
+            bold = bool(getattr(getattr(cell, "font", None), "bold", False)) or is_head
+            out.append({"text": "" if vm == "continue" else text[i][c], "span": span,
+                        "vmerge": vm, "jc": jc, "bold": bold})
+            c += span
+        return out
+
+    return {"title": title, "ncol": ncol, "footnotes": footnotes,
+            "header": [cells(i, True) for i in head], "body": [cells(i, False) for i in body]}
+
+
+def _column_chars(table: dict) -> list[int]:
+    chars = [0] * table["ncol"]
+    for row in table["header"] + table["body"]:
+        col = 0
+        for cell in row:
+            if cell["span"] == 1 and col < len(chars):
+                chars[col] = max(chars[col], len(cell["text"]))
+            col += cell["span"]
+    return chars
+
+
+def _esc(value: str) -> str:
+    from xml.sax.saxutils import escape
+    return escape(value, {'"': "&quot;"})
+
+
+def _rule(side: str, size: int | None) -> str:
+    if size is None:
+        return f'<w:{side} w:val="nil"/>'
+    return f'<w:{side} w:val="single" w:sz="{size}" w:space="0" w:color="000000"/>'
+
+
+def _table_xml(table: dict, widths: list[int]) -> str:
+    """Raw OOXML: no table style, tblBorders none, explicit three-line cell borders."""
+    rows = table["header"] + table["body"]
+    nhead, last = len(table["header"]), len(rows) - 1
+    thick, thin = docxaudit.TABLE_RULE_THICK, docxaudit.TABLE_RULE_THIN
+    out = ['<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:jc w:val="center"/><w:tblBorders>'
+           + "".join(_rule(s, None) for s in ("top", "left", "bottom", "right", "insideH", "insideV"))
+           + '</w:tblBorders><w:tblLayout w:type="autofit"/>'
+           '<w:tblLook w:val="0000" w:firstRow="0" w:lastRow="0" w:firstColumn="0" '
+           'w:lastColumn="0" w:noHBand="1" w:noVBand="1"/></w:tblPr><w:tblGrid>'
+           + "".join(f'<w:gridCol w:w="{w}"/>' for w in widths) + "</w:tblGrid>"]
+    for r, row in enumerate(rows):
+        trpr = "<w:trPr><w:cantSplit/>" + ("<w:tblHeader/>" if r < nhead else "") + "</w:trPr>"
+        out.append("<w:tr>" + trpr)
+        col = 0
+        for cell in row:
+            top = thick if r == 0 else None
+            bottom = thick if r == last else (thin if r == nhead - 1 else None)
+            width = sum(widths[col:col + cell["span"]])
+            col += cell["span"]
+            pr = f'<w:tcW w:w="{width}" w:type="dxa"/>'
+            if cell["span"] > 1:
+                pr += f'<w:gridSpan w:val="{cell["span"]}"/>'
+            if cell["vmerge"] == "restart":
+                pr += '<w:vMerge w:val="restart"/>'
+            elif cell["vmerge"] == "continue":
+                pr += "<w:vMerge/>"
+            pr += ("<w:tcBorders>" + _rule("top", top) + _rule("left", None) + _rule("bottom", bottom)
+                   + _rule("right", None) + _rule("insideH", None) + _rule("insideV", None)
+                   + "</w:tcBorders>")
+            pr += '<w:vAlign w:val="bottom"/>' if r < nhead else '<w:vAlign w:val="top"/>'
+            run = ""
+            if cell["text"]:
+                run = ("<w:r>" + ("<w:rPr><w:b/></w:rPr>" if cell["bold"] else "")
+                       + f'<w:t xml:space="preserve">{_esc(cell["text"])}</w:t></w:r>')
+            out.append(f'<w:tc><w:tcPr>{pr}</w:tcPr><w:p><w:pPr><w:jc w:val="{cell["jc"]}"/>'
+                       f"</w:pPr>{run}</w:p></w:tc>")
+        out.append("</w:tr>")
+    out.append("</w:tbl>")
+    for note in table["footnotes"]:
+        out.append(f'<w:p><w:r><w:t xml:space="preserve">{_esc(note)}</w:t></w:r></w:p>')
+    return "".join(out)
+
+
+def _page_geometry(style: dict | None) -> tuple[int, int, int]:
+    """(page width, page height, margin) in twips for the manuscript's portrait page."""
+    style = style or {}
+    margin = Inches(float(style.get("margins_in", 1.0))).twips
+    if str(style.get("paper_size", "A4")).upper() == "LETTER":
+        return Inches(8.5).twips, Inches(11).twips, margin
+    return Inches(8.2677).twips, Inches(11.6929).twips, margin
+
+
+def _sect_break(orientation: str, style: dict | None) -> str:
+    """A paragraph-level section break (next page) that ends a section of this orientation."""
+    w, h, m = _page_geometry(style)
+    size = (f'<w:pgSz w:w="{h}" w:h="{w}" w:orient="landscape"/>' if orientation == "landscape"
+            else f'<w:pgSz w:w="{w}" w:h="{h}"/>')
+    return ('```{=openxml}\n<w:p><w:pPr><w:sectPr><w:type w:val="nextPage"/>' + size
+            + f'<w:pgMar w:top="{m}" w:right="{m}" w:bottom="{m}" w:left="{m}" w:header="708" '
+            f'w:footer="708" w:gutter="0"/></w:sectPr></w:pPr></w:p>\n```')
+
+
+def _table_block(project: Path, entry: dict, caption: str, style: dict | None,
+                 overrides: dict[str, str]) -> tuple[str, str]:
+    """(Markdown: caption heading + raw table + footnotes, orientation) for one main table."""
+    label = str(entry.get("id", "")).strip()
     raw = str(entry.get("file", "")).strip()
     path = project / raw
     if not raw or not path.is_file():
-        raise ValueError(f"word_tables: {entry.get('id')} workbook missing ({raw})")
-    ws = load_workbook(path, data_only=True).worksheets[0]
-    rows = [["" if v is None else str(v).replace("|", "\\|").replace("\n", " ") for v in row]
-            for row in ws.iter_rows(values_only=True)]
-    rows = [r for r in rows if any(c.strip() for c in r)]
-    if not rows:
-        raise ValueError(f"word_tables: {entry.get('id')} workbook is empty")
-    width = max(len(r) for r in rows)
-    rows = [r + [""] * (width - len(r)) for r in rows]
-    lines = ["| " + " | ".join(rows[0]) + " |", "|" + "---|" * width]
-    lines += ["| " + " | ".join(r) + " |" for r in rows[1:]]
-    return f"## {entry.get('id')}. {caption}".rstrip() + "\n\n" + "\n".join(lines)
+        raise ValueError(f"word_tables: {label} workbook missing ({raw})")
+    table = _xlsx_table(path, label)
+    w, h, m = _page_geometry(style)
+    font = float((style or {}).get("body_font_pt", 12))
+    chars = _column_chars(table)
+    orientation = docxaudit.table_orientation(
+        chars, font, w - 2 * m, overrides.get(docxaudit.canon_figure_id(label), "auto"))
+    avail = (h if orientation == "landscape" else w) - 2 * m
+    natural = [min(c, docxaudit.TABLE_CHAR_CAP) * font * 10 + 216 for c in chars]
+    widths = [max(400, int(avail * n / sum(natural))) for n in natural]
+    caption = caption or table["title"]
+    md = (f"## {label}. {caption}".rstrip() + "\n\n```{=openxml}\n"
+          + _table_xml(table, widths) + "\n```")
+    return md, orientation
 
 
 def _table_captions(project: Path) -> dict[str, str]:
@@ -771,7 +957,8 @@ def _info_page(project: Path) -> str:
     return "\n".join(lines) + "\n"
 
 
-def prepare_source(kind: str, inputs: list[Path], project: Path, workdir: Path) -> list[Path]:
+def prepare_source(kind: str, inputs: list[Path], project: Path, workdir: Path,
+                   style: dict | None = None) -> list[Path]:
     """Apply the journal's presentation rules to a temporary copy handed to Pandoc."""
     if kind not in ("manuscript", "supplementary"):
         return inputs
@@ -799,11 +986,16 @@ def prepare_source(kind: str, inputs: list[Path], project: Path, workdir: Path) 
                 out.append(legends[last:].rstrip())
                 legends = "\n\n".join(x for x in out if x) + "\n"
             if target.get("word_tables") is True and plan.get("main_tables"):
+                # Each table on a new page, in its own portrait/landscape section; the section
+                # after the last table returns to the portrait main text (Figure legends).
                 caps = _table_captions(project)
-                tables = [_table_markdown(project, e, caps.get(
-                    docxaudit.canon_figure_id(str(e.get("id", ""))), ""))
-                    for e in plan.get("main_tables", [])]
-                head = head.rstrip() + "\n\n# Tables\n\n" + "\n\n".join(tables) + "\n\n"
+                overrides = docxaudit.table_overrides(project, plan)
+                parts = [_sect_break("portrait", style), "# Tables"]
+                for e in plan.get("main_tables", []):
+                    md, orientation = _table_block(project, e, caps.get(
+                        docxaudit.canon_figure_id(str(e.get("id", ""))), ""), style, overrides)
+                    parts += [md, _sect_break(orientation, style)]
+                head = head.rstrip() + "\n\n" + "\n\n".join(parts) + "\n\n"
             text = head + legends
     else:
         text = _clean_pipeline_code(text)
@@ -920,7 +1112,7 @@ def build(args) -> int:
             raise ValueError("; ".join(source_problems))
         with tempfile.TemporaryDirectory(prefix="medpaper_render_") as work:
             workdir = Path(work)
-            rendered = prepare_source(args.kind, args.input, project, workdir)
+            rendered = prepare_source(args.kind, args.input, project, workdir, style)
             run_pandoc(rendered, args.output, args.bibliography,
                        collapsing_csl(args.csl, workdir))
         normalize_docx(args.output, style, args.kind,
