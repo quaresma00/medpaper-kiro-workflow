@@ -1,99 +1,69 @@
-# S24 - User review and confirmation of the submission package
+# S24 - Review rounds on the submission package, then the user's confirmation
 
 ## Purpose
-Let the user inspect and modify the assembled journal-specific submission files, then obtain
-an explicit final `OK` before an independent reviewer sees a frozen package.
+Improve the assembled journal package in subagent review rounds, report each round once, and
+freeze the exact files when the user says no further review is needed.
 
 ## This stage needs the user
-Present clickable paths to the complete `08_submission/bundle/`, its
-`SUBMISSION_CHECKLIST.md`, `manifest.json`, the rendered previews used for visual QA, and
-`guidelines_extract.md`. Tell the user that both content and formatting may be edited. Do not
-treat delivery, silence, or an earlier manuscript approval as approval of this submission
-package.
+Only for one answer per round (and for user-owned facts such as authorship or funding). Do not
+ask permission per finding or per small change. Present clickable paths to
+`08_submission/bundle/`, `SUBMISSION_CHECKLIST.md` and the rendered previews in each report.
 
-This is a repeatable package-review loop. The user may request any number of correction
-rounds; do not freeze the package until the current round is closed and the user explicitly
-approves the exact visible files.
+## One round
+1. **Review.**
+```
+.\.venv\Scripts\python.exe tools/review_round.py start --scope package
+```
+   Invoke the read-only `medpaper-reviewer` agent as a subagent with the printed bundle files,
+   their fresh `.wf/review_text/` copies (DOCX/XLSX), the journal metadata,
+   `guidelines_extract.md` and the cached official instructions. Ask for reader, editor and
+   journal-compliance findings with exact locations. After an S25 `REVISE`, the S25 audit is
+   this round's review: start the round (`--delta`) and use its findings instead of a new read.
+   If the user edited files themselves, run `tools/package_content.py verify` first.
+2. **Fix on your own judgement.** Apply every fix that improves the package. Journal copy,
+   title page, cover letter and statements live in `08_submission/manuscript/` and
+   `08_submission/`; rebuild the affected DOCX in place and re-run `bundle_complete`,
+   `docx_bundle_ready`, `submission_checklist_measured` and visual QA for changed files.
+   A scientific change (07_manuscript, results, tables, figures, references) goes through
+   `tools/rework.py batch --sealed --plan ...` (then `tools/rework.py status` lists the only
+   files you may change; `check`, `mark`, `close`) and back to S19 for a review round and
+   re-freeze. A DOCX wording edit must come from its source; a visible-text-preserving layout
+   edit may stay in Word (`package_content.py verify` proves it). Never recapture at S24 to
+   bless drift. Never invent user-owned facts; list them as kept.
+3. **Close and report once.**
+```
+.\.venv\Scripts\python.exe tools/review_round.py close --scope package --findings critical=<n>,major=<n>,minor=<n> --change <file> "<one line>" --kept "<finding>" "<why>"
+```
+   Repeat `--change` / `--kept` as needed (both optional).
+   One concise message: issues by severity, changes (file + one line), what was kept and why,
+   the bundle paths. One question:
+   > 本轮投稿包审阅与修改已完成。是否再进行一轮子代理审阅？若无需继续审阅，请回复“无需继续审阅”。
+4. **Record the answer.**
+```
+.\.venv\Scripts\python.exe tools/review_round.py decide another_round --scope package --words "<user's words>"
+.\.venv\Scripts\python.exe tools/review_round.py decide no_further_review --scope package --words "<user's words>"
+```
+   `no_further_review` records `submission_package_user_confirmed=OK` bound to the round and
+   writes `08_submission/package_human_review.md`.
 
-## Procedure
-1. Wait while the user performs the requested manual content and formatting review. Do not
-   overwrite user-edited DOCX, table, figure, supplement or checklist files by rebuilding
-   them blindly.
-2. Preserve each feedback message verbatim and interpret it once into atomic items in
-   `project/temp/revision_plan.json`; name each item's revision kind, source files and
-   acceptance criteria. Collect every message into the round, then seal it once:
-```
-.\.venv\Scripts\python.exe tools/rework.py batch --plan project\temp\revision_plan.json
-.\.venv\Scripts\python.exe tools/rework.py seal --why "<the user's apply/end-of-feedback words>"
-.\.venv\Scripts\python.exe tools/rework.py status
-```
-   Nothing rewinds: edit only the files `status` lists (journal copy in
-   `08_submission/manuscript/`, title page, cover letter, the affected DOCX), rebuild them in
-   place and run `tools/rework.py check`, then mark and close. Changing scientific sources
-   (07_manuscript, results, tables, figures, references) sends the round back to S19 for
-   re-review and re-freeze; afterwards `wf advance` at S19 resumes a package round here that
-   merges the change into the journal copy (`scientific_freeze.py rebind-variant`). Never edit
-   narrative content only in DOCX. Format-only work stays at S24. Preserve every unrelated
-   user edit and modify only the affected Word file or deterministic style/build source.
-   If context compacts, resume from `tools/rework.py status` rather than re-reading the entire
-   feedback history. Token pressure is not permission to reduce or skip requested work.
-3. When the user has already edited files, identify which bundle files changed and run:
-```
-.\.venv\Scripts\python.exe tools/package_content.py verify
-```
-   A passing visible-text baseline proves a DOCX change was formatting-only. If it fails,
-   reconcile the changed wording back to its owning source in a revision round, rebuild the
-   DOCX from it and capture the new baseline (`package_content.py capture --replace` is
-   accepted at S24 only inside a sealed non-layout round that revalidates S23).
-   Never recapture at S24 to bless drift.
-4. Re-run `bundle_complete`, `docx_bundle_ready`, `package_content_matches_baseline`, the
-   standalone Word manifest audit and
-   visual QA for every changed file. Recheck filenames, upload roles, word/keyword/reference
-   limits, figure/table/legend numbering, supplements, declarations and cross-file facts
-   against the chosen journal's official guideline snapshot. If a title-page reference count
-   is present, verify that both the canonical source and the user-edited DOCX still equal the
-   number of distinct citekeys actually used in `full_manuscript.md`, not the library size.
-5. At S24, run `tools/rework.py check`, verify each atomic request against its acceptance
-   criteria, mark the final changed files and checks, then close the revision round with
-   `tools/rework.py close`. Present the
-   resulting package again; later feedback opens a new round without a fixed round limit.
-6. Write or append `project/08_submission/package_human_review.md` with headings `Package presented`,
-   `User modifications`, `Revalidation`, `User confirmation`, `Frozen package`.
-7. After all revision rounds are closed and the user's edits have been revalidated, ask exactly one clear confirmation question:
-   **“投稿包已按您的修改重新校验。是否确认 OK，并调用一个独立子代理，以普通读者和期刊编辑的视角终审当前冻结版本？”**
-   Continue only after an explicit affirmative answer such as `OK`, `确认` or `可以`.
-8. Freeze the exact reviewed bundle and its journal/source evidence:
+## Freeze the package
 ```
 .\.venv\Scripts\python.exe tools/package_review.py freeze
 ```
-   Record the package file count, freeze timestamp and `freeze_id` under `Frozen package`,
-   then record:
-```
-.\.venv\Scripts\python.exe tools/wf.py decide submission_package_user_confirmed OK --why "<what the user reviewed or changed, what was revalidated, and that independent audit was explicitly approved>"
-```
+S25 audits exactly these frozen files.
 
 ## Outputs
-- `08_submission/package_human_review.md`
+- `08_submission/package_human_review.md` (generated by `review_round.py`)
 - `08_submission/package_review_freeze.json`
 
 ## Hard rules
-- The confirmation must concern the final journal-specific upload package, not the earlier
-  scientific manuscript review.
-- No independent final audit starts before explicit user confirmation and a successful
-  freeze.
-- The user's confirmation is also the explicit request to invoke one independent subagent
-  for the final reader/editor/compliance review; an earlier review request does not substitute.
-- Any change after confirmation invalidates the freeze and requires this stage's checks and
-  confirmation again.
-- A direct Word content edit can never be classified as format-only. Visible-text drift blocks
-  freezing until it is applied to the owning source and rebuilt through S23.
+- Any change after the freeze invalidates it; run another round and freeze again.
 - Never infer or rewrite user-owned authorship, affiliation, funding, ethics or conflict data.
-- Do not trade away a requested correction, full validation, independent review or visual QA
-  to save tokens. Save tokens by reading the persisted item and its dependency closure only.
+- Save tokens with delta rounds and scoped rebuilds, never by skipping a fix, validation or
+  visual QA.
 
 ## Close
 ```
 .\.venv\Scripts\python.exe tools/wf.py check
-.\.venv\Scripts\python.exe tools/wf.py advance --note "user reviewed and explicitly confirmed the final package; changed files=<...>; freeze=<timestamp and file count>"
+.\.venv\Scripts\python.exe tools/wf.py advance --note "package review rounds=<n>; last=<round id>; user: no further review; freeze=<freeze_id>"
 ```
-

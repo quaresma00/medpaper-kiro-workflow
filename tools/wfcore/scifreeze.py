@@ -213,8 +213,14 @@ def build_freeze(project: Path) -> dict:
     }
     # Bind the freeze to the S19 review ZIP the user released, so the gate can prove the frozen
     # text is the reviewed text (scientific_freeze_intact checks the decision rationale).
+    # 1.8.1: bind to the latest subagent review round the user ended; legacy papers without
+    # rounds keep binding to their review-package id.
+    from . import reviewrounds
+    approved = reviewrounds.approved_round(project, "manuscript")
     latest = project / "07_manuscript/review_packages/latest_review_package.json"
-    if latest.is_file():
+    if approved:
+        payload["review_round_id"] = approved["id"]
+    elif latest.is_file():
         try:
             package_id = str(json.loads(latest.read_text(encoding="utf-8")).get("package_id", ""))
         except (OSError, json.JSONDecodeError):
@@ -245,7 +251,8 @@ def write_freeze(project: Path, *, force: bool = False) -> Path:
             old = {}
         new = build_freeze(project)
         if (old.get("files") == new.get("files")
-                and old.get("review_package_id") == new.get("review_package_id")):
+                and old.get("review_package_id") == new.get("review_package_id")
+                and old.get("review_round_id") == new.get("review_round_id")):
             approved = _s19_approval_at(project)
             if approved and str(old.get("frozen_at", "")) < approved:
                 old.setdefault("restamps", []).append(

@@ -3,7 +3,7 @@ name: medpaper-pipeline
 description: Drives a gated, resumable medical/clinical research paper pipeline from a research idea through feasibility, data acquisition, exploratory analysis, figure and table production, IMRAD writing, independent review, journal selection, de-AI polish and a Word submission package. Use whenever the task involves a medical research idea, a clinical manuscript, a research protocol, literature retrieval via PubMed, publication-grade figures or three-line tables, journal selection, a submission package, or a revision round on any of these. Do not follow the workflow from memory - run `python tools/wf.py status` and obey the stage card it prints.
 compatibility: Requires Python 3.11+ for the driver. Tables and Word output additionally need numpy, pandas, openpyxl and python-docx (matplotlib for the Python figure path). R 4.3+ with the packages in reference/language_policy.toml (figures default to R). Network access is required for PubMed, Crossref and Unpaywall. Set NCBI_API_KEY to raise the E-utilities rate limit.
 metadata:
-  version: "2.1.0"
+  version: "2.1.1"
   stages: "25"
   entrypoint: "python tools/wf.py status"
 ---
@@ -112,6 +112,7 @@ isolated context**, so a full text or a review never enters this conversation.
 |---|---|---|
 | S15 deep-read | `medpaper-deepreader`, **one invocation per paper** | A full text is tens of thousands of tokens. Five of them will not fit here. You get back a page of structured notes; save those to `06_refs/deepread/<citekey>.md` yourself. |
 | S18 independent review | `medpaper-reviewer` | Its judgement must not be contaminated by having watched you write the manuscript. That is the entire point of the stage. |
+| S19 / S24 review rounds | `medpaper-reviewer` | One subagent read per round on the files `tools/review_round.py start` prints (fresh hash-bound text copies). You then apply the fixes you judge improve the paper, close the round, report once and ask one question: another round or no further review. No export package, no per-change permission. |
 | S25 submission audit | `medpaper-reviewer` | Same reviewer, three positions: publication readiness, guideline compliance, reader/editor. |
 | S02 / S05 / S07 literature reconnaissance | `context-gatherer` for repo questions; the PubMed client for literature | Keep raw payloads out of this context; you only need the conclusion. |
 
@@ -215,8 +216,8 @@ the work.
 9. **Route every revision through `tools/rework.py`.** A user's change request goes to the
    earliest owning stage, updates the source of truth, and rebuilds downstream. Never patch a
    rendered artifact directly.
-10. **The package is not final until the user says so.** S24 records explicit confirmation and
-    freezes the exact files; S25 then audits the frozen set.
+10. **The package is not final until the user says so.** S24 review rounds end only on the
+    user's explicit no-further-review answer, then the exact files are frozen; S25 audits them.
 11. **A red gate means stop and fix, not `--force`.**
 
 ## Do not let another skill replace a stage
@@ -264,7 +265,8 @@ tools/figures/R/             medfig.R (save_medpaper, theme, palettes) and recip
 tools/R/medresults.R         R results writer with environment receipt
 tools/analysis/results.py    Python results writer with environment receipt
 tools/reproduce.py           S06 sandbox re-execution and its proof
-tools/manuscript/            assemble, build_docx, reference_count, review_package
+tools/manuscript/            assemble, build_docx, reference_count
+tools/review_round.py        S19/S24 subagent review rounds (start, close, decide)
 tools/text/polish.py         de-AI + academic-English linter, fact-preservation diff
 tools/rework.py              routes a revision to the earliest owning stage
 tools/package_*.py           submission package build, content check, review freeze

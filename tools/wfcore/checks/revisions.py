@@ -145,7 +145,7 @@ def reader_review_coverage(ctx: Ctx) -> Result:
             False, "reader_review_coverage", "; ".join(problems[:6]),
             ["Print the evidence block and give the reviewer exactly those files, including "
              "every rendered figure PNG: .venv/Scripts/python.exe "
-             "tools/manuscript/review_package.py reader-inputs",
+             "tools/review_round.py start --scope manuscript",
              "Paste the printed ```json block into the review report, and write the reviewer's "
              "'Reader comprehension' and 'Medical presentation' findings under those headings."],
         )
@@ -191,6 +191,46 @@ def s19_review_release_explicit(ctx: Ctx) -> Result:
         f"user explicitly ended review for S19 ZIP v{manifest['package_revision']:03d} "
         f"({package_token})",
     )
+
+
+@check("review_round_approved")
+def review_round_approved(ctx: Ctx) -> Result:
+    """1.8.1 S19/S24: the latest subagent review round is closed, reported, answered with
+    'no further review', bound to the approval decision, and nothing it covered changed since.
+
+    A paper that reached S19 with a legacy (pre-1.8.1) review ZIP and no rounds keeps passing
+    through the legacy package release check."""
+    from .. import reviewrounds as rr
+    scope = str(ctx.spec.get("scope", "manuscript"))
+    cfg = rr.SCOPES[scope]
+    if scope == "manuscript" and not rr.load(ctx.project)[scope] and \
+            (ctx.project / "07_manuscript/review_packages/latest_review_package.json").is_file():
+        legacy = s19_review_release_explicit(ctx)
+        return Result(legacy.ok, "review_round_approved",
+                      "legacy review package: " + legacy.detail, legacy.hints)
+    if scope == "package" and not rr.load(ctx.project)[scope]:
+        # Pre-1.8.1 S24: the user's OK plus the package freeze (verified by bundle_matches_freeze).
+        decision = ctx.state.decision(cfg["decision"]) or {}
+        frozen = (ctx.project / "08_submission/package_review_freeze.json").is_file()
+        migrated = [m.get("at", "") for m in ctx.state.data.get("pipeline_migrations", [])
+                    if str(m.get("to", "")) == "1.8.1"]
+        if decision.get("value") == cfg["value"] and frozen and migrated and \
+                str(decision.get("at", "")) < str(migrated[0]):
+            return Result(True, "review_round_approved",
+                          "legacy S24 confirmation (before 1.8.1 review rounds) with a package freeze")
+    problems = rr.problems(ctx.project, scope, ctx.state.decision(cfg["decision"]))
+    if problems:
+        return Result(False, "review_round_approved", "; ".join(problems[:6]), [
+            "One round: .venv/Scripts/python.exe tools/review_round.py start [--delta]; invoke "
+            "the medpaper-reviewer subagent on the printed files; apply the fixes you judge "
+            "improve the paper; review_round.py close --findings ... --change FILE \"...\"; "
+            "report once; ask: another round or no further review?",
+            "Record the answer: review_round.py decide another_round|no_further_review "
+            "--words \"<user's words>\""])
+    rnd = rr.latest(ctx.project, scope)
+    return Result(True, "review_round_approved",
+                  f"{len(rr.load(ctx.project)[scope])} review round(s); user ended review after "
+                  f"{rnd['id']}; covered files unchanged since")
 
 
 @check("package_content_matches_baseline")

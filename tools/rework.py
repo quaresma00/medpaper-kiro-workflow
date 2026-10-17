@@ -752,7 +752,7 @@ def _cmd_close(args, state: State, pipe=None) -> int:
     state.save()
     print(f"closed {revision['round_id']}; user review may now continue")
     if state.data.get("resume_package_revision") == revision["round_id"]:
-        print("next: rebuild + present the S19 review ZIP, get the user's explicit approval, "
+        print("next: run an S19 review round (tools/review_round.py start --delta), get the user's no-further-review answer, "
               "scientific_freeze.py capture --force, then wf advance (resumes the S24 package round)")
     return 0
 

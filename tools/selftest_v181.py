@@ -161,6 +161,169 @@ def run_tables(tmp: Path, record, section) -> None:
                root, da.table_overrides(p))))
 
 
+def _review_paper(base: Path) -> tuple[Path, dict]:
+    import selftest_v180 as v180
+    p, env = v180._paper(base, None)
+    plan = {"main_figures": [{"id": "Figure 1", "file": "05_figures/out/Figure1.png"}],
+            "supp_figures": [], "main_tables": [{"id": "Table 1", "file": "04_tables/main/Table1.xlsx"}],
+            "supp_tables": []}
+    (p / "01_protocol/artifact_plan.json").write_text(json.dumps(plan), encoding="utf-8")
+    (p / "07_manuscript/full_manuscript.md").write_text(v180._manuscript("## Funding\nNone."),
+                                                        encoding="utf-8")
+    (p / "06_refs/library.json").write_text("{}", encoding="utf-8")
+    (p / "03_analysis/results").mkdir(parents=True, exist_ok=True)
+    (p / "03_analysis/results/primary.json").write_text('{"hr": 1.87}', encoding="utf-8")
+    from wfcore.state import State
+    st = State(p, ".wf").load()
+    st.data["current"] = "S19_human_review"
+    st.save()
+    return p, env
+
+
+def run_review(tmp: Path, record, section) -> None:
+    import subprocess
+    import tomllib
+    from wfcore import registry, reviewrounds as rr, scifreeze
+    from wfcore.checks import Ctx, get, load_all
+    from wfcore.checks.frozen import _approval_binding_problems
+    from wfcore.state import State
+    section("1.8.1 review rounds: subagent review, autonomous fixes, one question per round")
+    load_all()
+    pipe = registry.load()
+    raw = tomllib.loads((ROOT / "pipeline/pipeline.toml").read_text(encoding="utf-8"))
+    stages = {s["id"]: s for s in raw["stage"]}
+    gates = {sid: [g["check"] for g in stages[sid]["gate"]] for sid in stages}
+    cards = "".join((ROOT / "pipeline/stages" / f"{sid}.md").read_text(encoding="utf-8")
+                    for sid in ("S18_independent_review", "S19_human_review",
+                                "S24_package_human_review", "S25_submission_audit"))
+    record("default flow builds no review package (gates, outputs and cards)",
+           "manuscript_review_package_current" not in gates["S19_human_review"]
+           and "s19_review_release_explicit" not in gates["S19_human_review"]
+           and "review_round_approved" in gates["S19_human_review"]
+           and "review_round_approved" in gates["S24_package_human_review"]
+           and not any("review_packages" in o for o in stages["S19_human_review"]["outputs"])
+           and not any(k in cards.casefold() for k in ("review_package", "review package",
+                                                        "third-party", "zip")))
+    record("cards do not ask permission per change", all(
+        k not in cards for k in ("逐项", "是否修改", "permission for each")))
+    p, env = _review_paper(tmp / "review")
+
+    def cli(*args):
+        return subprocess.run([sys.executable, str(ROOT / "tools/review_round.py"), *args,
+                               "--project", str(p)], capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", env=env)
+
+    def gate(sid="S19_human_review", scope="manuscript"):
+        return get("review_round_approved")(Ctx(
+            pipeline=pipe, state=State(p, ".wf").load(), project=p, stage=pipe.stage(sid),
+            spec={"check": "review_round_approved", "scope": scope}))
+    r0 = gate()
+    record("a review round record is required to advance", not r0.ok and "no review round" in r0.detail,
+           r0.detail)
+    s1 = cli("start")
+    copies = list((p / ".wf/review_text").glob("*.txt"))
+    record("start lists the current files and writes fresh hash-bound table text copies",
+           s1.returncode == 0 and "medpaper-reviewer" in s1.stdout and "full_manuscript.md" in s1.stdout
+           and copies and "sha256:" in copies[0].read_text(encoding="utf-8"), (s1.stdout + s1.stderr)[-300:])
+    open_gate = gate()
+    md = p / "07_manuscript/full_manuscript.md"
+    md.write_text(md.read_text(encoding="utf-8").replace("was associated", "was clearly associated"),
+                  encoding="utf-8")
+    c1 = cli("close", "--findings", "critical=0,major=1,minor=2", "--change",
+             "07_manuscript/full_manuscript.md", "Tightened the Discussion claim",
+             "--kept", "Add a second cohort", "needs data the study does not have")
+    waiting = gate()
+    d1 = cli("decide", "another_round", "--words", "再审一轮")
+    another = gate()
+    record("an open round, an unanswered round and 'another round' all keep the stage open",
+           not open_gate.ok and "open" in open_gate.detail and c1.returncode == 0
+           and not waiting.ok and "waiting" in waiting.detail and d1.returncode == 0
+           and not another.ok and "another review round" in another.detail,
+           " | ".join([open_gate.detail, waiting.detail, another.detail, c1.stderr, d1.stderr]))
+    hr = (p / "07_manuscript/human_review.md").read_text(encoding="utf-8")
+    record("the round record writes human_review.md (findings, changes, kept items, answers)",
+           all(h in hr for h in rr.SCOPES["manuscript"]["headings"]) and "Tightened" in hr
+           and "needs data" in hr and "major 1" in hr)
+    s2 = cli("start", "--delta")
+    rnd2 = rr.latest(p, "manuscript")
+    c2 = cli("close", "--findings", "minor=0")
+    d2 = cli("decide", "no_further_review", "--words", "无需继续审阅")
+    ok_gate = gate()
+    st = State(p, ".wf").load()
+    dec = st.decision("manuscript_human_reviewed") or {}
+    record("'no further review' records the approval bound to the round and lets the stage advance",
+           s2.returncode == 0 and rnd2["mode"] == "delta" and c2.returncode == 0 and d2.returncode == 0
+           and ok_gate.ok and dec.get("value") == "NO_FURTHER_REVIEW" and "M002" in dec.get("rationale", ""),
+           ok_gate.detail + (s2.stderr + c2.stderr + d2.stderr))
+    record("no review package was generated in the new flow",
+           not (p / "07_manuscript/review_packages").exists())
+    freeze = scifreeze.build_freeze(p)
+    record("the scientific freeze binds to the latest approved round",
+           freeze.get("review_round_id") == "M002" and "review_package_id" not in freeze, str(freeze)[:200])
+    scifreeze.freeze_path(p).write_text(json.dumps(freeze), encoding="utf-8")
+    ctx = Ctx(pipeline=pipe, state=State(p, ".wf").load(), project=p,
+              stage=pipe.stage("S19_human_review"), spec={})
+    bound_ok = _approval_binding_problems(ctx)
+    scifreeze.freeze_path(p).write_text(json.dumps({**freeze, "review_round_id": "M001"}), encoding="utf-8")
+    bound_bad = _approval_binding_problems(ctx)
+    record("freeze binding passes for the approved round and fails for an older one",
+           bound_ok == [] and any("M001" in x for x in bound_bad), str(bound_ok + bound_bad))
+    # Legacy: a pre-1.8.1 freeze bound to a review-package id still validates.
+    st = State(p, ".wf").load()
+    st.record_decision("manuscript_human_reviewed", "NO_FURTHER_REVIEW",
+                       "user approved ZIP v001 package abcdef123456 explicitly")
+    legacy = {k: v for k, v in freeze.items() if k != "review_round_id"}
+    legacy.update(review_package_id="abcdef1234567890", frozen_at="2999-01-01T00:00:00Z")
+    scifreeze.freeze_path(p).write_text(json.dumps(legacy), encoding="utf-8")
+    ctx = Ctx(pipeline=pipe, state=State(p, ".wf").load(), project=p,
+              stage=pipe.stage("S19_human_review"), spec={})
+    record("an old paper whose freeze carries a legacy review_package_id still passes",
+           _approval_binding_problems(ctx) == [], str(_approval_binding_problems(ctx)))
+    st.record_decision("manuscript_human_reviewed", "NO_FURTHER_REVIEW",
+                       f"review round M002: user said no further review")
+    # Coverage: an artifact changed after the last round fails until a new (delta) round.
+    (p / "05_figures/legends.md").write_text(
+        (p / "05_figures/legends.md").read_text(encoding="utf-8") + "\nEdited.\n", encoding="utf-8")
+    stale = gate()
+    early = cli("decide", "no_further_review", "--words", "无需继续审阅")
+    cli("start", "--delta")
+    rnd3 = rr.latest(p, "manuscript")
+    cli("close", "--findings", "minor=1")
+    cli("decide", "no_further_review", "--words", "无需继续审阅")
+    fresh = gate()
+    record("coverage fails when a covered file changes after the last round; a delta round fixes it",
+           not stale.ok and "changed after review round M002" in stale.detail
+           and "05_figures/legends.md" in rnd3["reviewed"] and fresh.ok,
+           stale.detail + " | " + fresh.detail)
+    data = rr.load(p)
+    data["manuscript"][-1]["reviewed"] = []
+    (p / rr.REL).write_text(json.dumps(data), encoding="utf-8")
+    record("a delta round that skipped a changed file fails",
+           any("skipped changed" in x for x in rr.problems(p, "manuscript", None)))
+    record("approval cannot be recorded while a round is open or covered files drifted",
+           early.returncode != 0 or "changed after" in early.stderr, early.stderr[-200:])
+    # A legacy S19 paper with a review ZIP and no rounds keeps the legacy release check.
+    q, _ = _review_paper(tmp / "legacy")
+    (q / "07_manuscript/review_packages").mkdir(parents=True)
+    (q / "07_manuscript/review_packages/latest_review_package.json").write_text("{}", encoding="utf-8")
+    lg = get("review_round_approved")(Ctx(pipeline=pipe, state=State(q, ".wf").load(), project=q,
+                                          stage=pipe.stage("S19_human_review"),
+                                          spec={"check": "review_round_approved"}))
+    record("a legacy S19 paper with a review ZIP is judged by the legacy package check",
+           "legacy review package" in lg.detail, lg.detail)
+    st = State(q, ".wf").load()
+    st.data["pipeline_version"] = "1.8.0"
+    st.save()
+    st = State(q, ".wf").load()
+    st.migrate_pipeline("1.8.1", [s.id for s in pipe.stages])
+    events = [e for e in State(q, ".wf").load().data.get("events", [])
+              if e.get("kind") == "requirements_changed"]
+    record("migration to 1.8.1 records an event only (no paper file rewritten)",
+           len(events) == 1 and "review_round.py" in events[0]["detail"]
+           and (q / "07_manuscript/review_packages/latest_review_package.json").read_text() == "{}")
+
+
 def run(tmp: Path, record, section) -> None:
     tmp.mkdir(parents=True, exist_ok=True)
     run_tables(tmp, record, section)
+    run_review(tmp, record, section)

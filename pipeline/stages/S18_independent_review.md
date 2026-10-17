@@ -9,17 +9,15 @@ edits them. This is an independent scientific/editorial audit, not another writi
    `07_manuscript/supplementary_methods.md` when present, every workbook under
    `04_tables/main/` and `04_tables/supplementary/`, every rendered figure PNG in the plan,
    legends, captions and `01_protocol/artifact_plan.json`.
-   Do not change them while the reviewer is working. Print the exact inventory once:
+   Do not change them while the reviewer is working. Open review round 1 (it stays open; its
+   fixes are applied at S19):
 ```
-.\.venv\Scripts\python.exe tools/manuscript/review_package.py reader-inputs
+.\.venv\Scripts\python.exe tools/review_round.py start --scope manuscript
 ```
-   It prints a fenced `json` block (`reviewed_artifacts`: path -> SHA-256). Give the reviewer
+   It lists the exact current files, writes hash-bound text copies of the workbooks under
+   `.wf/review_text/` (regenerated now; give the reviewer these, never an older extract) and
+   prints a fenced `json` block (`reviewed_artifacts`: path -> SHA-256). Give the reviewer
    exactly those files, figures included; a review that never saw the figures cannot pass.
-   For workbooks it also writes hash-bound text copies under `.wf/review_text/` (regenerated
-   every call; give the read-only reviewer these, never an older extract).
-   **Delta re-review** after a small revision: `reader-inputs --delta` lists only the files
-   changed since the last passing review plus their dependants (`"mode": "delta"`); the
-   reviewer reads those, and unchanged files keep the earlier coverage, bound by hash.
 2. Delegate to exactly one independent subagent - **the `medpaper-reviewer` agent** - which
    must not edit files, run commands or advance a stage. It is declared `tools: ["read"]`, so
    that is structural rather than a request; do not grant it more. Give it the frozen paths
@@ -58,6 +56,7 @@ edits them. This is an independent scientific/editorial audit, not another writi
    `READY` means ready for the user's review and realistic SCIE targeting; `REVISE` means
    potentially publishable after listed corrections; `NOT_READY` means a material validity
    barrier remains. The workflow may still advance so the user can inspect the evidence.
+   Do not ask the user about individual findings here; S19 applies them and reports once.
 
 ## Outputs
 - `07_manuscript/independent_publishability_review.md`

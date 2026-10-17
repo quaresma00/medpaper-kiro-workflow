@@ -14,7 +14,7 @@
 
 [meta]
 name = "medpaper"
-version = "1.8.0"
+version = "1.8.1"
 schema = 1
 description = "Medical/clinical research pipeline: idea -> feasibility -> data -> analysis -> artifacts -> manuscript -> submission package."
 
@@ -57,7 +57,7 @@ invariants = [
   "A user-requested revision never leaves the workflow and never rewinds by default. At S19/S24: `rework.py batch --plan` per feedback message (collects, builds nothing), `rework.py seal --why` once the user is done, edit only the files `rework.py status` lists, then `rework.py check` (only the affected stages' content gates; any file changed outside the scope fails), `mark`, `close`. Completed stages stay completed; wf advance/loop are refused while a scoped round is open. Full rewind is the explicit fallback only (`batch --rewind`, e.g. a journal switch). Science changed after S19 returns to S19 for re-review and re-freeze before the journal copy is merged. Word-only layout edits are allowed at S24 only when the S23 visible-text baseline is unchanged.",
   "The scientific record is frozen when the user releases S19 review, and 07_manuscript/ is read-only from then on. Journal requirements - word caps, abstract shape, reference style, title page, required statements - are presentation, and are applied to the copy in 08_submission/manuscript/ that S20 opens for the chosen journal. Switching journals first loops to S20 and runs reset-journal, which moves the entire old submission tree to 08_submission/journal_archives/<journal>-<UTC>/ (archived, never deleted, never read by a gate), then takes a fresh copy from the same frozen text; no prior cache, title page, cover letter, trim, bundle or approval may survive in the live tree. Once S19 is done a missing freeze fails the gate, and the freeze also covers 03_analysis/results/*.json. scientific_freeze_intact, journal_variant_ready and variant_preserves_science are non-overridable. Prose may be tightened to fit a cap, but a number, citation or artifact reference that disappears is dropped content, which is a scientific decision needing the user's recorded authorisation.",
   "Repeated feedback is handled as a persisted revision round at S19 (scientific manuscript) or S24 (journal package). Interpret each message once into atomic items, collect them into one round, seal once and build once; read and rebuild only the sealed dependency closure, preserve unaffected approved evidence, and still run every applicable quality gate (`rework build --scope full` at most twice per round). Token or context pressure is never permission to omit an item, shorten the scientific work or skip validation; resume from tools/rework.py status after compaction.",
-  "Every initial or revised S19 scientific version must have a current, versioned third-party review ZIP and be presented with clickable locations for the manuscript, optional supplementary Methods, tables, figures and independent verdict. Remain at S19 until the user explicitly states that no further review is needed; silence, file delivery, thanks, or a generic continue instruction is not approval.",
+  "Review points (S18/S19 manuscript, S24/S25 package) run as rounds: tools/review_round.py start, the read-only medpaper-reviewer subagent reads the printed current files, you apply on your own judgement the fixes that improve the paper (scoped rework where frozen science requires it), close the round, give the user ONE summary (findings by severity, changes file + one line, what was kept and why) and ask one question: another round or no further review. No export package, no per-change permission. Stay until the user explicitly says no further review; silence, thanks or a generic continue is not approval.",
   "Figures render in R by default (figure_engine); analysis may stay in Python. A figure drawn with the other engine needs `renderer` and a `renderer_reason` (>= 20 characters) in the artifact plan. Approved Python figures are kept as they are: never refit confirmed models just to render them in R. R figures carry a render receipt (script, result and output hashes); a changed script or result makes qc.py fail until the figure is re-rendered.",
   "If you are unsure where you are, run `.\\.venv\\Scripts\\python.exe tools\\wf.py status`. Never guess the current stage.",
 ]
@@ -604,7 +604,7 @@ id = "S19_human_review"
 title = "User review of the full manuscript, supplementary Methods and tables"
 card = "stages/S19_human_review.md"
 needs_user = true
-outputs = ["07_manuscript/human_review.md", "07_manuscript/review_packages/latest_review_package.json", "07_manuscript/scientific_freeze.json"]
+outputs = ["07_manuscript/human_review.md", "07_manuscript/scientific_freeze.json"]
 [[stage.gate]]
 check = "outputs_exist"
 [[stage.gate]]
@@ -633,10 +633,10 @@ require_all_cited = true
 require_rendered = true
 [[stage.gate]]
 check = "revision_rounds_closed"
+# 1.8.1: subagent review rounds replace the S19 review ZIP (legacy ZIPs still pass).
 [[stage.gate]]
-check = "manuscript_review_package_current"
-[[stage.gate]]
-check = "s19_review_release_explicit"
+check = "review_round_approved"
+scope = "manuscript"
 # The user has said the science needs no further change, so hash it here. From S20 on, a journal
 # requirement is satisfied by adapting a copy in 08_submission/manuscript/, never by editing
 # these files - which is what stopped a second journal choice from churning settled text.
@@ -863,6 +863,9 @@ check = "journal_variant_ready"
 check = "variant_preserves_science"
 [[stage.gate]]
 check = "reporting_checklist_complete"
+[[stage.gate]]
+check = "review_round_approved"
+scope = "package"
 [[stage.gate]]
 check = "decision_recorded"
 name = "submission_package_user_confirmed"

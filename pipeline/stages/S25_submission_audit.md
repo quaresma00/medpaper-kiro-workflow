@@ -72,8 +72,9 @@ the chosen journal's current official instructions.
 ```
 .\.venv\Scripts\python.exe tools/wf.py decide submission_package_independent_audit "PASS|REVISE|BLOCKED" --why "<concise evidence-based basis>"
 ```
-6. For `REVISE`, summarise the findings, return to S24, correct the package, revalidate it and
-   obtain a new explicit user confirmation before auditing the changed freeze:
+6. For `REVISE`, loop to S24 and run one review round there with these findings as its review:
+   fix on your own judgement, report once, ask the single another-round question; audit the
+   new freeze after the user's no-further-review answer:
 ```
 .\.venv\Scripts\python.exe tools/wf.py loop --to S24_package_human_review --why "<material audit defects requiring correction and renewed user confirmation>"
 ```
@@ -92,8 +93,8 @@ the chosen journal's current official instructions.
 - A checklist assertion is not evidence; inspect the actual file and official rule.
 - Read as a first-time reader and editor; do not treat prior automated QA or scientific review
   as proof that the prose is understandable or free of elementary errors.
-- The subagent reports defects but never edits the frozen package. Corrections occur only after
-  returning to S24, followed by renewed user confirmation and a new freeze.
+- The subagent reports defects but never edits the frozen package. Corrections happen in an
+  S24 review round, then the user's no-further-review answer and a new freeze.
 - A reference-count field is optional when the journal is silent, but if present it must match
   the actual citation set in both the canonical title page and frozen Word file.
 - `PASS` is required to complete the pipeline. Portal-only user tasks may be listed, but an

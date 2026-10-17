@@ -41,6 +41,7 @@ NON_OVERRIDABLE_GATES = {
     "citekeys_resolve",
     "revision_rounds_closed",
     "s19_review_release_explicit",
+    "review_round_approved",
     # Deferring a visual review is permission to batch the look, not to skip it.
     "visual_debts_cleared",
     # A deep read of the wrong paper is worse than a missing one: it puts confident, sourced
@@ -701,6 +702,9 @@ def cmd_advance(args) -> int:
         if "revision_rounds_closed" in failed_names:
             print("--force cannot waive an unfinished revision round. Complete every recorded "
                   "item, return through its gates, and close the round at the review stage.")
+        if "review_round_approved" in failed_names:
+            print("--force cannot waive a review point. Finish the subagent review round, report "
+                  "it, and record the user's answer with tools/review_round.py decide.")
         if "s19_review_release_explicit" in failed_names:
             print("--force cannot waive S19 review. Present the current versioned ZIP and exact "
                   "artifact paths, then wait for the user's explicit no-further-review statement.")

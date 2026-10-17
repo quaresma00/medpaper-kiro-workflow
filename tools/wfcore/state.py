@@ -98,6 +98,7 @@ class State:
             self._note_legacy_revision()
             self._note_on_demand_checklist(old_version)
             self._note_v180(old_version)
+            self._note_v181(old_version)
             self.save()
         return changed
 
@@ -116,6 +117,22 @@ class State:
                    "legends; regenerate SUBMISSION_CHECKLIST.md with tools/manuscript/submission_qc.py "
                    "write; supplementary legends move to the supplementary file; papers before S03/S06 "
                    "add 'Design precedent' lines. Paper files were not modified.")
+
+    def _note_v181(self, old_version: str) -> None:
+        """1.8.1: review rounds replace the S19 review ZIP; Word tables get three-line borders."""
+        try:
+            old = tuple(int(x) for x in old_version.split(".")[:3])
+        except ValueError:
+            old = (0,)
+        if old >= (1, 8, 1) or self.data.get("v181_migration_noted"):
+            return
+        self.data["v181_migration_noted"] = True
+        self.event("requirements_changed",
+                   "1.8.1: S19/S24 review is a subagent round loop (tools/review_round.py); no "
+                   "review ZIP is built. A paper already holding a review ZIP or an S24 OK keeps "
+                   "passing on it; the next review starts a round. Rebuild a manuscript DOCX with "
+                   "word_tables for three-line tables on their own pages. Paper files were not "
+                   "modified.")
 
     def _note_on_demand_checklist(self, old_version: str) -> None:
         """1.7.3: no pre-emptive registration or reporting checklist. Nothing to convert - the

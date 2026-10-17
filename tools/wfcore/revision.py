@@ -32,7 +32,7 @@ SCIENTIFIC_KINDS = {"study-design", "data", "analysis", "final-protocol"}
 # content of a revised file, so a scoped round never runs them in place.
 LIFECYCLE_CHECKS = {
     "no_future_artifacts", "single_section_written", "temp_clean", "revision_rounds_closed",
-    "manuscript_review_package_current", "s19_review_release_explicit",
+    "manuscript_review_package_current", "s19_review_release_explicit", "review_round_approved",
     "scientific_freeze_captured", "bundle_matches_freeze", "submission_audit_matches_freeze",
     "paper_override_skip",
 }

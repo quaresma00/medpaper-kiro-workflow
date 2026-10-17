@@ -1,6 +1,6 @@
 ---
 name: medpaper-reviewer
-description: Independent read-only reviewer for a frozen medical manuscript, supplementary file, table set or submission package. Judges publication readiness, journal-guideline compliance, and whether a reader or editor would understand it. Use at the pipeline's independent-review stages (S18, S25) or whenever finished work needs an outside critique. Cannot edit files, run commands, or advance any workflow.
+description: Independent read-only reviewer for a frozen medical manuscript, supplementary file, table set or submission package. Judges publication readiness, journal-guideline compliance, and whether a reader or editor would understand it. Use at the pipeline's independent-review stages (S18, S25) and the S19/S24 review rounds or whenever finished work needs an outside critique. Cannot edit files, run commands, or advance any workflow.
 tools: ["read"]
 includeMcpJson: false
 includePowers: false

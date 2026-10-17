@@ -62,6 +62,7 @@ PROTECTED_CHECKS = frozenset({
     "citekeys_resolve",
     "revision_rounds_closed",
     "s19_review_release_explicit",
+    "review_round_approved",
     "visual_debts_cleared",
     "deepread_complete",
     "scientific_freeze_intact",

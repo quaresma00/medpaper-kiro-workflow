@@ -2132,8 +2132,8 @@ def run_codex_integration() -> None:
                f"card must name `{agent}` so the work is not done in the main context")
 
     record("pipeline and skill versions agree",
-           pipe["meta"]["version"] == "1.8.0" and 'version: "2.1.0"' in skill,
-           f'pipeline={pipe["meta"]["version"]}, skill=2.1.0 (Kiro adapter revision)')
+           pipe["meta"]["version"] == "1.8.1" and 'version: "2.1.1"' in skill,
+           f'pipeline={pipe["meta"]["version"]}, skill=2.1.1 (Kiro adapter revision)')
     record("all 25 stage cards exist",
            len(pipe["stage"]) == 25 and
            all((ROOT / "pipeline" / s["card"]).is_file() for s in pipe["stage"]),
@@ -2166,7 +2166,8 @@ def run_codex_integration() -> None:
     record("final package audit waits for explicit user OK and is independent",
            package_human.get("needs_user") is True and
            final_audit.get("needs_user", False) is False and
-           "是否确认 OK" in package_human_card and
+           "无需继续审阅" in package_human_card and
+           "review_round.py decide no_further_review --scope package" in package_human_card and
            "tools/package_review.py freeze" in package_human_card and
            "exactly one independent read-only subagent" in final_audit_card and
            "Freeze ID: <freeze_id>" in final_audit_card and
@@ -2199,15 +2200,14 @@ def run_codex_integration() -> None:
            "tools/rework.py status" in package_human_card and
            "Never recapture at S24" in package_human_card,
            "persisted S19/S24 rounds + component equality + visible-text enforcement")
-    record("S19 requires a current third-party ZIP and explicit no-further-review decision",
-           "manuscript_review_package_current" in human_checks and
-           "s19_review_release_explicit" in human_checks and
-           "tools/manuscript/review_package.py build" in human_card and
-           "无需继续审核，可以进入下一步" in human_card and
-           "05_figures/out/" in human_card and "exact ZIP" in human_card and
-           '"s19_review_release_explicit"' in
+    record("S19 runs subagent review rounds (no review ZIP) and needs explicit no-further-review",
+           "review_round_approved" in human_checks and
+           "manuscript_review_package_current" not in human_checks and
+           "tools/review_round.py start" in human_card and "medpaper-reviewer" in human_card and
+           "无需继续审阅" in human_card and "ZIP" not in human_card and
+           '"review_round_approved"' in
            (ROOT / "tools/wfcore/cli.py").read_text(encoding="utf-8"),
-           "versioned review ZIP + exact paths + package-bound non-overridable stop")
+           "round-bound non-overridable stop")
     journal = next(s for s in pipe["stage"] if s["id"] == "S20_journal")
     polish = next(s for s in pipe["stage"] if s["id"] == "S22_polish")
     journal_stages = {s["id"]: {g["check"] for g in s["gate"]}
@@ -5089,9 +5089,9 @@ def run_v160(tmp: Path) -> None:
                if s["id"] == "S18_independent_review")
     record("reader_review_coverage is wired into the S18 gate and card",
            any(g["check"] == "reader_review_coverage" for g in s18["gate"])
-           and "reader-inputs" in (ROOT / "pipeline/stages/S18_independent_review.md")
+           and "review_round.py start --scope manuscript" in (ROOT / "pipeline/stages/S18_independent_review.md")
            .read_text(encoding="utf-8"))
-    record("pipeline version is 1.8.0", pipe.meta.get("version") == "1.8.0")
+    record("pipeline version is 1.8.1", pipe.meta.get("version") == "1.8.1")
 
 
 def run_v170(tmp: Path) -> None:
@@ -5332,7 +5332,7 @@ def run_v170(tmp: Path) -> None:
            and not early, _out(qs)[-200:])
     s19 = pipe.stage("S19_human_review")
     record("the S19 re-review still requires explicit approval and a re-freeze",
-           any(g.get("check") == "s19_review_release_explicit" for g in s19.gate)
+           any(g.get("check") == "review_round_approved" for g in s19.gate)
            and any(g.get("check") == "scientific_freeze_captured" for g in s19.gate)
            and "rebind-variant" in (ROOT / "tools/manuscript/scientific_freeze.py")
            .read_text(encoding="utf-8"))

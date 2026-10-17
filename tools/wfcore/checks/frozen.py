@@ -75,8 +75,8 @@ def scientific_freeze_intact(ctx: Ctx) -> Result:
             return Result(
                 False, "scientific_freeze_intact", "; ".join(binding),
                 ["The freeze must be the text the user released at S19. Loop to S19, present "
-                 "the current review ZIP, record manuscript_human_reviewed NO_FURTHER_REVIEW "
-                 "with its package ID, then re-capture the freeze."])
+                 "a review round (tools/review_round.py), record the user's no-further-review "
+                 "answer with review_round.py decide, then re-capture the freeze."])
     if ok:
         return Result(True, "scientific_freeze_intact",
                       f"{count} frozen scientific file(s) unchanged since review closed")
@@ -110,14 +110,15 @@ def _approval_binding_problems(ctx: Ctx) -> list[str]:
         freeze = scifreeze.load_freeze(ctx.project)
     except SystemExit as exc:
         return [str(exc)]
-    package_id = str(freeze.get("review_package_id", ""))
-    if not package_id:
+    round_id = str(freeze.get("review_round_id", ""))  # 1.8.1 subagent review rounds
+    package_id = str(freeze.get("review_package_id", ""))  # legacy review ZIP (1.6.0-1.8.0)
+    if not round_id and not package_id:
         return []
-    token = package_id[:12]
+    token = round_id or package_id[:12]
     problems = []
     if token not in str(decision.get("rationale", "")):
-        problems.append(f"the freeze is bound to S19 review package {token}, which the "
-                        "approval decision does not name")
+        problems.append(f"the freeze is bound to S19 review {'round' if round_id else 'package'} "
+                        f"{token}, which the approval decision does not name")
     if str(freeze.get("frozen_at", "")) < str(decision.get("at", "")):
         problems.append("the scientific freeze predates the current S19 approval")
     return problems
