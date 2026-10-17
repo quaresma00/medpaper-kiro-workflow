@@ -212,8 +212,11 @@ def journal_limits_met(ctx: Ctx) -> Result:
                 if ctx.psrc(f"07_manuscript/{name}.md").is_file())
         counts = journalspec.markdown_counts(text, scope)
         refs, basis = _ref_count(ctx), f"{rel} (Word-compatible count)"
-    margin = float(ctx.target("journal_limit_margin", 0.97))
-    problems, notes = [], []
+    # 1.9.0 (#11): at or below the cap passes (margin 1.0 by default, configurable); the old
+    # 97% safety band is a warning only (journal_limit_warn_share), never a block.
+    margin = float(ctx.target("journal_limit_margin", 1.0))
+    warn_share = float(ctx.target("journal_limit_warn_share", 0.97))
+    problems, notes, near = [], [], []
     for key, label, got in (("main_text_words", "main text", counts["main"]),
                             ("abstract_words", "abstract", counts["abstract"])):
         cap = caps[key]
@@ -221,7 +224,9 @@ def journal_limits_met(ctx: Ctx) -> Result:
             continue
         allowed = int(cap * margin)
         (problems if got > allowed else notes).append(
-            f"{label} {got}/{cap} words (margin {allowed})")
+            f"{label} {got}/{cap} words" + (f" (margin {allowed})" if allowed != cap else ""))
+        if got <= allowed and got > cap * warn_share:
+            near.append(f"{label} {got}/{cap}")
     nfig, ntab = _display_counts(ctx)
     for key, label, got in (("reference_limit", "references", refs),
                             ("display_items", "main display items", nfig + ntab),
@@ -239,6 +244,11 @@ def journal_limits_met(ctx: Ctx) -> Result:
             ["Cut content, do not compress into denser jargon.",
              "If cutting would remove something a reviewer needs, move it to the supplement."],
         )
+    if near:
+        return Result(False, "journal_limits_met",
+                      "within journal limits, close to the cap (portal counters may differ): "
+                      + "; ".join(near) + " | " + "; ".join(notes),
+                      ["Optional: check the count in the submission portal."], severity="warn")
     return Result(True, "journal_limits_met", "within journal limits: " + "; ".join(notes))
 
 

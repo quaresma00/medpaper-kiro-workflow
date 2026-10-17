@@ -35,6 +35,13 @@ def _resolve_manuscript_paths(spec: dict, project: Path) -> dict:
 STOP_ON_FAIL = frozenset({"outputs_exist"})
 
 
+def pinned_out(state, sid: str, spec: dict) -> bool:
+    """1.9.0 (#8): a gate marked `since = "X"` newer than the paper's engine pin does not
+    re-judge a stage the paper already completed; stages not yet completed get it."""
+    fn = getattr(state, "pin_excludes", None)
+    return bool(fn and fn(sid, spec.get("since")))
+
+
 def run_stage(pipeline, state, project: Path, stage, *, reuse: bool = False,
               record: bool = False) -> list[Result]:
     """Run a stage gate.
@@ -63,6 +70,11 @@ def run_stage(pipeline, state, project: Path, stage, *, reuse: bool = False,
                 Result(False, name or "<missing>", f"unknown check '{name}' - not in the registry",
                        [f"Known checks: {', '.join(checks.known())}"])
             )
+            continue
+        if pinned_out(state, stage.id, spec):
+            results.append(Result(True, name, f"gate added in engine {spec.get('since')}; this "
+                                  f"completed stage keeps the paper's pinned {state.engine_pin} "
+                                  "gate set (wf migrate adopts it)"))
             continue
         ctx = Ctx(pipeline=pipeline, state=state, project=project, stage=stage, spec=spec)
         try:

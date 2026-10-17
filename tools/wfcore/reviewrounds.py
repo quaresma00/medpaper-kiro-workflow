@@ -46,9 +46,13 @@ def inputs(project: Path, scope: str) -> dict[str, str]:
     if scope == "manuscript":
         from .readerreview import reader_inputs
         return reader_inputs(project)
-    from .packagefreeze import FREEZE_REL, _sha256, expected_files
-    return {rel: _sha256(p) for rel, p in expected_files(project).items()
-            if rel not in (FREEZE_REL, SCOPES["package"]["summary"])}
+    # 1.9.0: a package round covers the uploads by visible content; internal QC, notes and
+    # receipts are evidence and never reopen review.
+    from .determinism import content_sha256
+    from .packagefreeze import FREEZE_REL, expected_files, upload_files
+    uploads = upload_files(project)
+    return {rel: content_sha256(p) for rel, p in expected_files(project).items()
+            if rel in uploads and rel not in (FREEZE_REL, SCOPES["package"]["summary"])}
 
 
 def load(project: Path) -> dict:
@@ -77,11 +81,26 @@ def latest(project: Path, scope: str) -> dict | None:
     return rounds[-1] if rounds else None
 
 
-def _changed_since(prev: dict | None, current: dict[str, str]) -> list[str]:
+def _changed_since(prev: dict | None, current: dict[str, str],
+                   project: Path | None = None) -> list[str]:
     if not prev:
         return sorted(current)
     after = prev.get("after") or {}
-    return sorted(r for r, h in current.items() if after.get(r) != h)
+    changed = [r for r, h in current.items() if after.get(r) != h]
+    if project is None or not changed:
+        return sorted(changed)
+    from . import presentation
+    from .determinism import raw_sha256
+    out = []
+    for r in changed:
+        p = Path(project) / r
+        old = str(after.get(r, ""))
+        if old and p.is_file() and old.casefold() == raw_sha256(p).casefold():
+            continue  # a pre-1.9.0 round recorded the raw hash of the same bytes
+        if presentation.covered(project, r, prev.get("closed_at")):
+            continue  # a presentation delta after the round (facts unchanged, 1.9.0)
+        out.append(r)
+    return sorted(out)
 
 
 def start(project: Path, scope: str, stage: str, delta: bool = False) -> dict:
@@ -144,7 +163,7 @@ def decide(project: Path, scope: str, answer: str, words: str) -> dict:
     if not rnd or not rnd.get("closed_at"):
         raise ValueError("close the round (report to the user) before recording the answer")
     if answer == DONE:
-        drift = _changed_since(rnd, inputs(project, scope))
+        drift = _changed_since(rnd, inputs(project, scope), project)
         if drift:
             raise ValueError("changed after the round closed (run another round, --delta is "
                              "fine): " + ", ".join(drift[:6]))
@@ -216,7 +235,7 @@ def problems(project: Path, scope: str, decision: dict | None) -> list[str]:
     if last["user_decision"] == ANOTHER:
         return out + [f"the user asked for another review round after {last['id']}; start it"]
     try:
-        drift = _changed_since(last, inputs(project, scope))
+        drift = _changed_since(last, inputs(project, scope), project)
     except (OSError, ValueError, KeyError, TypeError) as exc:
         return out + [f"cannot inventory the review inputs: {exc}"]
     if drift:

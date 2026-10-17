@@ -36,6 +36,7 @@ Interpret the finding against the literature you actually read. One file, this s
 - `07_manuscript/discussion.md`
 
 ## Hard rules
+- Body text is continuous paragraphs (1.9.0). Lists only where a sentence truly cannot carry the content (rarely more than one short list per section); every result, count, criterion, covariate and sensitivity finding is written as a sentence. `prose_not_lists` fails above `body_list_items_max` items or `body_list_share_max` of the blocks.
 - ONE section file this stage.
 - Never mention the pipeline's own history (independent review, earlier draft, previous
   version, reviewer). A change of analysis is a "protocol deviation" or "post hoc analysis".

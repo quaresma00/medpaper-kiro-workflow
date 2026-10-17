@@ -26,9 +26,10 @@ if (!exists("save_medpaper", mode = "function")) source(file.path(dirname(.rc_se
   if (!is.null(n) && length(x) != n) stop(what, " must have length ", n, call. = FALSE)
   invisible(x)
 }
-.fmt_num <- function(x, dp = 2) formatC(x, format = "f", digits = dp)
-.fmt_est <- function(est, lo, hi, dp = 2) sprintf("%s (%s-%s)", .fmt_num(est, dp), .fmt_num(lo, dp), .fmt_num(hi, dp))
-.fmt_p <- function(p) if (p < 0.001) "<0.001" else if (p < 0.01) .fmt_num(p, 3) else .fmt_num(p, 2)
+# 1.9.0: number style follows the journal (medpaper_numfmt() in medfig.R), never hard-coded.
+.fmt_num <- function(x, dp = 2) mf_fmt_num(x, dp)
+.fmt_est <- function(est, lo, hi, dp = 2) mf_fmt_est(est, lo, hi, dp)
+.fmt_p <- function(p) mf_fmt_p(p)
 .rc_tag <- function(p, archetype) { attr(p, "medpaper_archetype") <- archetype; p }
 
 .rc_risk_leaf <- function(rt, times, levels_, palette) {

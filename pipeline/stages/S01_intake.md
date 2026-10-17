@@ -46,6 +46,7 @@ later stage argues against the same target instead of a remembered paraphrase.
 - `03_analysis/notes.md`
 
 ## Hard rules
+- Spelling system (1.9.0): new papers are American English (`.wf/config.toml` spelling = "american"). If the user wants British, record it now: `wf config set spelling british`. Table and R/Python figure builders read it (and the chosen journal's `target_journal.json` spelling later), so switching is a rebuild, never a scientific change.
 - If people will code, classify or adjudicate any variable, ask now in the same question who
   they are: role, specialty and years of experience for each coder and the adjudicator.
   Record it in `idea.json` (`human_coders`); Methods needs it and it cannot be reconstructed later.

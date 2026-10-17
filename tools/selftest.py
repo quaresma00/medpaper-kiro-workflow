@@ -2132,8 +2132,8 @@ def run_codex_integration() -> None:
                f"card must name `{agent}` so the work is not done in the main context")
 
     record("pipeline and skill versions agree",
-           pipe["meta"]["version"] == "1.8.1" and 'version: "2.1.1"' in skill,
-           f'pipeline={pipe["meta"]["version"]}, skill=2.1.1 (Kiro adapter revision)')
+           pipe["meta"]["version"] == "1.9.0" and 'version: "2.2.0"' in skill,
+           f'pipeline={pipe["meta"]["version"]}, skill=2.2.0 (Kiro adapter revision)')
     record("all 25 stage cards exist",
            len(pipe["stage"]) == 25 and
            all((ROOT / "pipeline" / s["card"]).is_file() for s in pipe["stage"]),
@@ -2171,7 +2171,7 @@ def run_codex_integration() -> None:
            "tools/package_review.py freeze" in package_human_card and
            "exactly one independent read-only subagent" in final_audit_card and
            "Freeze ID: <freeze_id>" in final_audit_card and
-           "allowed = [\"PASS\"]" in
+           "allowed = [\"PASS\", \"PASS_AUTHOR_FINAL_COPY\"]" in
            (ROOT / "pipeline/pipeline.toml").read_text(encoding="utf-8") and
            "loop --to S24_package_human_review" in final_audit_card,
            "user confirmation -> immutable freeze -> one guideline audit -> PASS or S24 loop")
@@ -5091,7 +5091,7 @@ def run_v160(tmp: Path) -> None:
            any(g["check"] == "reader_review_coverage" for g in s18["gate"])
            and "review_round.py start --scope manuscript" in (ROOT / "pipeline/stages/S18_independent_review.md")
            .read_text(encoding="utf-8"))
-    record("pipeline version is 1.8.1", pipe.meta.get("version") == "1.8.1")
+    record("pipeline version is 1.9.0", pipe.meta.get("version") == "1.9.0")
 
 
 def run_v170(tmp: Path) -> None:
@@ -5750,6 +5750,8 @@ def main() -> int:
         selftest_v180.run(tmp / "v180_root", record, section)
         import selftest_v181
         selftest_v181.run(tmp / "v181_root", record, section)
+        import selftest_v190
+        selftest_v190.run(tmp / "v190_root", record, section)
         run_new_wiring()
         section("isolation")
         record("selftest did not touch the real papers root or user home",

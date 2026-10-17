@@ -104,6 +104,11 @@ Then repeat S20 from the shortlist with fresh official evidence and call `open-v
 new journal. `07_manuscript/` and its freeze are never touched. `open-variant --force` is only
 for rebuilding the current S20 variant; it clears S21+ downstream files as well as the variant.
 
+## CSL check (1.9.0)
+```
+.\.venv\Scripts\python.exe tools/manuscript/csl_check.py --csl project/08_submission/journal.csl --example "<official example reference>"
+```
+
 ## Outputs
 - `08_submission/journal_shortlist.md`
 - `08_submission/target_journal.json`
@@ -112,6 +117,8 @@ for rebuilding the current S20 variant; it clears S21+ downstream files as well 
 - `08_submission/manuscript/` (the journal adaptation copy, opened from the frozen source)
 
 ## Hard rules
+- Record typed structure fields in target_journal.json: `main_text_headings`, `keywords` {min, max, separator}, `running_title_position`, `blinded_main_manuscript`, `spelling`, `number_format` {p_space, minus (unicode|hyphen), thousands (","|"thin"|""), interval}. Builders and checks read them; a change to them later is a `journal-format` (presentation) revision.
+- CSL (1.9.0): compare the journal's official example reference with the rendered list before S23 and fix differences with a paper-local `08_submission/csl_patch.json` (never by editing refs.bib or the final Word file). `initialize-with-hyphen` only works on the `<style>` root - use `{"initialize_with_hyphen": false}` in the patch.
 - Never state indexing, quartile, fees, turnaround or format rules from memory.
 - Never satisfy a journal requirement by editing `07_manuscript/`. That is what the variant is
   for, and `scientific_freeze_intact` is non-overridable.

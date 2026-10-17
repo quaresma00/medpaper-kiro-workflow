@@ -32,7 +32,7 @@ except ImportError as exc:  # pragma: no cover - clear deployment failure
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
-from wfcore import docxaudit, journalspec, paths as wfpaths, scifreeze  # noqa: E402
+from wfcore import determinism, docxaudit, journalspec, paths as wfpaths, scifreeze  # noqa: E402
 from wfcore.packagecontent import build_receipt_path  # noqa: E402
 
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -381,8 +381,12 @@ def _add_page_numbers(doc, font: str, size: float) -> None:
 
 
 def normalize_docx(path: Path, style: dict, kind: str, *, legend_bold: bool = True,
-                   reference_separator: str = "space") -> None:
+                   reference_separator: str = "space", blind: bool = False) -> None:
     doc = Document(path)
+    if blind:  # 1.9.0 (#13): no author identity in the review-facing file's metadata
+        cp = doc.core_properties
+        cp.author = ""
+        cp.last_modified_by = ""
     font = str(style["font_family"])
     body_pt = float(style["body_font_pt"])
     title_pt = float(style["title_font_pt"])
@@ -475,6 +479,9 @@ def normalize_docx(path: Path, style: dict, kind: str, *, legend_bold: bool = Tr
 
     doc.save(path)
     _sanitize_package_xml(path, font)
+    # 1.9.0: identical source -> identical bytes (fixed zip dates and docProps timestamps);
+    # blinded files also lose creator/lastModifiedBy/company.
+    determinism.normalize(path, blind=blind)
 
 
 def _sanitize_package_xml(path: Path, font: str) -> None:
@@ -798,6 +805,48 @@ def _xlsx_table(path: Path, label: str) -> dict:
             "header": [cells(i, True) for i in head], "body": [cells(i, False) for i in body]}
 
 
+# 1.9.0 (#15): "< 0.001", "(n = 162)", "n = 40", "95% CI" must not break inside a narrow cell.
+_NOBREAK_RES = (
+    re.compile(r"([<>\u2264\u2265=])[ \t]+(?=[-\u2212]?\.?\d)"),          # "< 0.001" -> "<\u00a00.001"
+    re.compile(r"(?<![\w])([nNpP])[ \t]*(=)[ \t]*"),                    # "n = 162"
+    re.compile(r"(\d%)[ \t]+(?=CI\b|CrI\b|PI\b)"),                       # "95% CI"
+)
+
+
+def nobreak(text: str) -> str:
+    if not text:
+        return text
+    text = _NOBREAK_RES[1].sub("\\1\u00a0\\2\u00a0", text)
+    text = _NOBREAK_RES[0].sub("\\1\u00a0", text)
+    return _NOBREAK_RES[2].sub("\\1\u00a0", text)
+
+
+def _token_chars(table: dict) -> list[int]:
+    """Longest unbreakable run per column (after nobreak), the minimum a column needs."""
+    out = [0] * table["ncol"]
+    for row in table["header"] + table["body"]:
+        col = 0
+        for cell in row:
+            if cell["span"] == 1 and col < len(out):
+                runs = re.split(r"[ \t\n]+", nobreak(cell["text"]))
+                out[col] = max([out[col]] + [len(r) for r in runs])
+            col += cell["span"]
+    return out
+
+
+def _fit_widths(natural: list[float], minimum: list[float], avail: int) -> list[int]:
+    """Proportional widths that never squeeze a column below its longest unbreakable token."""
+    total = sum(natural) or 1
+    widths = [max(400.0, avail * n / total, m) for n, m in zip(natural, minimum)]
+    over = sum(widths) - avail
+    if over > 0:
+        slack = [max(0.0, w - max(400.0, m)) for w, m in zip(widths, minimum)]
+        room = sum(slack)
+        if room > 0:
+            widths = [w - over * s / room if over < room else w - s for w, s in zip(widths, slack)]
+    return [int(w) for w in widths]
+
+
 def _column_chars(table: dict) -> list[int]:
     chars = [0] * table["ncol"]
     for row in table["header"] + table["body"]:
@@ -854,7 +903,7 @@ def _table_xml(table: dict, widths: list[int]) -> str:
             run = ""
             if cell["text"]:
                 run = ("<w:r>" + ("<w:rPr><w:b/></w:rPr>" if cell["bold"] else "")
-                       + f'<w:t xml:space="preserve">{_esc(cell["text"])}</w:t></w:r>')
+                       + f'<w:t xml:space="preserve">{_esc(nobreak(cell["text"]))}</w:t></w:r>')
             out.append(f'<w:tc><w:tcPr>{pr}</w:tcPr><w:p><w:pPr><w:jc w:val="{cell["jc"]}"/>'
                        f"</w:pPr>{run}</w:p></w:tc>")
         out.append("</w:tr>")
@@ -899,7 +948,7 @@ def _table_block(project: Path, entry: dict, caption: str, style: dict | None,
         chars, font, w - 2 * m, overrides.get(docxaudit.canon_figure_id(label), "auto"))
     avail = (h if orientation == "landscape" else w) - 2 * m
     natural = [min(c, docxaudit.TABLE_CHAR_CAP) * font * 10 + 216 for c in chars]
-    widths = [max(400, int(avail * n / sum(natural))) for n in natural]
+    widths = _fit_widths(natural, [t * font * 10 + 216 for t in _token_chars(table)], avail)
     caption = caption or table["title"]
     md = (f"## {label}. {caption}".rstrip() + "\n\n```{=openxml}\n"
           + _table_xml(table, widths) + "\n```")
@@ -940,6 +989,10 @@ def _info_page(project: Path) -> str:
         lines += [f"Article title: {title}", ""]
     if target.get("journal"):
         lines += [f"Journal: {target['journal']}", ""]
+    if journalspec.blinded(target):
+        # 1.9.0 (#13): a double-blind journal's supplementary file is blinded like the
+        # manuscript - no author names or correspondence on its first page.
+        return "\n".join(lines) + "\n"
     try:
         info = json.loads((project / "00_input/author_info.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -957,6 +1010,24 @@ def _info_page(project: Path) -> str:
     return "\n".join(lines) + "\n"
 
 
+def journal_structure(text: str, target: dict) -> str:
+    """1.9.0: the journal's heading names and keyword separator, applied to the render copy.
+
+    The Markdown keeps the workflow's canonical '# Methods' and comma-joined keywords; a journal
+    that wants 'Materials and Methods' or 'Keywords: a; b; c' gets them in the DOCX only.
+    """
+    for canon, shown in journalspec.main_text_headings(target).items():
+        if shown != canon:
+            text = re.sub(rf"(?mi)^#\s+{re.escape(canon)}\s*$", f"# {shown}", text, count=1)
+    rules = journalspec.keyword_rules(target)
+    if rules["separator"] != ",":
+        def join(m):
+            terms = journalspec.keyword_terms(m.group(2), rules)
+            return m.group(1) + f"{rules['separator']} ".join(terms)
+        text = re.sub(r"(?mi)^(Keywords\s*:\s*)(.+)$", join, text, count=1)
+    return text
+
+
 def prepare_source(kind: str, inputs: list[Path], project: Path, workdir: Path,
                    style: dict | None = None) -> list[Path]:
     """Apply the journal's presentation rules to a temporary copy handed to Pandoc."""
@@ -965,6 +1036,7 @@ def prepare_source(kind: str, inputs: list[Path], project: Path, workdir: Path,
     text = "\n\n".join(p.read_text(encoding="utf-8", errors="replace") for p in inputs)
     target = journalspec.load(project)
     if kind == "manuscript":
+        text = journal_structure(text, target)
         m = re.search(r"(?mi)^#\s+Figure legends\s*$", text)
         if m:
             head, legends = text[:m.start()], text[m.start():]
@@ -1009,11 +1081,50 @@ def prepare_source(kind: str, inputs: list[Path], project: Path, workdir: Path,
     return [out]
 
 
+CSL_PATCH_REL = "08_submission/csl_patch.json"
+
+
+def patch_csl(xml: str, patch: dict) -> str:
+    """1.9.0 (#14): paper-local CSL corrections for a community style that lags the guide.
+
+    08_submission/csl_patch.json (in the paper, never the engine):
+      {"initialize_with_hyphen": false,      -> attribute on the <style> root (where CSL reads it)
+       "citation_brackets": true,             -> citation layout prefix "[" suffix "]"
+       "replace": [{"find": "...", "with": "..."}]}   literal edits, applied in order
+    """
+    if not isinstance(patch, dict):
+        return xml
+    if "initialize_with_hyphen" in patch:
+        value = "true" if patch["initialize_with_hyphen"] else "false"
+        xml = re.sub(r'\s+initialize-with-hyphen="[^"]*"', "", xml)
+        xml = re.sub(r"<style\b", f'<style initialize-with-hyphen="{value}"', xml, count=1)
+    if patch.get("citation_brackets"):
+        def bracket(m):
+            tag = re.sub(r'\s+(?:prefix|suffix)="[^"]*"', "", m.group(0))
+            return tag[:-1] + ' prefix="[" suffix="]">'
+        xml = re.sub(r"(?s)(<citation\b.*?)(<layout\b[^>]*>)",
+                     lambda m: m.group(1) + bracket(re.match(r".*", m.group(2))), xml, count=1)
+    for rep in patch.get("replace", []) if isinstance(patch.get("replace"), list) else []:
+        if isinstance(rep, dict) and rep.get("find"):
+            xml = xml.replace(str(rep["find"]), str(rep.get("with", "")))
+    return xml
+
+
 def collapsing_csl(csl: Path | None, workdir: Path) -> Path | None:
     """Copy of the CSL whose numeric citations collapse to ranges ([1-3, 7])."""
     if csl is None or not csl.is_file():
         return csl
     xml = csl.read_text(encoding="utf-8")
+    patch_file = project_root() / CSL_PATCH_REL
+    if patch_file.is_file():
+        try:
+            patched = patch_csl(xml, json.loads(patch_file.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            patched = xml
+        if patched != xml:
+            xml = patched
+            csl = workdir / ("patched_" + csl.name)
+            csl.write_text(xml, encoding="utf-8")
     m = re.search(r"<citation\b[^>]*>", xml)
     if not m or "collapse=" in m.group(0) or 'citation-format="numeric"' not in xml:
         return csl
@@ -1115,14 +1226,17 @@ def build(args) -> int:
             rendered = prepare_source(args.kind, args.input, project, workdir, style)
             run_pandoc(rendered, args.output, args.bibliography,
                        collapsing_csl(args.csl, workdir))
+        blind = (journalspec.blinded(journalspec.load(project))
+                 and args.kind not in ("title_page", "cover_letter"))
         normalize_docx(args.output, style, args.kind,
                        legend_bold=bool(spec["legend_style"].get("bold", True)),
-                       reference_separator=spec["reference_separator"])
+                       reference_separator=spec["reference_separator"], blind=blind)
         problems = audit_docx(args.output, style, args.kind,
                               planned_figure_ids() if args.kind == "manuscript" else None,
                               figure_legend_cap(), spec)
         if not problems and pdf_path is not None:
             _convert_pdf(args.output, pdf_path)
+            determinism.normalize(pdf_path)
     except Exception as exc:  # noqa: BLE001
         args.output.unlink(missing_ok=True)
         receipt_path.unlink(missing_ok=True)

@@ -502,8 +502,9 @@ def _facts(text: str, aliases: dict | None = None) -> dict:
     the grouping, so '[@a] [@b]' and the collapsible '[@a; @b]' are the same citations; a
     journal alias ('Online Resource 2') counts as the canonical ids it stands for; and
     supplementary legend blocks are ignored because 1.8.0 moves them to the supplementary file."""
-    from . import journalspec
+    from . import journalspec, presentation
     text = SUPP_LEGEND_RE.sub(" ", text)
+    text = presentation.strip_non_facts(text)  # 1.9.0: ICD-10, 5-minute, (1)-(4) are not values
     if aliases:
         text = journalspec.expand_aliases(text, aliases)
     stripped = CITE_RE.sub(" ", text)

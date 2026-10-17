@@ -174,3 +174,20 @@ def visual_debts_cleared(ctx: Ctx) -> Result:
     mode = _visual_mode(ctx)
     return Result(True, "visual_debts_cleared",
                   f"no outstanding visual reviews (visual_review_mode = {mode})")
+
+
+@check("final_copy_verified")
+def final_copy_verified(ctx: Ctx) -> Result:
+    """1.9.0 (#24): S25 may end on the author's hand-edited upload copy, once it is checked."""
+    rec = ctx.state.decision("submission_package_independent_audit") or {}
+    if rec.get("value") != "PASS_AUTHOR_FINAL_COPY":
+        return Result(True, "final_copy_verified", "no author final copy in use")
+    from .. import finalcopy
+    problems = finalcopy.verified(ctx.project)
+    if problems:
+        return Result(False, "final_copy_verified", "; ".join(problems),
+                      ["tools/final_copy.py record --edit ... --words ...; then final_copy.py check"])
+    edits = finalcopy.load(ctx.project).get("edits", [])
+    return Result(True, "final_copy_verified",
+                  f"author final copy accepted: {len(edits)} recorded manual edit(s); numbers, "
+                  "citations and display references unchanged")

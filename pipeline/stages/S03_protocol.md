@@ -62,6 +62,7 @@ pre-specified rather than fitted to whatever happened to be significant.
 - `02_data/acquisition_plan.md`
 
 ## Hard rules
+- Confirm the spelling system decided at S01 (`wf config get spelling`); table/figure label text is generated with it.
 - Do not look at the data before the analysis plan is written down. If data was already
   inspected, say so in the protocol under `Deviations` at S06 rather than hiding it.
 - The acquisition target is the entire protocol-defined universe. A small schema/connectivity

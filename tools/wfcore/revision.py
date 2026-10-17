@@ -69,10 +69,39 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+# 1.9.0: indexes the tools rewrite on every deterministic rebuild. Their content is derived from
+# certified sources (the tables, figures and sidecars themselves stay certified), so a rewrite
+# renews them instead of opening a bookkeeping round.
+DERIVED_RENEWABLE = {"04_tables/manifest.json", "05_figures/qc/qc_report.json"}
+DELETED = "DELETED"
+
+
 def renewable(rel: str) -> bool:
     """Re-fetchable evidence/cache. Refreshing it is maintenance, never a content edit."""
     rel = rel.replace("\\", "/")
-    return rel == "06_refs/verified.json" or rel.startswith(("06_refs/cache/", "08_submission/cache/"))
+    return (rel == "06_refs/verified.json" or rel in DERIVED_RENEWABLE
+            or rel.startswith(("06_refs/cache/", "08_submission/cache/")))
+
+
+def receipt(project: Path, rel: str) -> dict:
+    """A changed-file credential: raw SHA-256 plus the visible-content hash (1.9.0), so an
+    identical rebuild with new container timestamps still matches."""
+    from .determinism import content_sha256
+    path = Path(project) / rel
+    out = {"path": rel, "sha256": sha256(path)}
+    content = content_sha256(path)
+    if content.startswith("c:"):
+        out["content_sha256"] = content
+    return out
+
+
+def receipt_holds(project: Path, rec: dict) -> bool:
+    """Does the working tree still match a credential (deletion credentials included)?"""
+    from .determinism import same
+    path = Path(project) / str(rec.get("path", ""))
+    if rec.get("deleted") or rec.get("sha256") == DELETED:
+        return not path.exists()
+    return same(path, rec.get("sha256"), rec.get("content_sha256"))
 
 
 def atomic_json(path: Path, payload: dict) -> None:
@@ -171,6 +200,36 @@ def guard_outputs(project: Path, outputs: list[Path]) -> None:
                              "only the planned dependency closure may be rebuilt (rework.py status)")
 
 
+def certified_receipts(project: Path) -> dict[str, tuple[str, dict]]:
+    """rel -> (round id, credential) like certified_hashes, keeping content/deletion data."""
+    directory = project / ".wf" / "revisions"
+    rounds = []
+    for path in sorted(directory.glob("R*.json")) if directory.is_dir() else []:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if data.get("status") == "complete":
+            rounds.append(data)
+    out: dict[str, tuple[str, dict]] = {}
+    for data in rounds:
+        for item in data.get("items", []):
+            for rec in item.get("changed_files", []) or []:
+                if isinstance(rec, dict) and rec.get("path") and not renewable(rec["path"]):
+                    out[rec["path"]] = (data.get("round_id", "?"), rec)
+    if rounds and rounds[-1].get("schema_version") == SCHEMA:
+        val = rounds[-1].get("validation", {})
+        content = val.get("artifact_content", {})
+        for rel, digest in val.get("artifact_hashes", {}).items():
+            if not renewable(rel):
+                out[rel] = (rounds[-1].get("round_id", "?"),
+                            {"path": rel, "sha256": digest, "content_sha256": content.get(rel)})
+        for rel in val.get("artifact_deleted", []):
+            out[rel] = (rounds[-1].get("round_id", "?"), {"path": rel, "sha256": DELETED,
+                                                          "deleted": True})
+    return out
+
+
 def certified_hashes(project: Path) -> dict[str, tuple[str, str]]:
     """rel -> (round id, sha256) for every file the newest closed rounds certified."""
     directory = project / ".wf" / "revisions"
@@ -203,9 +262,8 @@ def certified_drift(project: Path) -> list[str]:
     """
     from . import scifreeze
     drift = []
-    for rel, (_, expected) in certified_hashes(project).items():
-        p = project / rel
-        if not p.is_file() or sha256(p).casefold() != expected.casefold():
+    for rel, (_, rec) in certified_receipts(project).items():
+        if not receipt_holds(project, rec):
             drift.append(rel)
     try:
         current = json.loads((project / ".wf/state.json").read_text(encoding="utf-8")).get("current")
@@ -264,7 +322,7 @@ def plan_scope(project: Path, pipeline, state, revision: dict) -> None:
     from .dependencies import closure
     items = revision["items"]
     review = revision["review_stage"]
-    if any(i["kind"] == "journal" for i in items):
+    if any(i["kind"] in ("journal", "journal-switch") for i in items):
         raise ValueError("a journal switch replaces the whole submission tree and cannot be "
                          "scoped in place; use the full fallback: rework.py batch --rewind "
                          "(then reset-journal at S20)")
@@ -273,7 +331,8 @@ def plan_scope(project: Path, pipeline, state, revision: dict) -> None:
         _safe_path(project, rel)
     rebuild: set[str] = set()
     for item in items:
-        rebuild.update(closure(project, item["affected_sources"], change_type=item["change_type"],
+        ct = "scientific" if item["change_type"] == "auto" else item["change_type"]  # widest closure
+        rebuild.update(closure(project, item["affected_sources"], change_type=ct,
                                baseline_documents=revision.get("baseline_documents")))
     if review == "S19_human_review":
         # Never rewrite a journal layer while scientific approval is pending.
@@ -372,7 +431,11 @@ def _run(pipeline, state, project: Path, row: dict):
     from . import checks
     from .checks import Ctx, Result
     from .gates import _resolve_manuscript_paths
+    from .gates import pinned_out
     spec = _resolve_manuscript_paths(row["spec"], project)
+    if pinned_out(state, row["stage"], spec):
+        return Result(True, str(spec.get("check")), f"not in the paper's pinned engine "
+                      f"{state.engine_pin} for completed {row['stage']}")
     fn = checks.get(spec.get("check"))
     if fn is None:
         return Result(False, str(spec.get("check")), "unknown check")
@@ -411,30 +474,45 @@ def validate(project: Path, pipeline, state, revision: dict):
     return results, input_signature(project, state, revision, after), after
 
 
-def check_round(project: Path, pipeline, state, path: Path, revision: dict) -> int:
+def check_round(project: Path, pipeline, state, path: Path, revision: dict, *,
+                quiet: bool = False, summary: bool = False) -> int:
+    from .determinism import content_sha256
     if revision.get("status") != "active":
         raise ValueError("seal the feedback batch before checking (tools/rework.py seal)")
     if not is_scoped(revision):
         raise ValueError("a legacy (schema-1) round is validated by the normal stage gates")
     results, signature, files = validate(project, pipeline, state, revision)
     allowed = set(revision.get("allowed_files", []))
+    hashes = {r: (h if not h.startswith("stat:") else sha256(project / r))
+              for r, h in files.items() if r in allowed and not renewable(r)}
+    content = {}
+    for rel in hashes:
+        c = content_sha256(project / rel)
+        if c.startswith("c:"):
+            content[rel] = c
     revision["validation"] = {
         "input_signature": signature, "ok": not any(r.blocking for r in results),
         "checked_at": datetime.now(timezone.utc).isoformat(),
-        "artifact_hashes": {r: (h if not h.startswith("stat:") else sha256(project / r))
-                            for r, h in files.items() if r in allowed and not renewable(r)},
+        "artifact_hashes": hashes,
+        "artifact_content": content,
+        "artifact_deleted": sorted(r for r in revision.get("baseline", {})
+                                   if r in allowed and r not in files and not renewable(r)),
         "renewable_evidence": {r: h for r, h in files.items() if renewable(r)},
         "results": [{"check": r.check, "ok": r.ok, "detail": r.detail[:300],
                      "severity": r.severity} for r in results],
     }
     atomic_json(path, revision)
-    for result in results:
-        if not result.ok:
-            print(f"[{result.label}] {result.check}: {result.detail}")
-            for hint in result.hints[:2]:
-                print(f"    -> {hint}")
-    print(f"Scoped checks: {sum(r.ok for r in results)}/{len(results)} "
-          f"({len(revision.get('validation_stages', []))} stage(s)); checkpoint stays {state.current}")
+    if not summary:
+        for result in results:
+            if not result.ok:
+                print(f"[{result.label}] {result.check}: {result.detail}")
+                for hint in ([] if quiet else result.hints[:2]):
+                    print(f"    -> {hint}")
+    failed = [r.check for r in results if r.blocking]
+    if not (quiet and not summary and not failed):
+        print(f"Scoped checks: {sum(r.ok for r in results)}/{len(results)} "
+              f"({len(revision.get('validation_stages', []))} stage(s)); checkpoint stays "
+              f"{state.current}" + (f"; failing: {', '.join(failed)}" if summary and failed else ""))
     return 0 if revision["validation"]["ok"] else 2
 
 

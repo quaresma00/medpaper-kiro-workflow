@@ -3,7 +3,7 @@ name: medpaper-pipeline
 description: Drives a gated, resumable medical/clinical research paper pipeline from a research idea through feasibility, data acquisition, exploratory analysis, figure and table production, IMRAD writing, independent review, journal selection, de-AI polish and a Word submission package. Use whenever the task involves a medical research idea, a clinical manuscript, a research protocol, literature retrieval via PubMed, publication-grade figures or three-line tables, journal selection, a submission package, or a revision round on any of these. Do not follow the workflow from memory - run `python tools/wf.py status` and obey the stage card it prints.
 compatibility: Requires Python 3.11+ for the driver. Tables and Word output additionally need numpy, pandas, openpyxl and python-docx (matplotlib for the Python figure path). R 4.3+ with the packages in reference/language_policy.toml (figures default to R). Network access is required for PubMed, Crossref and Unpaywall. Set NCBI_API_KEY to raise the E-utilities rate limit.
 metadata:
-  version: "2.1.1"
+  version: "2.2.0"
   stages: "25"
   entrypoint: "python tools/wf.py status"
 ---
@@ -215,9 +215,17 @@ the work.
    non-overridable.
 9. **Route every revision through `tools/rework.py`.** A user's change request goes to the
    earliest owning stage, updates the source of truth, and rebuilds downstream. Never patch a
-   rendered artifact directly.
+   rendered artifact directly. After the S19 freeze `rework.py check` classifies a round by
+   content (1.9.0): unchanged numbers, citations, display references, table cells and figure
+   data = a presentation change (deterministic checks only, a presentation delta in the
+   freezes, no S19 return, no new review round, no re-confirmation - just tell the user what
+   changed); changed facts go back to S19. Kinds: `journal-switch` (full rewind) and
+   `journal-format` (CSL / formatting fields). Body text is continuous prose (`prose_not_lists`).
 10. **The package is not final until the user says so.** S24 review rounds end only on the
-    user's explicit no-further-review answer, then the exact files are frozen; S25 audits them.
+    user's explicit no-further-review answer, then the exact uploads are frozen by visible
+    content; S25 audits them. If the author finishes journal details by hand in a copy, S25 can
+    close with `tools/final_copy.py` (record + check) and `PASS_AUTHOR_FINAL_COPY`. A paper
+    keeps the gate set of the engine it ran under for completed stages until `wf migrate`.
 11. **A red gate means stop and fix, not `--force`.**
 
 ## Do not let another skill replace a stage

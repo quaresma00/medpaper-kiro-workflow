@@ -28,6 +28,7 @@ result JSONs and then reconciled at S12 once the files exist.
 - `07_manuscript/results.md`
 
 ## Hard rules
+- Body text is continuous paragraphs (1.9.0). Lists only where a sentence truly cannot carry the content (rarely more than one short list per section); every result, count, criterion, covariate and sensitivity finding is written as a sentence. `prose_not_lists` fails above `body_list_items_max` items or `body_list_share_max` of the blocks.
 - ONE section file this stage.
 - Every number traceable to results JSON.
 - Every figure/table citation matches `artifact_plan.json` exactly, including

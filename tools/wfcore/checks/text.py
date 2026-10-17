@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 from . import Ctx, Result, check
 
@@ -45,8 +46,15 @@ BACKSTAGE_RE = re.compile(
     re.I)
 
 
+# (#10) CRediT contributor role names are journal-template text, not revision history:
+# "Writing - original draft", "Writing - review & editing" (any dash, "and" or "&").
+CREDIT_ROLE_RE = re.compile(
+    r"\bwriting\s*[-\u2010-\u2015:,]?\s*(?:original\s+draft(?:\s+preparation)?|"
+    r"review\s*(?:&|and)\s*editing)\b", re.I)
+
+
 def backstage_hits(text: str) -> list[str]:
-    return sorted({m.group(0) for m in BACKSTAGE_RE.finditer(_body(text))})
+    return sorted({m.group(0) for m in BACKSTAGE_RE.finditer(CREDIT_ROLE_RE.sub(" ", _body(text)))})
 
 
 FORBIDDEN_VISIBLE_SYMBOLS = {
@@ -237,6 +245,75 @@ def no_ai_boilerplate(ctx: Ctx) -> Result:
             severity="warn",
         )
     return Result(True, "no_ai_boilerplate", f"{rel}: no placeholders, no stock phrasing")
+
+
+# ---------------------------------------------------------------------------
+# 1.9.0 (#3): body text is continuous prose. A real run produced ~60 list items in Methods and
+# Results; medical journals almost never print them and readers take them for generated text.
+# ---------------------------------------------------------------------------
+LIST_ITEM_RE = re.compile(r"(?m)^[ \t]{0,3}(?:[-*+\u2022]|\d{1,2}[.)]|\(?[a-z]\))[ \t]+\S")
+BODY_SECTIONS = {"introduction", "background", "methods", "materials and methods",
+                 "patients and methods", "results", "discussion", "conclusion", "conclusions"}
+
+
+def list_density(text: str, whole_file: bool = False) -> tuple[int, int, list[str]]:
+    """(list items, prose paragraphs, sections holding lists) in the body sections.
+
+    A full manuscript is split on level-1 headings and only its body sections count (the
+    references, legends and declarations are not prose); a section file counts as a whole."""
+    text = FENCE_RE.sub(" ", text)
+    if whole_file or not re.search(r"(?m)^#\s+\S", text):
+        blocks = [("file", text)]
+    else:
+        parts = re.split(r"(?m)^#\s+(.+)$", text)
+        blocks = [(parts[i].strip().casefold(), parts[i + 1]) for i in range(1, len(parts) - 1, 2)
+                  if parts[i].strip().casefold() in BODY_SECTIONS]
+    items = paras = 0
+    where = []
+    for name, block in blocks:
+        n = len(LIST_ITEM_RE.findall(block))
+        prose = [p for p in re.split(r"\n\s*\n", LIST_ITEM_RE.sub("", block))
+                 if p.strip() and not p.lstrip().startswith("#") and len(p.split()) >= 8]
+        items += n
+        paras += len(prose)
+        if n:
+            where.append(f"{name} {n}")
+    return items, paras, where
+
+
+def prose_list_problem(text: str, items_max: int, share_max: float,
+                       whole_file: bool = False) -> str | None:
+    items, paras, where = list_density(text, whole_file)
+    share = items / max(1, items + paras)
+    if items > items_max or (items >= 2 and share > share_max):
+        return (f"{items} list item(s) in body text ({', '.join(where)}; {share:.0%} of blocks; "
+                f"limits {items_max} items / {share_max:.0%})")
+    return None
+
+
+@check("prose_not_lists")
+def prose_not_lists(ctx: Ctx) -> Result:
+    """Methods/Results/Introduction/Discussion are written as paragraphs; results in sentences."""
+    rels = ctx.spec.get("paths") or [ctx.spec.get("path", "07_manuscript/full_manuscript.md")]
+    items_max = int(ctx.spec.get("max_items", ctx.target("body_list_items_max", 3)))
+    share_max = float(ctx.spec.get("max_share", ctx.target("body_list_share_max", 0.10)))
+    problems, seen = [], 0
+    for rel in rels:
+        if not ctx.p(rel).is_file():
+            continue
+        seen += 1
+        name = Path(rel).name
+        bad = prose_list_problem(ctx.read(rel), items_max, share_max,
+                                 whole_file=name != "full_manuscript.md")
+        if bad:
+            problems.append(f"{rel}: {bad}")
+    if problems:
+        return Result(False, "prose_not_lists", "; ".join(problems),
+                      ["Rewrite the lists as continuous paragraphs: criteria, steps, covariates "
+                       "and sensitivity results all read as sentences in a medical journal.",
+                       "Thresholds: [targets] body_list_items_max / body_list_share_max "
+                       "(paper config may change them)."])
+    return Result(True, "prose_not_lists", f"{seen} file(s): body text is continuous prose")
 
 
 _PY_PLOT_RES = (

@@ -40,16 +40,24 @@ ROUTES = {
     "introduction": "S14_introduction",
     "discussion": "S16_discussion",
     "title-abstract-keywords": "S17_assemble",
-    "journal": "S20_journal",
+    # 1.9.0: "journal" was read as "journal formatting"; it means switching journals.
+    "journal-switch": "S20_journal",
+    # CSL, target_journal.json formatting fields, docx_style.json: presentation only.
+    "journal-format": "S20_journal",
     "title-page-or-statements": "S21_authors",
     "cover-letter-or-package-structure": "S23_package",
 }
+KIND_ALIASES = {"journal": "journal-switch"}  # rounds recorded before 1.9.0
 
 ROUND_SCHEMA = 2
 LEGACY_SCHEMA = 1
 REVIEW_STAGES = set(scoped.REVIEW_STAGES)
-LAYOUT_KINDS = {"figure-layout", "table-layout", "word-format-only"}
-ADMIN_KINDS = {"title-page-or-statements", "journal", "cover-letter-or-package-structure"}
+LAYOUT_KINDS = {"figure-layout", "table-layout", "word-format-only", "journal-format"}
+ADMIN_KINDS = {"title-page-or-statements", "journal-switch", "journal",
+               "cover-letter-or-package-structure"}
+# 1.9.0: after the S19 freeze an item's class is decided by its content when it is checked
+# (wfcore/presentation.py), not by the directory it touches.
+POST_FREEZE_STAGES = {"S23_package", "S24_package_human_review"}
 
 # Only decisions whose evidence can be changed by the requested kind are invalidated.
 COMMON_MANUSCRIPT_INVALIDATION = {
@@ -92,6 +100,8 @@ INVALIDATE_BY_KIND = {
     "title-abstract-keywords": COMMON_MANUSCRIPT_INVALIDATION,
     "manuscript-copyedit": COMMON_MANUSCRIPT_INVALIDATION,
     "journal": PACKAGE_INVALIDATION | {"journal_chosen", "polish_reviewed"},
+    "journal-switch": PACKAGE_INVALIDATION | {"journal_chosen", "polish_reviewed"},
+    "journal-format": PACKAGE_INVALIDATION,
     "title-page-or-statements": PACKAGE_INVALIDATION | {"polish_reviewed"},
     "cover-letter-or-package-structure": PACKAGE_INVALIDATION,
     "word-format-only": PACKAGE_INVALIDATION,
@@ -148,7 +158,8 @@ def _valid_project_rel(value: object) -> bool:
     return not path.is_absolute() and ".." not in path.parts
 
 
-def _read_batch_plan(path: Path, kinds: list[str], review_stage: str, pipe) -> dict:
+def _read_batch_plan(path: Path, kinds: list[str], review_stage: str, pipe,
+                     rewind: bool = False) -> dict:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("revision plan must contain one JSON object")
@@ -170,9 +181,15 @@ def _read_batch_plan(path: Path, kinds: list[str], review_stage: str, pipe) -> d
     for index, item in enumerate(items, 1):
         if not isinstance(item, dict):
             raise ValueError(f"items[{index}] is not an object")
-        kind = item.get("kind")
+        kind = KIND_ALIASES.get(item.get("kind"), item.get("kind"))
         if kind not in kinds:
             raise ValueError(f"items[{index}].kind must be one of {kinds}")
+        if kind == "journal-switch" and not rewind:
+            # Validated at batch time (1.9.0), not discovered at seal.
+            raise ValueError(
+                f"items[{index}]: journal-switch replaces the whole submission tree and cannot be "
+                "scoped in place: rework.py batch --rewind --plan ... (then reset-journal at S20). "
+                "For CSL / target_journal.json formatting fields use kind journal-format")
         request = str(item.get("request", "")).strip()
         sources = item.get("affected_sources")
         acceptance = item.get("acceptance_criteria")
@@ -190,9 +207,16 @@ def _read_batch_plan(path: Path, kinds: list[str], review_stage: str, pipe) -> d
         default_type = ("layout" if kind in LAYOUT_KINDS else
                         "wording" if kind == "manuscript-copyedit" else
                         "administrative" if kind in ADMIN_KINDS else "scientific")
+        touches_science = any(s.startswith(("02_data/", "03_analysis/", "01_protocol/protocol"))
+                              for s in sources)
+        if (review_stage in POST_FREEZE_STAGES and default_type == "scientific"
+                and kind not in scoped.SCIENTIFIC_KINDS and not touches_science):
+            default_type = "auto"  # classified by content at `rework.py check`
         change_type = item.get("change_type", default_type)
-        if change_type not in {"layout", "wording", "administrative", "scientific"}:
-            raise ValueError("change_type must be layout, wording, administrative or scientific")
+        if change_type == "auto" and (kind in scoped.SCIENTIFIC_KINDS or touches_science):
+            change_type = "scientific"
+        if change_type not in {"layout", "wording", "administrative", "scientific", "auto"}:
+            raise ValueError("change_type must be layout, wording, administrative, scientific or auto")
         if kind in scoped.SCIENTIFIC_KINDS and change_type != "scientific":
             raise ValueError("data/design/model changes cannot be downgraded to cosmetic revisions")
         if change_type != "scientific" and any(
@@ -268,7 +292,7 @@ def _cmd_batch_rewind(args, project: Path, pipe, state: State, kinds: list[str])
             "created_at": _now(), "status": "active", "feedback_updates": [], "items": [],
             "full_rewind": True,
         }
-    plan = _read_batch_plan(args.plan.resolve(), kinds, review_stage, pipe)
+    plan = _read_batch_plan(args.plan.resolve(), kinds, review_stage, pipe, rewind=True)
     first_new = len(revision["items"]) + 1
     for offset, item in enumerate(plan["items"]):
         item["id"] = f"{revision['round_id']}-{first_new + offset:02d}"
@@ -345,6 +369,7 @@ def _cmd_batch(args, project: Path, pipe, state: State, kinds: list[str]) -> int
             "full_builds": 0, "feedback_updates": [], "items": [],
             "baseline": scoped.snapshot(project), "baseline_documents": _baseline_documents(project),
         }
+        _add_fact_baseline(project, revision)
     plan = _read_batch_plan(args.plan.resolve(), kinds, review_stage, pipe)
     if any(u.get("feedback_sha256") == plan["feedback_sha256"] for u in revision["feedback_updates"]):
         print("identical feedback already recorded; no duplicate items")
@@ -372,6 +397,97 @@ def _cmd_batch(args, project: Path, pipe, state: State, kinds: list[str]) -> int
     return _seal_round(state, pipe, args.why or plan["feedback_verbatim"])
 
 
+def _add_fact_baseline(project: Path, revision: dict) -> None:
+    """Post-freeze rounds remember the reviewed facts so `check` can classify by content."""
+    from wfcore import presentation, scifreeze
+    if revision.get("review_stage") in POST_FREEZE_STAGES and scifreeze.is_frozen(project):
+        revision["fact_baseline"] = presentation.snapshot_facts(project)
+        # Frozen files already edited before the round opened cannot be compared with what
+        # review saw; they are judged scientific (restore them, then open the round).
+        _, drift, _ = scifreeze.verify_freeze(project)
+        revision["pre_round_edits"] = sorted(d.split(":")[0] for d in drift)
+
+
+def _classified(project: Path, revision: dict) -> bool:
+    return "fact_baseline" in revision
+
+
+def _move_science_to_s19(state: State, pipe, revision: dict, science: list[dict]) -> bool:
+    for item in science:
+        if pipe.stage(item["owning_stage"]).index > pipe.stage("S19_human_review").index:
+            item["owning_stage"] = "S19_human_review"
+    revision["deferred_package_items"] = [i for i in revision["items"] if i not in science]
+    revision["items"] = science
+    origin = revision["review_stage"]
+    revision["review_stage"] = "S19_human_review"
+    state.stage_info(origin)["status"] = "pending"
+    state.stage_info("S19_human_review")["status"] = "active"
+    state.data["current"] = "S19_human_review"
+    state.data["resume_package_revision"] = revision["round_id"]
+    state.event("revision_science_to_s19",
+                f"{revision['round_id']}: post-S19 science returns to S19; S20-S23 stay done")
+    return True
+
+
+def _changed_since_baseline(project: Path, revision: dict) -> dict[str, str]:
+    base = revision.get("baseline", {})
+    now = scoped.snapshot(project)
+    return {r: base.get(r, "") for r in set(base) | set(now) if base.get(r) != now.get(r)}
+
+
+def _classify_for_check(project: Path, pipe, state: State, path: Path, revision: dict) -> int | None:
+    """1.9.0: decide presentation vs science by content before the scoped checks run.
+
+    Returns an exit code when the round was escalated to S19, else None (continue checking).
+    """
+    from wfcore import presentation
+    if not _classified(project, revision) or revision.get("status") != "active":
+        return None
+    pending = [i for i in revision["items"] if i["change_type"] != "scientific"]
+    if not pending:
+        return None
+    changed = _changed_since_baseline(project, revision)
+    verdict = presentation.classify(project, revision["fact_baseline"], sorted(changed))
+    early = revision.get("pre_round_edits") or []
+    if early:
+        verdict["reasons"] += [f"{rel}: edited after the freeze before this round opened "
+                               "(cannot be compared with the reviewed text)" for rel in early]
+        verdict["class"] = "scientific"
+    revision["classification"] = verdict
+    if verdict["class"] == "presentation":
+        summary = "; ".join(i["request"][:120] for i in revision["items"])
+        touched = presentation.record_delta(project, revision["round_id"], summary, changed)
+        revision["presentation_delta"] = {"at": verdict["at"], "files": sorted(changed), **touched}
+        _write_round(path, revision)
+        print(f"PRESENTATION change (facts unchanged in {len(verdict['checked'])} reviewed file(s)): "
+              "deterministic checks only; no return to S19, no new review round, no re-confirmation.")
+        print("changed: " + (", ".join(sorted(changed)) or "none"))
+        print("Show the user this change summary when reporting the round.")
+        return None
+    print("SCIENTIFIC change: facts differ from the reviewed version:")
+    for reason in verdict["reasons"][:12]:
+        print(f"  - {reason}")
+    if revision["review_stage"] != "S24_package_human_review":
+        _write_round(path, revision)
+        print("Open the round at S24 so the science can return to S19, or restore the facts.")
+        return 2
+    for item in pending:
+        item["change_type"] = "scientific"
+    science = [i for i in revision["items"]
+               if not all(s.startswith(("00_input/", "08_submission/")) for s in i["affected_sources"])]
+    _move_science_to_s19(state, pipe, revision, science or revision["items"])
+    names = set(revision.pop("deferred_invalidations", [])) | {"manuscript_human_reviewed"}
+    revision.pop("fact_baseline", None)
+    scoped.plan_scope(project, pipe, state, revision)
+    _write_round(path, revision)
+    removed = _clear_decisions(state, names)
+    scoped.drop_receipts(state)
+    state.save()
+    print(f"-> back at S19 for re-review and re-freeze (as for any science change); "
+          f"invalidated: {', '.join(removed) or 'none'}. Rerun rework.py check at S19.")
+    return 2
+
+
 def _seal_round(state: State, pipe, why: str) -> int:
     if len(why.strip()) < 10:
         raise ValueError("seal requires the user's end-of-batch or apply-now instruction (--why)")
@@ -384,43 +500,47 @@ def _seal_round(state: State, pipe, why: str) -> int:
     science_moved = False
     if revision["review_stage"] == "S24_package_human_review":
         # Science changed after S19 is re-reviewed and re-frozen at S19 before any journal copy
-        # is touched (scifreeze); package items wait for the resumed round.
-        def is_science(item):
-            return any(not s.startswith(("00_input/", "08_submission/")) for s in item["affected_sources"])
-        science = [i for i in revision["items"] if is_science(i)]
+        # is touched (scifreeze); package items wait for the resumed round. 1.9.0: an item is
+        # science by its declared/classified content, not by the directory it edits.
+        if _classified(project, revision):
+            science = [i for i in revision["items"] if i["change_type"] == "scientific"]
+        else:  # no scientific freeze: the pre-1.9.0 directory rule
+            for item in revision["items"]:
+                if item["change_type"] == "auto":
+                    item["change_type"] = "scientific"
+            science = [i for i in revision["items"] if any(
+                not s.startswith(("00_input/", "08_submission/")) for s in i["affected_sources"])]
         if science:
             if any(any(s.startswith(("00_input/", "08_submission/")) for s in i["affected_sources"])
                    for i in science):
                 raise ValueError("split scientific sources and journal-package sources into separate items")
-            for item in science:
-                if pipe.stage(item["owning_stage"]).index > pipe.stage("S19_human_review").index:
-                    item["owning_stage"] = "S19_human_review"
-            revision["deferred_package_items"] = [i for i in revision["items"] if i not in science]
-            revision["items"] = science
-            revision["review_stage"] = "S19_human_review"
-            science_moved = True
+            science_moved = _move_science_to_s19(state, pipe, revision, science)
     scoped.plan_scope(project, pipe, state, revision)
+    if _classified(project, revision):
+        revision["allowed_files"] = sorted(set(revision["allowed_files"])
+                                           | {"08_submission/manuscript/variant.json"})
     revision.update({"status": "active", "sealed_at": _now(), "seal_instruction": why.strip()})
     _write_round(round_path, revision)
     review_stage = revision["review_stage"]
-    if science_moved:
-        state.stage_info("S24_package_human_review")["status"] = "pending"
-        state.stage_info("S19_human_review")["status"] = "active"
-        state.data["current"] = "S19_human_review"
-        state.data["resume_package_revision"] = revision["round_id"]
-        state.event("revision_science_to_s19",
-                    f"{revision['round_id']}: post-S19 science returns to S19; S20-S23 stay done")
     invalidations: set[str] = set()
+    deferred: set[str] = set()
     for item in revision["items"] + revision.get("deferred_package_items", []):
         names = set(INVALIDATE_BY_KIND[item["kind"]])
         if item["change_type"] != "scientific":
             names.discard("independent_publishability")
         names.discard("journal_chosen")  # in place: the chosen journal stays chosen
+        if _classified(project, revision) and item["change_type"] != "scientific":
+            deferred.update(names)  # kept unless the content check finds changed facts
+            continue
         invalidations.update(names)
     if review_stage == "S19_human_review":
         invalidations.add("manuscript_human_reviewed")
     else:
         invalidations.discard("manuscript_human_reviewed")
+        deferred.discard("manuscript_human_reviewed")
+    if deferred:
+        revision["deferred_invalidations"] = sorted(deferred - invalidations)
+        _write_round(round_path, revision)
     removed = _clear_decisions(state, invalidations)
     scoped.drop_receipts(state)
     state.save()
@@ -622,6 +742,7 @@ def _cmd_layout(args, project: Path, pipe, state: State) -> int:
                               "interpretation": "controlled layout-only round opened by rework.py layout"}],
         "baseline": scoped.snapshot(project), "baseline_documents": _baseline_documents(project),
     }
+    _add_fact_baseline(project, revision)
     # The edit may already be on disk: the baseline must hold the certified version.
     for rel, (_, digest) in scoped.certified_hashes(project).items():
         if rel in sources:
@@ -680,12 +801,23 @@ def _cmd_mark(args, project: Path, state: State) -> int:
         raise ValueError(f"unknown item {args.item}")
     if len(args.summary.strip()) < 30:
         raise ValueError("mark summary must state what changed in at least 30 characters")
-    if not args.changed_file:
-        raise ValueError("mark requires at least one --changed-file")
+    deleted_files = getattr(args, "deleted_file", []) or []
+    if not args.changed_file and not deleted_files:
+        raise ValueError("mark requires at least one --changed-file (or --deleted-file)")
     if not args.validated_by:
         raise ValueError("mark requires at least one --validated-by check or inspection")
     changed = []
     changed_names: set[str] = set()
+    for rel in deleted_files:
+        # 1.9.0: a deletion credential. Later checks accept the file's absence and flag it
+        # only if it reappears.
+        if not _valid_project_rel(rel):
+            raise ValueError(f"unsafe deleted-file path: {rel}")
+        if (project / rel).exists():
+            raise ValueError(f"--deleted-file still exists: {rel}; delete it first")
+        normalized = Path(rel).as_posix()
+        changed_names.add(normalized)
+        changed.append({"path": normalized, "sha256": scoped.DELETED, "deleted": True})
     for rel in args.changed_file:
         if not _valid_project_rel(rel):
             raise ValueError(f"unsafe changed-file path: {rel}")
@@ -694,7 +826,7 @@ def _cmd_mark(args, project: Path, state: State) -> int:
             raise ValueError(f"changed file does not exist: {rel}")
         normalized = Path(rel).as_posix()
         changed_names.add(normalized)
-        changed.append({"path": normalized, "sha256": _sha256_file(source)})
+        changed.append(scoped.receipt(project, normalized))
     required_sources = {Path(rel).as_posix() for rel in item.get("affected_sources", [])}
     missing_sources = sorted(required_sources - changed_names)
     if missing_sources:
@@ -737,9 +869,10 @@ def _cmd_close(args, state: State, pipe=None) -> int:
             raise ValueError("scoped validation expired; rerun rework.py check before closing")
         for item in revision["items"]:
             for receipt in item.get("changed_files", []):
-                if (not scoped.renewable(receipt["path"]) and
-                        _sha256_file(project / receipt["path"]) != receipt["sha256"]):
-                    raise ValueError("a marked file changed; mark its final version again before closing")
+                if not scoped.renewable(receipt["path"]) and not scoped.receipt_holds(
+                        project, receipt):
+                    raise ValueError("a marked file changed; mark its final version again before "
+                                     f"closing ({receipt['path']})")
         scoped.refresh_evidence(project, pipe, state, revision)
         if checked.get("input_signature") != scoped.input_signature(project, state, revision):
             raise ValueError("a source changed while refreshing evidence; rerun rework.py check")
@@ -751,6 +884,10 @@ def _cmd_close(args, state: State, pipe=None) -> int:
     state.add_note(f"[REVISION COMPLETE] {revision['round_id']}: {args.summary.strip()}", state.current)
     state.save()
     print(f"closed {revision['round_id']}; user review may now continue")
+    if revision.get("classification", {}).get("class") == "presentation":
+        files = revision.get("presentation_delta", {}).get("files", [])
+        print(f"presentation delta recorded ({len(files)} file(s)); the freezes were updated, not "
+              "invalidated. Tell the user what changed (summary above); no re-confirmation needed.")
     if state.data.get("resume_package_revision") == revision["round_id"]:
         print("next: run an S19 review round (tools/review_round.py start --delta), get the user's no-further-review answer, "
               "scientific_freeze.py capture --force, then wf advance (resumes the S24 package round)")
@@ -827,7 +964,14 @@ def main() -> int:
                         help="project-relative changed source; repeat as needed")
     parser.add_argument("--validated-by", action="append", default=[],
                         help="completed gate/test/inspection; repeat as needed")
-    parser.add_argument("--summary", help="resolution or round-completion summary")
+    parser.add_argument("--summary", nargs="?", const=True,
+                        help="mark/close: resolution or round-completion summary; "
+                             "check: bare --summary prints one result line")
+    parser.add_argument("--deleted-file", action="append", default=[],
+                        help="mark: a project-relative source this item deleted (records a "
+                             "deletion credential; repeatable)")
+    parser.add_argument("--quiet", action="store_true",
+                        help="check: print failures only")
     parser.add_argument("--project", type=Path, default=None)
     args = parser.parse_args()
     project = paths.paper_from_cli(args.project)
@@ -864,7 +1008,11 @@ def main() -> int:
             return _seal_round(state, pipe, args.why or "")
         if args.command == "check":
             path, revision = _load_round(state)
-            return scoped.check_round(project, pipe, state, path, revision)
+            escalated = _classify_for_check(project, pipe, state, path, revision)
+            if escalated is not None:
+                return escalated
+            return scoped.check_round(project, pipe, state, path, revision,
+                                      quiet=args.quiet, summary=args.summary is True)
         if args.command == "refresh":
             path, revision = _load_round(state)
             if not scoped.is_scoped(revision) or revision.get("status") != "active":
@@ -876,11 +1024,11 @@ def main() -> int:
         if args.command == "build":
             return _cmd_build(args, state)
         if args.command == "mark":
-            if not args.item or not args.summary:
+            if not args.item or not isinstance(args.summary, str):
                 raise ValueError("mark requires --item and --summary")
             return _cmd_mark(args, project, state)
         if args.command == "close":
-            if not args.summary:
+            if not isinstance(args.summary, str):
                 raise ValueError("close requires --summary")
             return _cmd_close(args, state, pipe)
         if not args.kind or not args.why:

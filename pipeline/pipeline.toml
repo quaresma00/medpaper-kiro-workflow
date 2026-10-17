@@ -14,7 +14,7 @@
 
 [meta]
 name = "medpaper"
-version = "1.8.1"
+version = "1.9.0"
 schema = 1
 description = "Medical/clinical research pipeline: idea -> feasibility -> data -> analysis -> artifacts -> manuscript -> submission package."
 
@@ -127,9 +127,19 @@ journal_source_age_days_max = 90
 # included). S20 replaces them with the chosen journal's typed limits in target_journal.json.
 draft_main_words_max = 4000
 draft_abstract_words_max = 250
-# journal_limits_met keeps this share of a journal word cap as the effective ceiling, because
-# a portal's word counter rarely matches ours exactly.
-journal_limit_margin = 0.97
+# journal_limits_met (1.9.0): a count at or below the cap passes (margin 1.0 = 100%; a paper
+# may lower it). Above journal_limit_warn_share of the cap is a warning only, because a
+# portal's word counter rarely matches ours exactly.
+journal_limit_margin = 1.0
+journal_limit_warn_share = 0.97
+# prose_not_lists (1.9.0): body sections are continuous paragraphs. More list items than this,
+# or (with 2+ items) a larger share of the body's blocks, fails.
+body_list_items_max = 3
+body_list_share_max = 0.10
+# Spelling system (1.9.0), decided at S01/S03: "american" (default for new papers, written to
+# the paper config by `wf new`/`wf init`) or "british". Empty = undecided: table/figure text
+# is left as written. A chosen journal's target_journal.json "spelling" takes precedence.
+spelling = ""
 reference_verification_age_days_max = 90
 
 # ==============================================================================
@@ -346,6 +356,10 @@ optional = true
 check = "no_ai_boilerplate"
 path = "07_manuscript/methods.md"
 [[stage.gate]]
+check = "prose_not_lists"
+path = "07_manuscript/methods.md"
+since = "1.9.0"
+[[stage.gate]]
 check = "no_ai_boilerplate"
 path = "07_manuscript/supplementary_methods.md"
 optional = true
@@ -369,6 +383,10 @@ require_all_cited = true
 [[stage.gate]]
 check = "no_ai_boilerplate"
 path = "07_manuscript/results.md"
+[[stage.gate]]
+check = "prose_not_lists"
+path = "07_manuscript/results.md"
+since = "1.9.0"
 
 [[stage]]
 id = "S10_tables"
@@ -430,6 +448,10 @@ paths = ["07_manuscript/results.md", "07_manuscript/methods.md"]
 require_all_cited = true
 require_rendered = true
 [[stage.gate]]
+check = "display_numbering_consistent"
+paths = ["07_manuscript/methods.md", "07_manuscript/results.md"]
+since = "1.9.0"
+[[stage.gate]]
 check = "numbers_have_provenance"
 path = "07_manuscript/results.md"
 [[stage.gate]]
@@ -482,6 +504,10 @@ max_key = "intro_refs_max"
 [[stage.gate]]
 check = "no_ai_boilerplate"
 path = "07_manuscript/introduction.md"
+[[stage.gate]]
+check = "prose_not_lists"
+path = "07_manuscript/introduction.md"
+since = "1.9.0"
 
 [[stage]]
 id = "S15_deepread"
@@ -527,6 +553,10 @@ path = "07_manuscript/discussion.md"
 [[stage.gate]]
 check = "no_ai_boilerplate"
 path = "07_manuscript/discussion.md"
+[[stage.gate]]
+check = "prose_not_lists"
+path = "07_manuscript/discussion.md"
+since = "1.9.0"
 
 [[stage]]
 id = "S17_assemble"
@@ -536,6 +566,10 @@ outputs = ["07_manuscript/title.md", "07_manuscript/abstract.md", "07_manuscript
 [[stage.gate]]
 check = "outputs_exist"
 optional = ["07_manuscript/statements.md"]
+[[stage.gate]]
+check = "prose_not_lists"
+path = "07_manuscript/full_manuscript.md"
+since = "1.9.0"
 [[stage.gate]]
 check = "data_acquisition_complete"
 [[stage.gate]]
@@ -636,6 +670,7 @@ check = "revision_rounds_closed"
 # 1.8.1: subagent review rounds replace the S19 review ZIP (legacy ZIPs still pass).
 [[stage.gate]]
 check = "review_round_approved"
+since = "1.8.1"
 scope = "manuscript"
 # The user has said the science needs no further change, so hash it here. From S20 on, a journal
 # requirement is satisfied by adapting a copy in 08_submission/manuscript/, never by editing
@@ -709,6 +744,10 @@ card = "stages/S22_polish.md"
 outputs = ["07_manuscript/polish_report.json", "07_manuscript/polish_log.md"]
 [[stage.gate]]
 check = "polish_snapshot_exists"
+[[stage.gate]]
+check = "prose_not_lists"
+path = "07_manuscript/full_manuscript.md"
+since = "1.9.0"
 [[stage.gate]]
 check = "polish_preserves_facts"
 [[stage.gate]]
@@ -865,6 +904,7 @@ check = "variant_preserves_science"
 check = "reporting_checklist_complete"
 [[stage.gate]]
 check = "review_round_approved"
+since = "1.8.1"
 scope = "package"
 [[stage.gate]]
 check = "decision_recorded"
@@ -921,7 +961,10 @@ check = "variant_preserves_science"
 [[stage.gate]]
 check = "decision_recorded"
 name = "submission_package_independent_audit"
-allowed = ["PASS"]
+allowed = ["PASS", "PASS_AUTHOR_FINAL_COPY"]
+[[stage.gate]]
+check = "final_copy_verified"
+since = "1.9.0"
 
 # ------------------------------------------------------------------------------
 # Directories where the agent may legitimately create many files.
@@ -956,5 +999,6 @@ globs = [
   "08_submission/cache/**",
   "08_submission/*.csl",
   "08_submission/bundle/**",
+  "08_submission/final_copy/**",
 ]
 

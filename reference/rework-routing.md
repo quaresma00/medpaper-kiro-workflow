@@ -119,7 +119,8 @@ Use the earliest stage that owns the changed fact or artifact:
 | Discussion | `discussion` -> S16 |
 | title, abstract, keywords or initial assembly | `title-abstract-keywords` -> S17 |
 | meaning-preserving copyedit | `manuscript-copyedit` -> S19 before journal polish, otherwise S22 |
-| target journal or its rules | `journal` -> S20 |
+| switch to another target journal | `journal-switch` (was `journal`; full rewind) -> S20 |
+| journal formatting: CSL, target_journal.json formatting fields, docx_style.json | `journal-format` -> S20 (presentation) |
 | title page or declarations | `title-page-or-statements` -> S21 |
 | cover letter, filename, upload list or package composition | `cover-letter-or-package-structure` -> S23 |
 | Word layout with absolutely no visible-text change | `word-format-only` -> S23/S24 |

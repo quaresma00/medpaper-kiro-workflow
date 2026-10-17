@@ -736,6 +736,67 @@ scale_fill_medpaper <- function(name = "okabe_ito", ...) scale_fill_manual(value
 }
 
 # ---------------------------------------------------------------------------
+# 1.9.0: overwrite the PDF CreationDate/ModDate values in place (same length, so the xref
+# table stays valid) with a fixed stamp; wfcore/determinism.py applies the identical rule.
+.mf_pdf_stable <- function(path) {
+  if (!file.exists(path)) return(invisible(FALSE))
+  b <- readBin(path, "raw", file.info(path)$size)
+  for (key in c("/CreationDate", "/ModDate")) {
+    for (p in grepRaw(key, b, fixed = TRUE, all = TRUE)) {
+      open <- grepRaw("(", b, offset = p, fixed = TRUE)
+      if (!length(open) || open - p > nchar(key) + 4) next
+      close <- grepRaw(")", b, offset = open, fixed = TRUE)
+      if (!length(close)) next
+      n <- close - open - 1
+      if (n > 0) b[(open + 1):(close - 1)] <- charToRaw(substr(paste0("D:20000101000000Z", strrep(" ", n)), 1, n))
+    }
+  }
+  writeBin(b, path)
+  invisible(TRUE)
+}
+
+# 1.9.0: journal number style (P-value spacing, minus sign, thousands separator, interval
+# dash) and spelling, decided once per paper. `wf run-script` exports MEDPAPER_NUMFMT from
+# tools/wfcore/numfmt.py (target_journal.json number_format / spelling, else the paper config).
+medpaper_numfmt <- function() {
+  d <- list(p_space = FALSE, minus = "hyphen", thousands = "", interval = "-", spelling = "american")
+  raw <- Sys.getenv("MEDPAPER_NUMFMT", "")
+  if (nzchar(raw)) {
+    got <- tryCatch(jsonlite::fromJSON(raw, simplifyVector = TRUE), error = function(e) NULL)
+    for (k in names(got)) d[[k]] <- got[[k]]
+  }
+  d
+}
+mf_fmt_num <- function(x, dp = 2, style = medpaper_numfmt()) {
+  s <- formatC(abs(x), format = "f", digits = dp, big.mark = style$thousands)
+  neg <- if (identical(style$minus, "unicode")) "\u2212" else "-"
+  ifelse(x < 0, paste0(neg, s), s)
+}
+mf_fmt_p <- function(p, style = medpaper_numfmt()) {
+  lt <- if (isTRUE(style$p_space)) "< 0.001" else "<0.001"
+  if (p < 0.001) lt else if (p < 0.01) mf_fmt_num(p, 3, style) else mf_fmt_num(p, 2, style)
+}
+mf_fmt_est <- function(est, lo, hi, dp = 2, style = medpaper_numfmt())
+  sprintf("%s (%s%s%s)", mf_fmt_num(est, dp, style), mf_fmt_num(lo, dp, style), style$interval,
+          mf_fmt_num(hi, dp, style))
+# Label spelling follows the paper's spelling system (British -> American or back).
+mf_label <- function(text, style = medpaper_numfmt()) {
+  pairs <- list(c("haemoglobin", "hemoglobin"), c("anaemia", "anemia"), c("oedema", "edema"),
+                c("artefact", "artifact"), c("standardised", "standardized"), c("randomised", "randomized"),
+                c("colour", "color"), c("tumour", "tumor"), c("paediatric", "pediatric"),
+                c("oesophag", "esophag"), c("haemorrhage", "hemorrhage"), c("analysed", "analyzed"),
+                c("leukaemia", "leukemia"), c("ischaemi", "ischemi"), c("centre", "center"),
+                c("behaviour", "behavior"), c("organisation", "organization"), c("characterised", "characterized"))
+  american <- !identical(tolower(style$spelling), "british")
+  for (pr in pairs) {
+    from <- if (american) pr[1] else pr[2]; to <- if (american) pr[2] else pr[1]
+    text <- gsub(from, to, text, fixed = TRUE)
+    text <- gsub(paste0(toupper(substr(from, 1, 1)), substring(from, 2)),
+                 paste0(toupper(substr(to, 1, 1)), substring(to, 2)), text, fixed = TRUE)
+  }
+  text
+}
+
 save_medpaper <- function(plot, stem, width = "single", height_mm = NULL, dpi = 600,
                           archetype = NULL, tiff = TRUE, pdf = TRUE) {
   # A ggplot warning while building the figure ("Removed 3 rows containing missing values")
@@ -835,6 +896,7 @@ save_medpaper <- function(plot, stem, width = "single", height_mm = NULL, dpi = 
       if (use_cairo) grDevices::cairo_pdf(stage_of(pdf_out), width = w_mm / 25.4, height = h_mm / 25.4, bg = "white")
       else grDevices::pdf(stage_of(pdf_out), width = w_mm / 25.4, height = h_mm / 25.4, bg = "white", useDingbats = FALSE)
     }))
+    .mf_pdf_stable(stage_of(pdf_out))  # 1.9.0: same figure -> same bytes (no render timestamp)
   }
 
   base_family <- tryCatch(as.character(theme_get()$text$family %||% "Arial"), error = function(e) "Arial")

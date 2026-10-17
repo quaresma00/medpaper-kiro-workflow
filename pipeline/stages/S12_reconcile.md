@@ -31,6 +31,7 @@ a table the prose describes differently from how it was built.
 - `07_manuscript/reconciliation.md`
 
 ## Hard rules
+- `display_numbering_consistent` (1.9.0): main/supplementary tables and figures are numbered in first-citation order; a table caption in table_captions.md equals the workbook title row; citing a whole figure covers its panels, but once one panel is cited alone ("Figure 2C") every panel in the legend must be cited.
 - Do not resolve a mismatch by deleting the sentence that exposed it.
 - If a number changed, every place it appears must change: Results, tables, figures, and
   later the Abstract. Search for it rather than trusting memory.

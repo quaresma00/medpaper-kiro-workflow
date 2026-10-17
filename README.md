@@ -2,7 +2,17 @@
 
 一套面向医学与临床研究的 Kiro 工作流。它把“研究想法”推进为经过数据、文献、统计结果、图表、人工复核和期刊规则共同校验的投稿包，而不是只让 AI 一次性写出一篇看似完整的论文。
 
-当前版本：`1.8.1`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE + R 4.3+
+当前版本：`1.9.0`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE + R 4.3+
+
+## 1.9.0 变化（S01–S25 全程运行反馈 25 条）
+
+- **冻结后按内容分级**：S19 冻结后的修订在 `rework.py check` 时比对事实（数字、引用、表图引用、表格单元格、图的数据来源）。事实不变即“排版修改”：只重跑确定性检查，冻结记录 presentation delta，不回 S19、不新开审阅轮、不重新确认，只向用户汇报修改摘要；事实变化仍回 S19。投稿包确认只绑定上传文件的可见内容，内部 QC/notes/凭据不使其失效。
+- **期刊字段驱动**：`main_text_headings`、`keywords.min/max/separator`、`blinded_main_manuscript`、`spelling`、`number_format` 由构建器在 DOCX/表格/R 图中套用；Markdown 源保持工作流规范名。检查对照期刊字段，缺省时才用工作流默认值。
+- **派生文件确定性**：xlsx/docx/PDF/TIFF 固定时间戳与元数据；`manifest.json`、`qc_report.json` 可自动续期；漂移一次列全；`rework.py mark --deleted-file`；kind `journal` 更名 `journal-switch`（旧名兼容、batch 时校验），新增 `journal-format`。
+- **误报修正**：事实比对忽略 ICD-10/5-minute/(1)–(4) 等词内数字，`author_info.json` 登记的伦理号等行政事实可写入；CRediT 角色名白名单；期刊上限默认 100%（接近上限只警告）。
+- **构建与排版**：双盲时补充材料首页与 docProps 去作者信息并检查；表格 `< 0.001`、`n = 162`、`95% CI` 用不换行空格且列宽不低于最长词；论文内 `csl_patch.json` 与 `csl_check.py` 比对官方示例；清单 DOCX（`checklist_docx.py`）固定列宽、无内部路径。
+- **一致性前移与其他**：S12 `display_numbering_consistent`（首次引用顺序、表题两处一致、分面板引用）；`baseline_counts()` 输出二分类两类计数；正文列表阻断 `prose_not_lists`；`wf check --quiet/--summary/--reuse`；`preview.py` 渲染 PNG 联系表；论文锁定引擎版本（`wf migrate` 显式迁移）；S25 可用 `final_copy.py` 以“作者终稿副本”合法结束；S23 卡片列出投稿门户待办。
+- **迁移**：只写一条 `requirements_changed` 事件，不改论文文件。
 
 ## 1.8.1 变化（实测反馈 2 条）
 

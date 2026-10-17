@@ -102,6 +102,33 @@ medpaper_seed <- function(seed) {
   invisible(path)
 }
 
+# Baseline counts (1.9.0): every level of a categorical variable is counted - both categories of
+# a binary one (Male AND Female, Yes AND No) - overall and per group, with missing counted
+# separately. A journal asking for "M/F" then finds both numbers already in the results JSON,
+# so the table cell has provenance and nothing must be re-derived by hand.
+#   write_results(list(baseline = baseline_counts(dat, c("sex", "diabetes"), group = "arm")), "baseline")
+baseline_counts <- function(data, vars, group = NULL) {
+  groups <- if (is.null(group)) list(overall = rep(TRUE, nrow(data))) else
+    c(list(overall = rep(TRUE, nrow(data))),
+      stats::setNames(lapply(sort(unique(stats::na.omit(data[[group]]))), function(g) !is.na(data[[group]]) & data[[group]] == g),
+                      as.character(sort(unique(stats::na.omit(data[[group]]))))))
+  out <- list()
+  for (v in vars) {
+    x <- data[[v]]
+    lv <- if (is.factor(x)) levels(x) else if (is.logical(x)) c("FALSE", "TRUE") else sort(unique(as.character(stats::na.omit(x))))
+    xs <- as.character(x)
+    out[[v]] <- lapply(groups, function(idx) {
+      n <- sum(idx)
+      cnt <- stats::setNames(lapply(lv, function(l) {
+        k <- sum(idx & !is.na(xs) & xs == l)
+        list(n = k, pct = if (n > 0) 100 * k / n else NULL)
+      }), lv)
+      list(denominator = n, missing = sum(idx & is.na(xs)), levels = cnt)
+    })
+  }
+  out
+}
+
 # Curve tables (1.7.1): export the fitted curve with the results so the figure draws exactly the
 # analysis population instead of refitting it (recipe_km(curve = ...), recipe_cif(curve = ...)).
 #   fit <- survival::survfit(survival::Surv(time, status) ~ arm, data = dat)

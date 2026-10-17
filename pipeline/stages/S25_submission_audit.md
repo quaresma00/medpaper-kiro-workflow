@@ -83,10 +83,18 @@ the chosen journal's current official instructions.
    For any correction, use `tools/rework.py` to route content to its source; only a verified
    visible-text-preserving layout edit may remain solely in Word at S24.
 
+## Author final copy (1.9.0)
+```
+.\.venv\Scripts\python.exe tools/final_copy.py record --edit "<one manual edit>" --edit "<another>" --words "<author's words>"
+.\.venv\Scripts\python.exe tools/final_copy.py check
+.\.venv\Scripts\python.exe tools/wf.py decide submission_package_independent_audit PASS_AUTHOR_FINAL_COPY --why "<audit verdict; final-copy check passed>"
+```
+
 ## Outputs
 - `08_submission/independent_submission_audit.md`
 
 ## Hard rules
+- Legal end state (1.9.0): when the author chooses to finish journal requirements by hand in a copy of the uploads, put the edited files in `08_submission/final_copy/` (same names as in the bundle), record the edits and check them; numbers, citations and display references must be unchanged and blinding intact. Then record `submission_package_independent_audit PASS_AUTHOR_FINAL_COPY` and advance.
 - The independent subagent is read-only and audits exactly the user-confirmed frozen files.
 - Earlier S18 publishability review and S23 automated/visual QA do not substitute for this
   journal-specific final audit.

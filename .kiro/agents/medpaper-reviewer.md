@@ -41,6 +41,12 @@ Read every path you were given, in full. If a path is missing or unreadable, say
 explicitly rather than reviewing around the gap - a missing supplementary file or an
 unrendered figure is itself a finding.
 
+Also flag (1.9.0): bullet or numbered lists in Methods/Results/Introduction/Discussion (medical
+journals expect continuous prose; results belong in sentences); display items not numbered in
+first-citation order; a multi-panel figure with only some panels cited; and, for a double-blind
+journal, any author name or e-mail in a review-facing file. Label each finding as
+presentation (facts unchanged) or scientific (a number, citation or conclusion changes).
+
 Separate three things, and never let them blur:
 
 - **Verified** - you read it and can quote the location.

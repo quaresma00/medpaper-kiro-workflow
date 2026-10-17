@@ -245,8 +245,14 @@ def _normalize_for_facts(s: str) -> str:
     return s
 
 
-def facts(text: str) -> dict:
+def facts(text: str, rel: str = "") -> dict:
     b = FENCE_RE.sub(" ", text)
+    from wfcore import presentation
+    try:  # 1.9.0 (#9): registered administrative facts and in-word numbers are not results
+        b = presentation.strip_admin(b, presentation.admin_strings(project_root()), rel)
+    except (Exception, SystemExit):  # noqa: BLE001 - must work without a selected paper
+        pass
+    b = presentation.strip_non_facts(b)
     try:  # journal alias names ("Online Resource 2") count as the ids they stand for
         from wfcore import journalspec
         b = journalspec.expand_aliases(b, journalspec.project_aliases(project_root()))
@@ -336,10 +342,19 @@ def lint_structure(rel: str, text: str) -> list[dict]:
              f"{len(tricolon)} three-item lists per {nwords} words - vary the sentence shape",
              "advisory")
 
-    if re.search(r"(?m)^\s*[-*+]\s+\S", raw) and any(
-            s in rel for s in ("results", "discussion", "introduction")):
-        flag("bullets_in_prose",
-             "bullet list in a narrative section - journals want continuous prose", "blocking")
+    # 1.9.0 (#3): list density in the body sections of any file (full manuscript included),
+    # same thresholds as the prose_not_lists gate.
+    try:
+        from wfcore import registry
+        from wfcore.checks.text import prose_list_problem
+        tg = registry.effective_targets(project_root())
+        bad = prose_list_problem(text, int(tg.get("body_list_items_max", 3)),
+                                 float(tg.get("body_list_share_max", 0.10)),
+                                 whole_file=Path(rel).name != "full_manuscript.md")
+    except (Exception, SystemExit):  # noqa: BLE001 - linter must run without a paper
+        bad = None
+    if bad and not Path(rel).name.startswith(("title_page", "statements", "supplementary")):
+        flag("bullets_in_prose", bad + " - journals want continuous prose", "blocking")
     if re.search(r"(?<!\*)\*\*[^*\n]{1,60}\*\*(?!\*)", b) and "title_page" not in rel:
         flag("inline_bold", "bold text inside prose - remove it unless the journal asks for it",
              "blocking")
@@ -633,7 +648,7 @@ def cmd_snapshot(args) -> int:
     for rel, text in docs:
         name = Path(rel).name
         shutil.copy2(proj / rel, dest / name)
-        facts_index[rel] = facts(text)
+        facts_index[rel] = facts(text, rel)
     (dest / "facts.json").write_text(
         json.dumps({"snapshot_at": now(), "files": facts_index}, indent=2, ensure_ascii=False),
         encoding="utf-8")
@@ -750,7 +765,10 @@ def cmd_diff(args) -> int:
         if not p.exists():
             problems.append(f"{rel}: disappeared after polishing")
             continue
-        got = facts(p.read_text(encoding="utf-8", errors="replace"))
+        got = facts(p.read_text(encoding="utf-8", errors="replace"), rel)
+        snap_text = snap / Path(rel).name
+        if snap_text.is_file():  # re-derive with the current rules so an engine update is fair
+            expect = facts(snap_text.read_text(encoding="utf-8", errors="replace"), rel)
         old_words = len(body((snap / Path(rel).name).read_text(encoding="utf-8", errors="replace")).split())
         new_words = len(body(p.read_text(encoding="utf-8", errors="replace")).split())
         for field, label in (("numbers", "number"), ("citekeys", "citekey"), ("artifacts", "artifact ref")):

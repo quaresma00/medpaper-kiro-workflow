@@ -202,13 +202,9 @@ def manuscript_structure(ctx: Ctx) -> Result:
             problems.append(f"expected one Keywords line after Abstract, found {len(lines)}")
         else:
             payload = re.sub(r"^Keywords\s*:\s*", "", lines[0], flags=re.I)
-            if any(ch in payload for ch in "/;&"):
-                problems.append("Keywords must use commas only; '/', ';' and '&' are forbidden")
-            terms = [x.strip() for x in payload.split(",") if x.strip()]
-            if not 3 <= len(terms) <= 6:
-                problems.append(f"Keywords must contain 3-6 terms, found {len(terms)}")
-            if len({x.casefold() for x in terms}) != len(terms):
-                problems.append("Keywords contain duplicates")
+            # 1.9.0: count and separator from target_journal.json keywords (default 3-6, comma).
+            problems.extend(journalspec.keyword_problems(
+                payload, journalspec.keyword_rules(journalspec.load(ctx.project))))
     if "references" in positions:
         ref_block_end = positions.get("figure legends", len(text))
         ref_block = text[positions["references"]:ref_block_end]
@@ -499,6 +495,15 @@ def docx_bundle_ready(ctx: Ctx) -> Result:
     for role in ("manuscript", "title_page", "cover_letter"):
         if not any(p.suffix.casefold() == ".docx" for p in roles.get(role, [])):
             problems.append(f"no DOCX for required role '{role}'")
+    if journalspec.blinded(journalspec.load(ctx.project)):
+        # 1.9.0 (#13): every review-facing upload (body and docProps/PDF metadata) is anonymous.
+        ids = docxaudit.identity_strings(ctx.project)
+        for role, paths in roles.items():
+            if role in docxaudit.REVIEW_EXEMPT_ROLES:
+                continue
+            for path in paths:
+                if path.suffix.casefold() in (".docx", ".pdf"):
+                    problems.extend(docxaudit.blinding_problems(path, ids))
     if ctx.psrc("07_manuscript/supplementary_methods.md").exists():
         if not any(p.suffix.casefold() == ".docx" for p in roles.get("supplementary", [])):
             problems.append("supplementary Methods exists but no supplementary DOCX is packaged")

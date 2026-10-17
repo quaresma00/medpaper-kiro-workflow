@@ -317,6 +317,9 @@ def _scaffold(pipe, proj: Path) -> None:
 
 def _finish_paper(pipe, proj: Path, verb: str) -> None:
     adapters.write_adapters(proj, adapters.paper_adapters(paths.repo_root()), check=False)
+    st = State(proj, pipe.layout.get("state_dir", ".wf"))
+    if st.exists() and "spelling" not in st.load().config().get("targets", {}):
+        st.set_config("spelling", "american")  # 1.9.0 (#16): decided up front, changeable at S01/S03
     paths.set_active_paper(proj)
     print(f"{verb} {pipe.meta.get('name')} {pipe.meta.get('version')} paper at {proj} and selected it")
     print(f"current stage: {pipe.first().id}")
@@ -538,6 +541,9 @@ def cmd_status(args) -> int:
     print(BAR)
     print(f"engine  {paths.repo_root()}")
     print(f"paper   {proj}   ({_PROJECT_SOURCE or paths.describe_project_source(pipe.layout)})")
+    if st.engine_pin != str(pipe.meta.get("version")):
+        print(f"pin     paper pinned to engine {st.engine_pin} (engine {pipe.meta.get('version')}); "
+              "completed stages keep their gate set - `wf migrate` to adopt the new one")
     if (proj / "project").is_dir():
         print(f'!! {proj / "project"} exists - "project/" in cards means this paper folder; '
               "move its contents up one level")
@@ -634,8 +640,18 @@ def cmd_check(args) -> int:
     if not args.json:
         _warn_engine_cwd(proj, stdout=True)
     stage = pipe.resolve(args.stage) if args.stage else pipe.stage(st.current)
-    results = gates.run_stage(pipe, st, proj, stage, record=True)
+    results = gates.run_stage(pipe, st, proj, stage, record=True,
+                              reuse=bool(getattr(args, "reuse", False)))
     ok, blocking, warned = gates.summarize(results)
+    if getattr(args, "summary", False) or getattr(args, "quiet", False):
+        # 1.9.0 (#21): short output for agent shells that time out or truncate long logs.
+        if not getattr(args, "summary", False):
+            _gate_lines([r for r in results if not r.ok], proj)
+        failing = [r.check for r in results if r.blocking]
+        print(f"{stage.id}: {'GREEN' if ok else 'RED'} {len(results) - blocking - warned}/"
+              f"{len(results)} passing, {blocking} blocking, {warned} warning(s)"
+              + (f"; failing: {', '.join(failing)}" if failing else ""))
+        return 0 if ok else 2
     if args.json:
         print(json.dumps({
             "stage": stage.id, "gate_ok": ok, "blocking": blocking, "warnings": warned,
@@ -652,6 +668,32 @@ def cmd_check(args) -> int:
         return 0
     print(f"RED - {blocking} blocking issue(s)")
     return 2
+
+
+def cmd_migrate(args) -> int:
+    """1.9.0 (#8): explicit engine migration of a pinned paper."""
+    pipe, st, proj = _load(warn_stderr=False)
+    engine = str(pipe.meta.get("version", "0"))
+    pin = st.engine_pin
+    print(f"paper pinned to engine {pin}; this engine is {engine}")
+    newer = sorted({f"{s.id}: {g['check']} (since {g['since']})" for s in pipe.stages
+                    for g in s.gate if g.get("since") and st.pin_excludes(s.id, g.get("since"))})
+    print("gates that would start re-judging completed stages:"
+          + ("" if newer else " none"))
+    for line in newer:
+        print(f"  {line}")
+    if not args.yes:
+        print("migration notes recorded for this paper:")
+        for e in st.data.get("events", []):
+            if e.get("kind", "").startswith("requirements_"):
+                print(f"  - {e.get('detail', '')}")
+        print("run `wf migrate --yes` to adopt them")
+        return 0
+    notes = st.migrate_pin(engine)
+    print(f"pinned {pin} -> {engine}; {len(notes)} migration note(s):")
+    for n in notes:
+        print(f"  - {n}")
+    return 0
 
 
 def cmd_advance(args) -> int:
@@ -1358,11 +1400,30 @@ def cmd_run_script(args) -> int:
     print(f"cwd    {proj}")
     print(f"run    {' '.join(cmd)}")
     sys.stdout.flush()
+    from . import determinism, numfmt
+    # 1.9.0: the journal number style/spelling reaches R and Python builders (#16/#17), and
+    # container outputs are made byte-stable afterwards (#4).
+    os.environ["MEDPAPER_NUMFMT"] = numfmt.env_json(proj)
+    watch = ("04_tables", "05_figures/out")
+
+    def _derived() -> dict[Path, int]:
+        out = {}
+        for sub in watch:
+            root = proj / sub
+            if root.is_dir():
+                for p in root.rglob("*"):
+                    if p.is_file() and p.suffix.casefold() in (".xlsx", ".docx", ".pdf"):
+                        out[p] = p.stat().st_mtime_ns
+        return out
+    before = _derived()
     try:
         outcome = runner.run_paper_script(proj, script, args.script_args)
     except runner.RunnerError as exc:
         print(str(exc))
         return 2
+    for p, mtime in _derived().items():
+        if before.get(p) != mtime:
+            determinism.normalize(p)
     if outcome.engine_changes:
         print("CRITICAL: the paper script changed shared-engine path(s):")
         for path in outcome.engine_changes[:12]:
@@ -1522,7 +1583,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("stage", nargs="?")
     p.add_argument("--json", action="store_true")
     p.add_argument("--log", type=Path, help=log_help)
+    p.add_argument("--quiet", action="store_true", help="print failing checks and one summary line")
+    p.add_argument("--summary", action="store_true", help="print one summary line only")
+    p.add_argument("--reuse", action="store_true",
+                   help="reuse fresh receipts of unchanged pure checks (incremental re-check)")
     p.set_defaults(fn=cmd_check)
+
+    p = sub.add_parser("migrate", help="adopt this engine's full gate set for completed stages "
+                                       "(the paper is pinned to the engine it ran under)")
+    p.add_argument("--yes", action="store_true", help="apply; without it only the notes print")
+    p.set_defaults(fn=cmd_migrate)
 
     p = sub.add_parser("advance", help="close the current stage and move to the next")
     p.add_argument("--note", help="handoff note (required unless already noted)")

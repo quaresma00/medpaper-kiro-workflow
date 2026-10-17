@@ -89,7 +89,25 @@ def _autowidth(header: list, rows: list, explicit: list | None) -> list[float]:
     return widths
 
 
+def _styled(spec: dict) -> dict:
+    """1.9.0: journal number style and spelling applied at build time (wfcore/numfmt.py)."""
+    from wfcore import numfmt
+    st = numfmt.style()
+    if all(v is None for v in st.values()):
+        return spec
+
+    def f(v):
+        return numfmt.apply_text(v, st) if isinstance(v, str) else v
+    out = dict(spec)
+    out["title"] = f(spec["title"])
+    out["header"] = [f(h) for h in spec["header"]]
+    out["rows"] = [[f(v) for v in row] for row in spec["rows"]]
+    out["footnotes"] = [f(str(n)) for n in spec["footnotes"]]
+    return out
+
+
 def _write_sheet(ws, spec: dict) -> None:
+    spec = _styled(spec)
     header = spec["header"]
     rows = spec["rows"]
     footnotes = spec["footnotes"]
@@ -155,7 +173,14 @@ def write_workbook(path: str | Path, tables: list[dict]) -> Path:
         _write_sheet(ws, spec)
     p = wfpaths.paper_output_path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
+    # 1.9.0: same table -> same bytes (fixed workbook timestamps and zip entry dates), so a
+    # rebuild does not look like an edit to the revision credentials.
+    import datetime as _dt
+    fixed = _dt.datetime(2000, 1, 1)
+    wb.properties.created = wb.properties.modified = fixed
     wb.save(p)
+    from wfcore import determinism
+    determinism.normalize(p)
     print(f"wrote {p}  ({len(tables)} sheet(s))")
     return p
 
@@ -188,6 +213,7 @@ def p_value(p) -> str:
     except (TypeError, ValueError):
         return str(p)
     if f < 0.001:
+        # The journal's spacing ("< 0.001") is applied to every cell at build (numfmt).
         return "<0.001"
     return f"{f:.3f}" if f < 0.01 else f"{f:.2f}"
 

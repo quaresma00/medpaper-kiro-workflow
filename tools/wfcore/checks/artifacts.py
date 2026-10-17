@@ -695,7 +695,13 @@ def submission_audit_matches_freeze(ctx: Ctx) -> Result:
         audit = ctx.read(audit_rel)
     except (FileNotFoundError, json.JSONDecodeError) as exc:
         return Result(False, "submission_audit_matches_freeze", f"audit/freeze unreadable: {exc}")
+    from ..packagefreeze import confirmed_ids
     freeze_id = str(freeze.get("freeze_id", "")).strip()
+    # A presentation delta (1.9.0) re-hashes the package without a new audit; the audit of the
+    # superseded freeze id still identifies the same scientific package.
+    named = next((i for i in sorted(confirmed_ids(freeze)) if i in audit), None)
+    if named:
+        freeze_id = named
     if len(freeze_id) != 64 or freeze_id not in audit:
         return Result(
             False,

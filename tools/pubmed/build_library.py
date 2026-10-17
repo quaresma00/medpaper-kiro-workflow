@@ -127,6 +127,16 @@ def _bib_escape(s: str) -> str:
     return "".join(out)
 
 
+COLON_COMMON = {
+    "a", "an", "the", "results", "findings", "evidence", "lessons", "insights", "implications",
+    "analysis", "study", "review", "protocol", "rationale", "design", "update", "report",
+    "experience", "outcomes", "comparison", "assessment", "evaluation", "association", "role",
+    "impact", "effect", "effects", "risk", "trends", "challenges", "current", "new", "is", "does",
+    "do", "are", "can", "should", "what", "when", "how", "why", "who", "where", "from", "toward",
+    "towards", "beyond", "time", "more", "less", "no", "not", "one", "two", "three",
+}
+
+
 def protect_title(title: str) -> str:
     """Brace proper nouns and acronyms so a sentence-case CSL cannot lowercase them.
 
@@ -135,13 +145,20 @@ def protect_title(title: str) -> str:
     ({MAUDE}, {COVID}-19, {mRNA}).
     """
     out = []
+    after_colon = False
     for i, tok in enumerate(re.split(r"(\s+)", title)):
         core = tok.strip("()[]:;,.\"'")
         if tok.isspace() or not core or "{" in tok:
             out.append(tok)
             continue
         upper_inside = any(ch.isupper() for ch in core[1:])
-        if (i > 0 and core[:1].isupper()) or upper_inside:
+        # 1.9.0 (#14): the capital PubMed puts after a colon is style, not a proper noun; leave
+        # an ordinary word unbraced so the journal's CSL decides its case consistently.
+        colon_word = after_colon and core.casefold() in COLON_COMMON
+        after_colon = tok.rstrip().endswith(":")
+        if colon_word and not upper_inside:
+            out.append(tok)
+        elif (i > 0 and core[:1].isupper()) or upper_inside:
             start = tok.find(core)
             out.append(tok[:start] + "{" + core + "}" + tok[start + len(core):])
         else:

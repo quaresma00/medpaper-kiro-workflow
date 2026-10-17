@@ -7,7 +7,7 @@ import json
 from . import Ctx, Result, check
 from ..packagecontent import verify_baseline
 from ..reviewpackage import verify as verify_review_package
-from ..revision import renewable
+from ..revision import DELETED, receipt_holds, renewable
 
 
 def _sha256(path) -> str:
@@ -97,20 +97,44 @@ def revision_rounds_closed(ctx: Ctx) -> Result:
                 # Keep every old receipt as history, but compare the working tree only with
                 # the newest completed receipt for each path.
                 if not renewable(str(rel)):
-                    latest_receipts[str(rel)] = (path.name, str(item_id), str(expected))
+                    latest_receipts[str(rel)] = (path.name, str(item_id), receipt)
     if latest_scoped:
         path, revision = latest_scoped
-        for rel, expected in revision.get("validation", {}).get("artifact_hashes", {}).items():
+        val = revision.get("validation", {})
+        content = val.get("artifact_content", {})
+        for rel, expected in val.get("artifact_hashes", {}).items():
             if not renewable(rel):
-                latest_receipts[rel] = (path.name, "scoped validation", expected)
-    for rel, (round_name, item_id, expected) in latest_receipts.items():
+                latest_receipts[rel] = (path.name, "scoped validation",
+                                        {"path": rel, "sha256": expected,
+                                         "content_sha256": content.get(rel)})
+        for rel in val.get("artifact_deleted", []):
+            latest_receipts[rel] = (path.name, "scoped validation",
+                                    {"path": rel, "sha256": DELETED, "deleted": True})
+    # 1.9.0: every drifted file is listed at once (not the first few), and a credential holds
+    # on visible content, so an identical rebuild with new container timestamps is not drift.
+    missing, drifted, back = [], [], []
+    for rel, (round_name, item_id, rec) in sorted(latest_receipts.items()):
         source = ctx.project / rel
-        if not source.is_file():
-            problems.append(f"{round_name}/{item_id}: changed source missing ({rel})")
-        elif _sha256(source).casefold() != expected.casefold():
-            problems.append(f"{round_name}/{item_id}: changed source drifted after latest closure ({rel})")
-    if problems:
-        return Result(False, "revision_rounds_closed", "; ".join(problems[:8]))
+        if rec.get("deleted") or rec.get("sha256") == DELETED:
+            if source.exists():
+                back.append(f"{rel} ({round_name})")
+        elif not source.is_file():
+            missing.append(f"{rel} ({round_name}/{item_id})")
+        elif not receipt_holds(ctx.project, rec):
+            drifted.append(f"{rel} ({round_name})")
+    detail = problems[:8]
+    if missing:
+        detail.append(f"{len(missing)} changed source(s) missing: " + ", ".join(missing))
+    if drifted:
+        detail.append(f"{len(drifted)} changed source(s) drifted after latest closure: "
+                      + ", ".join(drifted))
+    if back:
+        detail.append(f"{len(back)} deleted source(s) reappeared: " + ", ".join(back))
+    if detail:
+        return Result(False, "revision_rounds_closed", "; ".join(detail),
+                      ["Open ONE round covering every file listed (rework.py batch), or restore them; "
+                       "a deleted source is credited with rework.py mark --deleted-file."]
+                      if drifted or missing or back else [])
     return Result(True, "revision_rounds_closed", f"{count} revision round(s) closed with source hashes and validations")
 
 

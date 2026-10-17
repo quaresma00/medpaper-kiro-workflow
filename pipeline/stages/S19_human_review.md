@@ -61,6 +61,7 @@ requirements are adapted in `08_submission/manuscript/` from S20 on. Re-freeze
 - `07_manuscript/scientific_freeze.json`
 
 ## Hard rules
+- Long checks: `wf check --quiet` (failures + one line) or `--summary`; run long ones in the background with `--log temp/check.log` and poll the `[wf] finished rc=` marker.
 - The S18 verdict is not the user's approval; only the recorded `no_further_review` is.
 - `review_round_approved` fails if anything the round covered changed after it closed; run a
   new round (`--delta` is fine).

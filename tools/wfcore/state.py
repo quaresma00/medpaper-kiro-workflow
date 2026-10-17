@@ -17,6 +17,16 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def version_tuple(value: str) -> tuple[int, ...]:
+    """'1.8.1-wip' -> (1, 8, 1); unparseable -> (0,)."""
+    out = []
+    for part in str(value).split("-")[0].split(".")[:3]:
+        if not part.isdigit():
+            break
+        out.append(int(part))
+    return tuple(out) or (0,)
+
+
 class State:
     def __init__(self, root: Path, state_dir: str = ".wf"):
         self.project = root
@@ -45,6 +55,8 @@ class State:
             "pipeline": pipeline_name,
             "pipeline_version": pipeline_version,
             "pipeline_origin_version": pipeline_version,
+            # 1.9.0: completed stages keep the gate set of this version until `wf migrate`.
+            "engine_pin": pipeline_version,
             "created_at": _now(),
             "current": first_stage,
             "stages": {first_stage: {"status": "active", "started_at": _now(), "loops": 0}},
@@ -88,6 +100,9 @@ class State:
             changed = True
         if changed:
             self.data.setdefault("pipeline_origin_version", old_version)
+            # 1.9.0: the version the paper ran under stays its pin; new gates reach completed
+            # stages only through an explicit `wf migrate`.
+            self.data.setdefault("engine_pin", old_version)
             self.data.setdefault("pipeline_migrations", []).append({
                 "at": _now(), "from": old_version, "to": pipeline_version,
                 "current_before": current, "current_after": self.data["current"],
@@ -99,8 +114,47 @@ class State:
             self._note_on_demand_checklist(old_version)
             self._note_v180(old_version)
             self._note_v181(old_version)
+            self._note_v190(old_version, pipeline_version)
             self.save()
         return changed
+
+    @property
+    def engine_pin(self) -> str:
+        return str(self.data.get("engine_pin") or self.data.get("pipeline_version") or "0")
+
+    def pin_excludes(self, sid: str, since: str | None) -> bool:
+        """A gate added after the paper's pinned engine does not re-judge a completed stage."""
+        if not since or self.status_of(sid) not in ("done", "skipped"):
+            return False
+        return version_tuple(self.engine_pin) < version_tuple(since)
+
+    def migrate_pin(self, engine_version: str) -> list[str]:
+        """`wf migrate`: adopt the engine's full gate set; returns the recorded migration notes."""
+        old = self.engine_pin
+        notes = [f"{e.get('at', '')} {e.get('kind')}: {e.get('detail', '')}"
+                 for e in self.data.get("events", [])
+                 if e.get("kind") in ("requirements_added", "requirements_changed",
+                                      "requirements_relaxed")]
+        self.data["engine_pin"] = engine_version
+        self.data.setdefault("pin_migrations", []).append(
+            {"at": _now(), "from": old, "to": engine_version})
+        self.event("engine_pin_migrated", f"{old} -> {engine_version}")
+        self.save()
+        return notes
+
+    def _note_v190(self, old_version: str, new_version: str = "1.9.0") -> None:
+        """1.9.0: record what changes for an in-flight paper; never rewrite its files."""
+        if (version_tuple(old_version) >= (1, 9, 0) or version_tuple(new_version) < (1, 9, 0)
+                or self.data.get("v190_migration_noted")):
+            return
+        self.data["v190_migration_noted"] = True
+        self.event("requirements_changed",
+                   "1.9.0: post-freeze revision items are classified by content (unchanged facts "
+                   "= presentation delta, no S19 return or re-confirmation); kind 'journal' is now "
+                   "'journal-switch' (+ 'journal-format'); package confirmation covers uploads by "
+                   "visible content only; completed stages keep this paper's pinned gate set "
+                   "until `wf migrate`; S25 can close with an author-edited upload copy "
+                   "(tools/final_copy.py). Paper files were not modified.")
 
     def _note_v180(self, old_version: str) -> None:
         """1.8.0: record what an in-flight paper must add; never rewrite its files."""

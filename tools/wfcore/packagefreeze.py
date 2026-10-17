@@ -98,22 +98,84 @@ def expected_files(project: Path) -> dict[str, Path]:
     return dict(sorted(files.items()))
 
 
-def build_freeze(project: Path) -> dict:
+def upload_files(project: Path) -> set[str]:
+    """1.9.0: what the user confirms is what gets uploaded - manifest items and the bundle."""
+    project = Path(project).resolve()
+    out: set[str] = set()
+    manifest = project.joinpath(*PurePosixPath(MANIFEST_REL).parts)
+    try:
+        for item in json.loads(manifest.read_text(encoding="utf-8")).get("items", []):
+            out.add(str(item.get("file", "")).replace("\\", "/"))
+    except (OSError, ValueError, AttributeError):
+        pass
+    bundle = project / "08_submission" / "bundle"
+    if bundle.is_dir():
+        out.update(p.relative_to(project).as_posix() for p in bundle.rglob("*")
+                   if p.is_file() and p.name != "manifest.json")
+    return {r for r in out if r}
+
+
+def _records(project: Path) -> list[dict]:
+    from .determinism import content_sha256
     files = expected_files(project)
-    records = [
-        {"path": rel, "sha256": _sha256(path), "size": path.stat().st_size}
-        for rel, path in files.items()
-    ]
-    freeze_id = hashlib.sha256(
+    uploads = upload_files(project)
+    records = []
+    for rel, path in files.items():
+        rec = {"path": rel, "sha256": _sha256(path), "size": path.stat().st_size,
+               "role": "upload" if rel in uploads else "evidence"}
+        if rec["role"] == "upload":
+            rec["content_sha256"] = content_sha256(path)
+        records.append(rec)
+    return records
+
+
+def _freeze_id(records: list[dict]) -> str:
+    return hashlib.sha256(
         json.dumps(records, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest().upper()
+
+
+def build_freeze(project: Path) -> dict:
+    records = _records(project)
     return {
         "schema_version": 1,
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "freeze_id": freeze_id,
+        "freeze_id": _freeze_id(records),
         "algorithm": "SHA-256",
         "files": records,
     }
+
+
+def apply_delta(project: Path, round_id: str, summary: str, at: str) -> list[str]:
+    """Record a presentation delta (1.9.0): re-hash the package, keep the confirmed ids."""
+    project = Path(project).resolve()
+    path = project.joinpath(*PurePosixPath(FREEZE_REL).parts)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    old = {str(r.get("path")): r for r in payload.get("files", []) if isinstance(r, dict)}
+    records = _records(project)
+    changed = sorted({r["path"] for r in records if old.get(r["path"], {}).get("sha256") != r["sha256"]}
+                     | (set(old) - {r["path"] for r in records}))
+    if not changed:
+        return []
+    deltas = payload.setdefault("presentation_deltas", [])
+    same = next((d for d in deltas if d.get("round") == round_id), None)
+    if same:  # a re-check of the same round keeps the confirmed id it superseded
+        same.update(at=at, summary=summary, files=sorted(set(same.get("files", [])) | set(changed)))
+    else:
+        deltas.append({"round": round_id, "at": at, "summary": summary,
+                       "from_freeze_id": payload.get("freeze_id"), "files": changed})
+    payload["files"] = records
+    payload["freeze_id"] = _freeze_id(records)
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return changed
+
+
+def confirmed_ids(payload: dict) -> set[str]:
+    """The current freeze id and every id a presentation delta superseded."""
+    ids = {str(payload.get("freeze_id", ""))}
+    ids.update(str(d.get("from_freeze_id", "")) for d in payload.get("presentation_deltas", [])
+               if isinstance(d, dict))
+    return {i for i in ids if len(i) == 64}
 
 
 def write_freeze(project: Path, output: Path | None = None) -> Path:
@@ -165,15 +227,29 @@ def verify_freeze(project: Path, freeze: Path | None = None) -> tuple[bool, list
     except ValueError as exc:
         return False, problems + [str(exc)], len(recorded)
 
-    added = sorted(set(expected) - set(recorded))
-    removed = sorted(set(recorded) - set(expected))
+    # 1.9.0: only uploaded files bind the confirmation, and they bind by visible content
+    # (a re-zipped DOCX/XLSX with new timestamps is the same file). Internal QC, notes,
+    # receipts and caches are recorded as evidence but never invalidate the user's OK.
+    from .determinism import content_sha256
+    uploads = upload_files(project)
+
+    def is_upload(rel: str) -> bool:
+        role = recorded.get(rel, {}).get("role")
+        return role == "upload" if role else rel in uploads
+    added = sorted(r for r in set(expected) - set(recorded) if r in uploads)
+    removed = sorted(r for r in set(recorded) - set(expected) if is_upload(r))
     if added:
-        problems.append("not frozen: " + ", ".join(added[:8]))
+        problems.append("not frozen: " + ", ".join(added))
     if removed:
-        problems.append("frozen file now absent: " + ", ".join(removed[:8]))
+        problems.append("frozen file now absent: " + ", ".join(removed))
     for rel in sorted(set(expected) & set(recorded)):
+        if not is_upload(rel):
+            continue
         item = recorded[rel]
         path = expected[rel]
-        if item.get("size") != path.stat().st_size or item.get("sha256") != _sha256(path):
-            problems.append(f"changed after user confirmation: {rel}")
+        if item.get("sha256") == _sha256(path):
+            continue
+        if item.get("content_sha256") and item["content_sha256"] == content_sha256(path):
+            continue
+        problems.append(f"changed after user confirmation: {rel}")
     return not problems, problems, len(recorded)

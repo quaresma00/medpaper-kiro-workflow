@@ -104,8 +104,15 @@ def limits(target: dict) -> tuple[dict[str, int | None], list[str]]:
 def word_count_scope(target: dict) -> list[str]:
     scope = target.get("word_count_scope")
     if isinstance(scope, list) and scope and all(isinstance(x, str) for x in scope):
-        return scope
-    return list(DEFAULT_SCOPE)
+        out = list(scope)
+    else:
+        out = list(DEFAULT_SCOPE)
+    # A renamed body heading ("Materials and Methods") counts like its canonical section.
+    heads = main_text_headings(target)
+    for canon, shown in heads.items():
+        if canon in out and shown not in out:
+            out.append(shown)
+    return out
 
 
 def declarations_order(target: dict) -> list[str]:
@@ -176,6 +183,83 @@ def expand_aliases(text: str, aliases: dict[str, list[str]]) -> str:
 
 def project_aliases(project: Path) -> dict[str, list[str]]:
     return supplementary_aliases(load(project))
+
+
+# ---------------------------------------------------------------------------
+# 1.9.0: typed structure fields. The Markdown source keeps the workflow's canonical names
+# (# Methods, comma-separated keywords); the DOCX build renames/re-joins them from these fields
+# and the checks compare against them, with the workflow defaults only when a field is absent.
+# ---------------------------------------------------------------------------
+CANON_BODY = ("Introduction", "Methods", "Results", "Discussion")
+HEADING_SYNONYMS = {
+    "introduction": {"introduction", "background"},
+    "methods": {"methods", "materials and methods", "material and methods", "patients and methods",
+                "subjects and methods", "methods and materials", "study design and methods"},
+    "results": {"results"},
+    "discussion": {"discussion"},
+}
+DEFAULT_KEYWORDS = {"min": 3, "max": 6, "separator": ","}
+
+
+def main_text_headings(target: dict) -> dict[str, str]:
+    """canonical heading -> the journal's display name (identity when the guide is silent)."""
+    out = {c: c for c in CANON_BODY}
+    raw = target.get("main_text_headings")
+    if isinstance(raw, list):
+        for name in raw:
+            if not isinstance(name, str) or not name.strip():
+                continue
+            key = re.sub(r"\s+", " ", name.strip()).casefold()
+            for canon, names in HEADING_SYNONYMS.items():
+                if key in names:
+                    out[canon.capitalize() if canon != "methods" else "Methods"] = name.strip()
+    return out
+
+
+def keyword_rules(target: dict) -> dict:
+    rules = dict(DEFAULT_KEYWORDS)
+    raw = target.get("keywords")
+    if isinstance(raw, dict):
+        for key in ("min", "max"):
+            if isinstance(raw.get(key), int) and not isinstance(raw.get(key), bool) and raw[key] > 0:
+                rules[key] = raw[key]
+        sep = str(raw.get("separator", "")).strip()
+        if sep in (",", ";", "|", "/", "·", "\u00b7"):
+            rules["separator"] = sep
+    return rules
+
+
+def keyword_terms(payload: str, rules: dict) -> list[str]:
+    """Split a Keywords payload on the canonical comma or the journal's separator."""
+    seps = {",", rules.get("separator", ",")}
+    pattern = "|".join(re.escape(s) for s in sorted(seps))
+    return [x.strip() for x in re.split(pattern, payload) if x.strip()]
+
+
+def keyword_problems(payload: str, rules: dict) -> list[str]:
+    problems = []
+    forbidden = [ch for ch in "/;&|" if ch in payload and ch != rules.get("separator")]
+    if forbidden:
+        problems.append("Keywords use '" + "', '".join(forbidden) + "'; separate terms with commas "
+                        f"(or the journal's '{rules['separator']}')")
+    terms = keyword_terms(payload, rules)
+    if not rules["min"] <= len(terms) <= rules["max"]:
+        problems.append(f"Keywords must contain {rules['min']}-{rules['max']} terms "
+                        f"(target_journal.json keywords or the workflow default), found {len(terms)}")
+    if len({x.casefold() for x in terms}) != len(terms):
+        problems.append("Keywords contain duplicates")
+    return problems
+
+
+def blinded(target: dict) -> bool:
+    """Double-blind review: every review-facing file is anonymised (1.9.0, #13)."""
+    return target.get("blinded_main_manuscript") is True or target.get("double_blind") is True
+
+
+def running_title_position(target: dict) -> str:
+    """'title_page' (default) or 'manuscript' (first page of the main document)."""
+    value = str(target.get("running_title_position", "title_page")).strip().casefold()
+    return "manuscript" if value in ("manuscript", "main", "first_page") else "title_page"
 
 
 def si_format(target: dict) -> str:

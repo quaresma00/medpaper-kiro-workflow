@@ -152,3 +152,37 @@ def write_results(name: str, payload: dict, seed: int | None = None) -> Path:
     finally:
         tmp.unlink(missing_ok=True)
     return out
+
+
+def baseline_counts(rows, variables: list[str], group: str | None = None) -> dict:
+    """Counts for EVERY level of each categorical variable (1.9.0) - both categories of a
+    binary one - overall and per group, missing counted separately. `rows` is a pandas
+    DataFrame or a list of dicts. Put the result into write_results() so a journal's "M/F"
+    or "yes/no" layout has both numbers with provenance."""
+    records = rows.to_dict("records") if hasattr(rows, "to_dict") else list(rows)
+
+    def missing(v) -> bool:
+        return v is None or (isinstance(v, float) and v != v)
+    groups = {"overall": records}
+    if group:
+        for key in sorted({str(r.get(group)) for r in records if not missing(r.get(group))}):
+            groups[key] = [r for r in records if not missing(r.get(group)) and str(r.get(group)) == key]
+    out: dict = {}
+    for var in variables:
+        values = [r.get(var) for r in records]
+        levels = sorted({str(v) for v in values if not missing(v)})
+        if set(levels) <= {"True", "False"}:
+            levels = ["False", "True"]
+        elif set(levels) <= {"0", "1"}:
+            levels = ["0", "1"]
+        out[var] = {}
+        for name, rs in groups.items():
+            n = len(rs)
+            out[var][name] = {
+                "denominator": n,
+                "missing": sum(1 for r in rs if missing(r.get(var))),
+                "levels": {lv: {"n": (k := sum(1 for r in rs if not missing(r.get(var))
+                                               and str(r.get(var)) == lv)),
+                                "pct": (100.0 * k / n) if n else None} for lv in levels},
+            }
+    return out

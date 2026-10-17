@@ -15,8 +15,9 @@ source for review, user editing, polishing and packaging.
    the structure most appropriate to the design. Every number must already occur in a
    results JSON and every conclusion must agree with the Discussion.
 3. Write `project/07_manuscript/keywords.md` as one line:
-   `Keywords: term 1, term 2, term 3`. Use 3-6 specific, MeSH-aligned terms where suitable.
-   Commas are the only separators: no slash, semicolon, ampersand or conjunction padding.
+   `Keywords: term 1, term 2, term 3`. Use 3-6 specific, MeSH-aligned terms where suitable
+   (or the journal's keywords.min/max once known). Commas separate terms in the source; the
+   DOCX build applies the journal's separator. No slash, ampersand or conjunction padding.
 4. Assemble the exact order with the deterministic tool:
    First, review the display-item abbreviation lists. When they exceed eight unique terms,
    any local list exceeds 50 words, or the lists visibly dominate captions, define the terms
@@ -53,6 +54,8 @@ source for review, user editing, polishing and packaging.
 - `07_manuscript/statements.md` (optional abbreviation list only; administrative facts wait)
 
 ## Hard rules
+- Keywords: the source line is comma-joined. The count follows `target_journal.json` keywords.min/max when a journal is already known (default 3-6); the journal's separator and its heading names (e.g. `main_text_headings` "Materials and Methods") are applied by the DOCX build, not in Markdown.
+- Body text is continuous paragraphs (1.9.0). Lists only where a sentence truly cannot carry the content (rarely more than one short list per section); every result, count, criterion, covariate and sensitivity finding is written as a sentence. `prose_not_lists` fails above `body_list_items_max` items or `body_list_share_max` of the blocks.
 - Do not ask for or invent authors, affiliations, ORCIDs, grants or correspondence details.
 - Do not present title choices. Select the strongest accurate title automatically.
 - Keywords appear immediately after the Abstract and nowhere before it.

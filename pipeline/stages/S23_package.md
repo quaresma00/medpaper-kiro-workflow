@@ -159,6 +159,13 @@ Manuscript: 08_submission/manuscript/full_manuscript.md
    `check-reporting` skill may assist read-only. `analysis_reproduces` is re-checked here too,
    so the package is never built on numbers that no longer re-execute.
 
+## Portal to-do (1.9.0)
+Before the user submits, list for them what the portal will ask beyond the files: article type / section selection, the copyright or licence form (fill it from the journal template with author_info.json; the signature image comes from the author), the portal's own formatting self-check (suggest answers from the manuscript: word counts, reference style, blinding, figure resolution), suggested reviewers if asked, and the cover-letter field. Reporting checklist upload (only when required):
+```
+.\.venv\Scripts\python.exe tools/manuscript/checklist_docx.py --output 08_submission/bundle/reporting_checklist.docx
+.\.venv\Scripts\python.exe tools/manuscript/preview.py 08_submission/bundle/manuscript.docx
+```
+
 ## Outputs
 - `08_submission/cover_letter.md`
 - `08_submission/bundle/SUBMISSION_CHECKLIST.md`
@@ -169,6 +176,8 @@ Manuscript: 08_submission/manuscript/full_manuscript.md
 - the journal-required Word, figure, table and supplementary upload files
 
 ## Hard rules
+- Visual checks: render uploads with `tools/manuscript/preview.py` (PNG contact sheet in temp/preview/, unique name per run) instead of ad-hoc COM scripts.
+- Double-blind journals (`blinded_main_manuscript`): every review-facing file, the supplementary file included, carries no author name or e-mail in its text or document properties; `docx_bundle_ready` checks it.
 - Pipeline-authored bundle-facing narrative files are DOCX, never Markdown; journal-supplied
   fixed forms retain their mandated non-Markdown format.
 - All text is black; no external hyperlinks; no Aptos/theme-font leakage when the selected

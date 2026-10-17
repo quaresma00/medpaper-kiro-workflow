@@ -381,8 +381,8 @@ def run_counts(tmp: Path, record, section) -> None:
         f"# T\n\n# Abstract\n\nShort abstract.\n\nKeywords: a, b, c\n\n# Introduction\n\n{body} "
         "[@a; @b; @c]\n\n# References\n", encoding="utf-8")
     r = _gate(p, "journal_limits_met", "S22_polish")
-    record("38+1 words against a 40-word cap fails the 97% safety margin and the 2-reference cap",
-           not r.ok and "margin 38" in r.detail and "references 3/2" in r.detail, r.detail)
+    record("38+1 words against a 40-word cap passes (1.9.0: cap is 100%); the 2-reference cap fails",
+           not r.ok and "main text" not in r.detail and "references 3/2" in r.detail, r.detail)
     target = json.loads((p / "08_submission/target_journal.json").read_text(encoding="utf-8"))
     target["limits"].update(main_text_words=100, reference_limit=5)
     (p / "08_submission/target_journal.json").write_text(json.dumps(target), encoding="utf-8")

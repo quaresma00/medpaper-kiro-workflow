@@ -66,6 +66,7 @@ write_results(list(analysis = "primary_model", hr = unname(exp(coef(fit))[1]),
 - (plus scripts in `03_analysis/code/` and result JSONs in `03_analysis/results/`)
 
 ## Hard rules
+- Baseline tables (1.9.0): count every level of a categorical variable - both categories of a binary one (women AND men) - overall and per group, with `baseline_counts()` (tools/R/medresults.R or tools/analysis/results.py) inside the results JSON, so any journal layout (M/F) has provenance.
 - **No plotting.** Python: no matplotlib/seaborn/plotly imports, `plt.`, `.plot()`, `.hist()`,
   `.savefig()`. R: no `plot()`, `hist()`, `ggplot()`, `ggsave()`, `png()`/`pdf()`, `dev.off()`,
   `ggsurvplot()`, `forest()`, `love.plot()`, `densityplot()` and friends. The gate scans the code

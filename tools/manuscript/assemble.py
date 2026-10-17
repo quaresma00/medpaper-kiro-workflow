@@ -46,19 +46,20 @@ def selected_title(text: str) -> str:
     return title
 
 
-def validate_keywords(text: str) -> str:
+def validate_keywords(text: str, project: Path | None = None) -> str:
+    """One 'Keywords:' line, comma-joined in the source. Count bounds come from
+    target_journal.json keywords.min/max when a journal is known (1.9.0), else 3-6; the
+    journal's separator is applied by the DOCX build, not here."""
+    from wfcore import journalspec
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     if len(lines) != 1 or not re.match(r"^keywords\s*:", lines[0], re.I):
         raise ValueError("keywords.md must be one line beginning 'Keywords:'")
     payload = re.sub(r"^keywords\s*:\s*", "", lines[0], flags=re.I)
-    if any(ch in payload for ch in "/;&"):
-        raise ValueError("keywords must use commas only; '/', ';' and '&' are forbidden")
-    items = [x.strip() for x in payload.split(",") if x.strip()]
-    if len(items) < 3 or len(items) > 6:
-        raise ValueError(f"keywords must contain 3-6 comma-separated terms, found {len(items)}")
-    if len({x.casefold() for x in items}) != len(items):
-        raise ValueError("keywords contain duplicates")
-    return "Keywords: " + ", ".join(items)
+    rules = journalspec.keyword_rules(journalspec.load(project) if project else {})
+    problems = journalspec.keyword_problems(payload, rules)
+    if problems:
+        raise ValueError("; ".join(problems))
+    return "Keywords: " + ", ".join(journalspec.keyword_terms(payload, rules))
 
 
 LEGEND_HEAD_RE = re.compile(r"(?mi)^#{2,6}\s+(?:Figure|Fig\.?)\s+(S?\d+)\b.*$")
@@ -82,7 +83,7 @@ def main_legends(text: str) -> str:
 def assemble(project: Path) -> str:
     title = selected_title(read_required(project, "07_manuscript/title.md"))
     abstract = normalize_h1(read_required(project, "07_manuscript/abstract.md"), "Abstract")
-    keywords = validate_keywords(read_required(project, "07_manuscript/keywords.md"))
+    keywords = validate_keywords(read_required(project, "07_manuscript/keywords.md"), project)
     sections = [
         normalize_h1(read_required(project, "07_manuscript/introduction.md"), "Introduction"),
         normalize_h1(read_required(project, "07_manuscript/methods.md"), "Methods"),

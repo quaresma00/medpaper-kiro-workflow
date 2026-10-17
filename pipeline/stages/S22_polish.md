@@ -49,6 +49,7 @@ restore it and tighten prose instead, or get the user's explicit authorisation a
 - `08_submission/manuscript/prepolish/` (fact-preservation snapshot)
 
 ## Hard rules
+- Body text is continuous paragraphs (1.9.0; also checked by polish.py lint as `bullets_in_prose`). Lists only where a sentence truly cannot carry the content (rarely more than one short list per section); every result, count, criterion, covariate and sensitivity finding is written as a sentence. `prose_not_lists` fails above `body_list_items_max` items or `body_list_share_max` of the blocks.
 - Wording only. Never change a number, citekey, artifact reference or conclusion strength.
 - Do not re-take the snapshot to hide a failed fact-preservation diff.
 - Do not add content or an AI-use disclosure during polishing.

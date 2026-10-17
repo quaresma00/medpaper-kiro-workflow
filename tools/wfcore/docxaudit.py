@@ -456,3 +456,67 @@ def extra_problems(name: str, xmls: dict[str, bytes], root, role: str, spec: dic
         text = "\n".join(t for t, _, _ in paragraphs(root))
         out += [f"{name}: {p}" for p in pipeline_code_problems(text)]
     return out
+
+
+# ---------------------------------------------------------------------------
+# 1.9.0 (#13): double-blind review files carry no author identity
+# ---------------------------------------------------------------------------
+REVIEW_EXEMPT_ROLES = {"title_page", "cover_letter", "copyright_form", "author_form"}
+
+
+def identity_strings(project) -> list[str]:
+    """Author names and e-mail addresses from 00_input/author_info.json."""
+    import json as _json
+    from pathlib import Path as _Path
+    try:
+        info = _json.loads((_Path(project) / "00_input/author_info.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    out: set[str] = set()
+
+    def person(p) -> None:
+        if isinstance(p, dict):
+            for key in ("name", "full_name", "email"):
+                if isinstance(p.get(key), str) and len(p[key].strip()) >= 4:
+                    out.add(p[key].strip())
+        elif isinstance(p, str) and len(p.strip()) >= 4:
+            out.add(p.strip())
+    for a in info.get("authors", []) if isinstance(info.get("authors"), list) else []:
+        person(a)
+    person(info.get("corresponding"))
+    return sorted(out, key=len, reverse=True)
+
+
+def blinding_problems(path, ids: list[str]) -> list[str]:
+    """Author names/e-mails in a review-facing DOCX (body, headers, notes, docProps) or PDF."""
+    import re as _re
+    import zipfile as _zip
+    from pathlib import Path as _Path
+    path = _Path(path)
+    if not ids or not path.is_file():
+        return []
+    texts: list[tuple[str, str]] = []
+    if path.suffix.casefold() == ".docx":
+        with _zip.ZipFile(path) as zf:
+            for name in zf.namelist():
+                if not name.endswith(".xml"):
+                    continue
+                blob = zf.read(name).decode("utf-8", errors="replace")
+                if name.startswith("word/"):
+                    blob = "".join(_re.findall(r"<w:t(?:\s[^>]*)?>([^<]*)</w:t>", blob))
+                elif name.startswith("docProps/"):
+                    blob = _re.sub(r"<[^>]+>", " ", blob)
+                else:
+                    continue
+                texts.append((name, blob))
+    elif path.suffix.casefold() == ".pdf":
+        texts.append(("pdf", path.read_bytes().decode("latin-1", errors="replace")))
+    problems = []
+    for where, text in texts:
+        folded = text.casefold()
+        hits = [s for s in ids if s.casefold() in folded]
+        if hits:
+            part = "metadata" if where.startswith("docProps/") or where == "pdf" else "text"
+            problems.append(f"{path.name}: author identity in {part} ({where}): "
+                            + ", ".join(sorted(set(hits))[:3]))
+    return problems
