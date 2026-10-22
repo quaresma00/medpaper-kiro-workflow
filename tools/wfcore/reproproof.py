@@ -163,6 +163,9 @@ def affected_scripts(project: Path, previous: dict) -> tuple[set[str] | None, li
     tp = project / TOLERANCE_REL
     if (sha256(tp) if tp.is_file() else None) != previous.get("tolerance_sha256"):
         return None, [], "the tolerance file changed"
+    rec_engine = previous.get("engine_inputs")
+    if isinstance(rec_engine, dict) and rec_engine != engine_inputs():
+        return None, [], "engine analysis helpers changed"
     prev_inputs = {i.get("path"): i.get("sha256") for i in previous.get("inputs", [])
                    if isinstance(i, dict)}
     cur_inputs = {rel: sha256(project / rel) for rel in sandbox_inputs(project)}
@@ -189,6 +192,42 @@ def affected_scripts(project: Path, previous: dict) -> tuple[set[str] | None, li
         grew = bool(more)
         hit |= more
     return hit, changed, "scoped by the dependency closure"
+
+
+ENGINE_INPUT_GLOBS = ("tools/R/*.R", "tools/analysis/**/*.py")
+
+
+def engine_inputs() -> dict[str, str]:
+    """SHA-256 of the engine helpers analysis scripts execute (results writers, R helpers).
+
+    Recorded in the proof (1.9.1) so an unchanged paper can reuse it and a helper change
+    forces a full re-run."""
+    from . import paths
+    root = paths.repo_root()
+    out: dict[str, str] = {}
+    for g in ENGINE_INPUT_GLOBS:
+        for p in sorted(root.glob(g)):
+            if p.is_file() and "__pycache__" not in p.parts:
+                out[p.relative_to(root).as_posix()] = sha256(p)
+    return out
+
+
+def reuse_reason(project: Path, previous) -> tuple[bool, str]:
+    """(True, why) when the previous passing proof still covers the paper exactly: the gate's
+    own recomputation passes (scripts, manifest, data, tolerance, results and retained re-run
+    hashes) and the engine analysis helpers are byte-identical to the recorded ones."""
+    if not isinstance(previous, dict) or not previous.get("all_match"):
+        return False, "no previous passing proof"
+    rec = previous.get("engine_inputs")
+    if not isinstance(rec, dict):
+        return False, "the previous proof predates engine-helper hashes (1.9.1)"
+    if rec != engine_inputs():
+        return False, "engine analysis helpers changed since the proof"
+    out = validate(project)
+    if not out.ok:
+        return False, out.problems[0] if out.problems else out.detail
+    return True, ("scripts, manifest, data, tolerance, results and engine helpers are "
+                  "identical to the passing proof of " + str(previous.get("generated_at", "?")))
 
 
 def sandbox_inputs(project: Path) -> list[str]:

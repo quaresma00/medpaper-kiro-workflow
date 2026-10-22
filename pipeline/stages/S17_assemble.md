@@ -44,7 +44,10 @@ source for review, user editing, polishing and packaging.
    The S17 gate runs `assemble.py --check`, so omissions or manual divergence fail even
    when the visible heading structure still looks valid.
 6. `analysis_reproduces` is re-checked here: any analysis code, raw data or results edit since
-   the S06 proof needs a new `tools/reproduce.py run` before S17 can close.
+   the S06 proof needs a new run before S17 can close:
+   `.\.venv\Scripts\python.exe tools/reproduce.py run --log <paper>/temp/repro.log`, in the
+   background; check the log every 2-3 minutes (last lines only), finished at `REPRODUCE DONE`,
+   never short polling loops. It ends at once with `REUSED` when only presentation changed.
 
 ## Outputs
 - `07_manuscript/title.md`

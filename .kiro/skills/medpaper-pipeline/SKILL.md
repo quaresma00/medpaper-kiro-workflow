@@ -72,8 +72,11 @@ R `tools/R/medresults.R`), which appends an `environment` receipt: language and 
 packages, seed, script and its sha256. Those receipt numbers never count as provenance. At S06
 `python tools/reproduce.py run` re-executes every top-level `03_analysis/code` script in a
 sandbox, in the order `03_analysis/analysis_manifest.json` declares (filename order with a
-warning when absent; `--affected-only` re-runs just the affected scripts), and requires
-identical results; `analysis_reproduces` re-checks that proof at S17, S23 and S25. No study registration and no reporting
+warning when absent; after a passing proof only the affected scripts re-run by default,
+`--full` re-runs all, and an unchanged paper ends at once with `REUSED`), and requires
+identical results. Run it as `python tools/reproduce.py run --log <paper>/temp/repro.log` in
+the background, read the log's last lines every 2-3 minutes (never short polling loops), and
+treat it as finished when `REPRODUCE DONE` appears; `analysis_reproduces` re-checks that proof at S17, S23 and S25. No study registration and no reporting
 checklist are prepared pre-emptively: a checklist is filled at S23 only when the chosen journal
 requires one (`journal_requires_checklist` in `target_journal.json`, set at S20), or PRISMA for
 a meta-analysis, which also registers on PROSPERO before screening. KM/CIF figures draw the curve table the analysis exported

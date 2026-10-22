@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Re-execute the paper's analysis in a sandbox and prove the results are identical.
 
-    python "<engine>/tools/reproduce.py" run [--timeout SECONDS] [--keep-sandbox] [--project DIR]
+    python "<engine>/tools/reproduce.py" run [--log FILE] [--full] [--force] [--timeout SECONDS]
+                                         [--keep-sandbox] [--project DIR]
     python "<engine>/tools/reproduce.py" check [--project DIR]
 
 `run` copies the analysis inputs (02_data/** except derived/, 03_analysis/code/**, the
@@ -12,6 +13,12 @@ changed inputs reach and carries the rest from the previous passing proof), comp
 keeps the re-run results in <paper>/.wf/repro/rerun/ as evidence and writes
 03_analysis/reproducibility_report.json. Acquisition is never re-run. `check` runs the
 analysis_reproduces gate logic. Exit 0 = identical, 2 = not reproduced, 1 = refused.
+
+1.9.1: with a passing proof whose recorded hashes (scripts, manifest, data, tolerance, results,
+retained re-run, engine analysis helpers) all still match, `run` executes nothing and ends
+REUSED (`--force` re-runs). When something changed, the scoped (`--affected-only`) run is the
+default (`--full` re-runs all). Progress is printed `[i/N] start|ok|FAIL` and the last line is
+always `REPRODUCE DONE rc=N REPRODUCED|NOT REPRODUCED|REUSED`; `--log FILE` tees it.
 """
 from __future__ import annotations
 
@@ -85,9 +92,22 @@ def cmd_run(args) -> int:
             previous = json.loads(report_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             previous = None
+    passing = isinstance(previous, dict) and bool(previous.get("all_match"))
+    if passing and not (args.force or args.full):
+        ok, why = rp.reuse_reason(paper, previous)
+        if ok:
+            shutil.rmtree(sandbox, ignore_errors=True)
+            print(f"nothing changed: {why}; no script executed (use --force to re-run anyway)")
+            print(f"report: {report_path}")
+            print("REUSED")
+            _STATE["reused"] = True
+            return 0
+        print(f"previous proof not reusable: {why}")
     scoped, changed, carried = None, [], {}
-    if args.affected_only:
+    if (args.affected_only or passing) and not args.full:
         scoped, changed, why = rp.affected_scripts(paper, previous)
+        if scoped is not None and not scoped and args.force:
+            scoped, why = None, "--force with no changed input"
         if scoped is not None:
             entries_m = rp.load_manifest(paper)[0] or []
             prev_carried = previous.get("carried_results") or {}
@@ -107,14 +127,16 @@ def cmd_run(args) -> int:
                     break
         if scoped is None:
             carried = {}
-            print(f"--affected-only: full re-run instead ({why})")
+            print(f"affected-only: full re-run instead ({why})")
         else:
-            print(f"--affected-only: re-running {len(scoped)} of {len(scripts)} script(s) "
-                  f"({why}); changed inputs: {', '.join(changed[:6]) or 'none'}")
+            print(f"affected-only: re-running {len(scoped)} of {len(scripts)} script(s) "
+                  f"({why}); changed inputs: {', '.join(changed[:6]) or 'none'} "
+                  "(--full re-runs everything)")
     print(f"do not edit the paper while reproduce.py run is active ({len(scripts)} scripts, "
           f"order from {order_source}, timeout {timeout:g} s each)")
     sys.stdout.flush()
     started = _now()
+    engine_hashes = rp.engine_inputs()
     before = runner.tree_snapshot(paper, rp.SNAPSHOT_EXCLUDE)
     inputs = []
     for rel in rp.sandbox_inputs(paper):
@@ -153,14 +175,17 @@ def cmd_run(args) -> int:
     script_rows, failed = [], None
     logs = sandbox / "_logs"
     logs.mkdir()
-    for s in (sandbox / p.relative_to(paper) for p in scripts):
+    n_scripts = len(scripts)
+    for idx, s in enumerate((sandbox / p.relative_to(paper) for p in scripts), 1):
         rel = s.relative_to(sandbox).as_posix()
+        tag = f"[{idx}/{n_scripts}]"
         if scoped is not None and rel not in scoped:
             row = dict(prev_rows.get(rel) or {"path": rel, "exit_code": 0})
             row.update(path=rel, sha256=rp.sha256(paper / rel), carried=True)
             script_rows.append(row)
-            print(f"  carried {rel}  (unaffected; proven by the previous run)")
+            print(f"{tag} carried {rel}  (unaffected; proven by the previous run)")
             continue
+        print(f"{tag} start {rel}")
         row = {"path": rel, "sha256": rp.sha256(paper / rel),
                "language": "python" if s.suffix.casefold() == ".py" else "R",
                "exit_code": None, "seconds": 0.0, "timed_out": False}
@@ -170,7 +195,7 @@ def cmd_run(args) -> int:
             row["exit_code"] = 2
             script_rows.append(row)
             failed = rel
-            print(f"  FAIL {rel}: {exc}")
+            print(f"{tag} FAIL {rel}: {exc}")
             break
         (logs / f"{s.name}.log").write_text(out.stdout + "\n--- stderr ---\n" + out.stderr,
                                             encoding="utf-8")
@@ -178,7 +203,7 @@ def cmd_run(args) -> int:
                    timed_out=out.timed_out)
         script_rows.append(row)
         status = "ok" if out.returncode == 0 and not out.engine_changes else "FAIL"
-        print(f"  {status} {rel}  ({out.seconds:.1f} s)")
+        print(f"{tag} {status} {rel} ({out.seconds:.1f} s)")
         if out.engine_changes:
             print("  CRITICAL: the script changed the engine: " + ", ".join(out.engine_changes[:5]))
         if out.returncode != 0 or out.timed_out or out.engine_changes:
@@ -216,6 +241,7 @@ def cmd_run(args) -> int:
         "timeout_seconds": timeout,
         "rerun_dir": rp.RERUN_DIR,
         "tolerance_sha256": rp.sha256(tp) if tp.is_file() else None,
+        "engine_inputs": engine_hashes,
         "order_source": order_source,
         "mode": "affected-only" if scoped is not None else "full",
         "changed_inputs": changed if scoped is not None else [],
@@ -263,21 +289,95 @@ def cmd_check(args) -> int:
     return 0 if out.ok else 2
 
 
+_STATE = {"reused": False}
+
+
+class _Tee:
+    """Console + log file, flushed on every write so a background run can be followed."""
+
+    def __init__(self, *streams):
+        self.streams = streams
+
+    def write(self, text):
+        for s in self.streams:
+            s.write(text)
+            s.flush()
+        return len(text)
+
+    def flush(self):
+        for s in self.streams:
+            s.flush()
+
+
+def _log_target(raw: str, project: str | None) -> Path:
+    log = Path(raw).resolve()
+    if paths.in_engine(log):
+        raise ValueError(f"--log may not point into the engine: {log}")
+    try:
+        paper = paths.paper_from_cli(project)
+    except paths.EngineWorkspace:
+        return log
+    if paths.within(log, paper) and not any(paths.within(log, paper / d)
+                                            for d in ("temp", ".wf", ".kiro")):
+        raise ValueError(f"--log inside the paper must be under temp/ (the run would otherwise "
+                         f"see the paper change): {log}")
+    return log
+
+
+def _run_with_progress(args) -> int:
+    rc, fh, out = 1, None, sys.stdout
+    try:
+        if args.log:
+            try:
+                log = _log_target(args.log, args.project)
+            except ValueError as exc:
+                print(f"reproduce: {exc}")
+                return 1
+            log.parent.mkdir(parents=True, exist_ok=True)
+            fh = log.open("w", encoding="utf-8", newline="\n")
+            sys.stdout = _Tee(out, fh)
+        rc = cmd_run(args)
+    except paths.EngineWorkspace as exc:
+        print(exc)
+        rc = 1
+    finally:
+        verdict = "REUSED" if _STATE["reused"] and rc == 0 else (
+            "REPRODUCED" if rc == 0 else "NOT REPRODUCED")
+        print(f"REPRODUCE DONE rc={rc} {verdict}")
+        sys.stdout = out
+        if fh:
+            fh.close()
+    return rc
+
+
 def main() -> int:
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except (AttributeError, ValueError):
+        pass
     ap = argparse.ArgumentParser(description="re-execute the analysis and prove identical results")
     sub = ap.add_subparsers(dest="command", required=True)
     r = sub.add_parser("run")
     r.add_argument("--timeout", default="3600")
     r.add_argument("--keep-sandbox", action="store_true")
     r.add_argument("--affected-only", action="store_true",
-                   help="after a passing proof, re-run only the scripts the changed inputs reach "
-                        "(needs 03_analysis/analysis_manifest.json); others are carried")
+                   help="re-run only the scripts the changed inputs reach (the default since "
+                        "1.9.1 whenever a passing proof exists; needs analysis_manifest.json)")
+    r.add_argument("--full", action="store_true",
+                   help="re-run every script even when a passing proof could scope the run")
+    r.add_argument("--force", action="store_true",
+                   help="re-run even when nothing changed since the passing proof")
+    r.add_argument("--log", default=None,
+                   help="also write the progress to this UTF-8 file (flushed per line); it ends "
+                        "with 'REPRODUCE DONE rc=N ...'")
     r.add_argument("--project", default=None)
     c = sub.add_parser("check")
     c.add_argument("--project", default=None)
     args = ap.parse_args()
+    if args.command == "run":
+        return _run_with_progress(args)
     try:
-        return cmd_run(args) if args.command == "run" else cmd_check(args)
+        return cmd_check(args)
     except paths.EngineWorkspace as exc:
         print(exc)
         return 1

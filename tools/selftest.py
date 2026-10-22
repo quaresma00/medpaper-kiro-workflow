@@ -2132,7 +2132,7 @@ def run_codex_integration() -> None:
                f"card must name `{agent}` so the work is not done in the main context")
 
     record("pipeline and skill versions agree",
-           pipe["meta"]["version"] == "1.9.0" and 'version: "2.2.0"' in skill,
+           pipe["meta"]["version"] == "1.9.1" and 'version: "2.2.0"' in skill,
            f'pipeline={pipe["meta"]["version"]}, skill=2.2.0 (Kiro adapter revision)')
     record("all 25 stage cards exist",
            len(pipe["stage"]) == 25 and
@@ -4353,6 +4353,55 @@ def run_reproduce(tmp: Path) -> None:
     (P / "02_data/raw/data.csv").write_text("x,y\n1,2\n2,4\n3,7\n", encoding="utf-8")
     rs.write_text(rs_old, encoding="utf-8")
     _wf("run-script", "03_analysis/code/03_r.R", env=env, cwd=tmp)
+
+    # ---- 1.9.1: visible progress, reuse of an unchanged proof, default scope ----
+    log = P / "temp/repro.log"
+    r13 = _run([*RP, "run", "--full", "--log", log, "--project", P], cwd=tmp)
+    rep13 = _json.loads(report.read_text(encoding="utf-8"))
+    lines = log.read_text(encoding="utf-8").splitlines() if log.is_file() else []
+    prog = [ln for ln in lines if ln.startswith("[")]
+    want = [f"[{i}/3] {k}" for i in (1, 2, 3) for k in ("start", "ok")]
+    record("1.9.1 --log tees [i/N] start/ok progress in order and ends with REPRODUCE DONE",
+           r13.returncode == 0 and [" ".join(ln.split()[:2]) for ln in prog] == want
+           and lines and lines[-1] == "REPRODUCE DONE rc=0 REPRODUCED"
+           and "REPRODUCE DONE rc=0 REPRODUCED" in r13.stdout, "\n".join(lines[-8:]))
+    record("1.9.1 --full re-runs every script and records the engine helper hashes",
+           rep13.get("mode") == "full" and not any(s.get("carried") for s in rep13["scripts"])
+           and "tools/R/medresults.R" in rep13.get("engine_inputs", {})
+           and "tools/analysis/results.py" in rep13.get("engine_inputs", {}))
+    sha13 = _sha(report)
+    r14 = _run([*RP, "run", "--log", log, "--project", P], cwd=tmp)
+    lines = log.read_text(encoding="utf-8").splitlines()
+    g = _gate("analysis_reproduces", P, stage="S23_package")
+    record("1.9.1 nothing changed: REUSED, no script executed, the proof untouched",
+           r14.returncode == 0 and lines[-1] == "REPRODUCE DONE rc=0 REUSED"
+           and not any(" start " in ln for ln in lines) and _sha(report) == sha13, _out(r14)[-200:])
+    record("1.9.1 the gate accepts the reused proof", g.ok, g.detail[:160])
+    r15 = _run([*RP, "run", "--force", "--project", P], cwd=tmp)
+    record("1.9.1 --force bypasses reuse and re-runs",
+           r15.returncode == 0 and "REUSED" not in r15.stdout and "[1/3] start" in r15.stdout
+           and _sha(report) != sha13, _out(r15)[-200:])
+    rs.write_text(rs_old + "# comment only\n", encoding="utf-8")
+    _wf("run-script", "03_analysis/code/03_r.R", env=env, cwd=tmp)
+    r16 = _run([*RP, "run", "--project", P], cwd=tmp)
+    rep16 = _json.loads(report.read_text(encoding="utf-8"))
+    started16 = [ln.split()[2] for ln in r16.stdout.splitlines() if " start " in ln]
+    record("1.9.1 one changed script: the default run re-runs only it",
+           r16.returncode == 0 and rep16.get("mode") == "affected-only"
+           and started16 == [C + "03_r.R"]
+           and {s["path"] for s in rep16["scripts"] if s.get("carried")}
+           == {C + "01_clean.py", C + "02_model.py"}, _out(r16)[-240:])
+    (P / "02_data/raw/data.csv").write_text("x,y\n1,2\n2,4\n3,7\n\n", encoding="utf-8")
+    r17 = _run([*RP, "run", "--project", P], cwd=tmp)
+    record("1.9.1 a data change re-runs every script by default",
+           r17.returncode == 0 and r17.stdout.count(" start ") == 3 and "REUSED" not in r17.stdout,
+           _out(r17)[-200:])
+    (P / "02_data/raw/data.csv").write_text("x,y\n1,2\n2,4\n3,7\n", encoding="utf-8")
+    rs.write_text(rs_old, encoding="utf-8")
+    _wf("run-script", "03_analysis/code/03_r.R", env=env, cwd=tmp)
+    bad_log = _run([*RP, "run", "--log", P / "03_analysis/x.log", "--project", P], cwd=tmp)
+    record("N: 1.9.1 --log inside the paper outside temp/ is refused",
+           bad_log.returncode == 1 and not (P / "03_analysis/x.log").exists(), _out(bad_log)[-160:])
     man.unlink()
     _run([*RP, "run", "--project", P], cwd=tmp)
     report.unlink()
@@ -5091,7 +5140,7 @@ def run_v160(tmp: Path) -> None:
            any(g["check"] == "reader_review_coverage" for g in s18["gate"])
            and "review_round.py start --scope manuscript" in (ROOT / "pipeline/stages/S18_independent_review.md")
            .read_text(encoding="utf-8"))
-    record("pipeline version is 1.9.0", pipe.meta.get("version") == "1.9.0")
+    record("pipeline version is 1.9.1", pipe.meta.get("version") == "1.9.1")
 
 
 def run_v170(tmp: Path) -> None:

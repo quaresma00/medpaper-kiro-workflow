@@ -84,7 +84,9 @@ Hard rules, several mechanically enforced by the gates:
 - Every manuscript number must already exist in `03_analysis/results/*.json`, written by
   `write_results()` (Python `${tool}analysis/results.py`, R `${tool}R/medresults.R`), which
   records the environment. S06 re-executes the analysis in a sandbox (`python
-  "${tool}reproduce.py" run`) and the result must be identical.
+  "${tool}reproduce.py" run --log <paper>/temp/repro.log`, in the background; read the log's
+  last lines every 2-3 minutes, done at `REPRODUCE DONE`; `REUSED` when nothing changed) and
+  the result must be identical.
 - Python for acquisition, cleaning, xlsx tables, Word and gates; R for figures (default) and
   R-strong statistics: `${engine}/reference/language_policy.toml`.
 - Draft scientific sections only at their active stages; S17 assembles the canonical full text.

@@ -10,8 +10,10 @@ Generated from result JSONs by code, never retyped.
    reads `03_analysis/results/*.json` and `01_protocol/artifact_plan.json`, and writes every
    table with the shared helper so formatting cannot drift. Table 1 statistics are computed
    in `03_analysis/code/` at S05 (R per `reference/language_policy.toml`: tableone/gtsummary
-   via `write_results()`). If one must be added now, run `reproduce.py run` before leaving
-   S10; S17 re-checks the proof.
+   via `write_results()`). If one must be added now, run
+   `.\.venv\Scripts\python.exe tools/reproduce.py run --log <paper>/temp/repro.log` in the
+   background before leaving S10 (check the log every 2-3 minutes, last lines only; done at
+   `REPRODUCE DONE`; no short polling loops); S17 re-checks the proof.
 
 ```python
 from wfcore.paths import project_dir
