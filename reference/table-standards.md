@@ -51,11 +51,14 @@ of interpretation, or a repeat of the Results prose.
 - **Footnotes**: data format (`Data are n (%) unless stated otherwise`), a short abbreviation
   list in alphabetical order, the test used, the meaning of any symbol, and the
   adjustment set for adjusted estimates.
-- **Crowded abbreviations**: when more than eight defined abbreviations occur across figures
-  and tables, or any local list exceeds 50 words or dominates its footnote, define them once
-  at S17 in `Declarations and Statements > Abbreviations`; remove the
-  repeated local abbreviation rows from the table source and regenerate the workbook.
-  An explicitly sourced journal requirement for local definitions overrides this preference.
+- **Abbreviations (1.11.0)**: every table footnote defines the abbreviations that table uses
+  (self-contained), and the manuscript keeps a central list too. Only an explicitly sourced
+  journal rule (`central_required`) moves them to the central list alone.
+- **Presentation standard (1.11.0)**: clinical labels from the display dictionary; one missing
+  symbol (`threeline.MISSING`); `not_estimable(lower)` for zero-cell estimates; never
+  Undefined/Not fitted/NA/NaN/Inf. Footnotes are whole sentences within
+  `table_footnote_words_max` words (units, abbreviations, method in one sentence); model
+  diagnostics, merge/collapse steps and convergence go to a supplementary table.
 - **Symbol order** for footnote markers: `*`, `†`, `‡`, `§`, `¶`, `#`, then doubled.
   Reserve `*` for significance if you also use it that way in figures - do not use one
   symbol for two purposes in the same paper.

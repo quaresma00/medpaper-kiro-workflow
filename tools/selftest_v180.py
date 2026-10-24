@@ -673,7 +673,10 @@ def run_runtime(tmp: Path, record, section) -> None:
            "loop --to S24_package_human_review" in
            (ROOT / "pipeline/stages/S25_submission_audit.md").read_text(encoding="utf-8"))
     P = _rw_paper(tmp / "rt", "S03_protocol")
-    env = {**os.environ, "MEDPAPER_PROJECT": str(P), "MEDPAPER_ROOT": str(ROOT)}
+    # 1.11.0: without PYTHONIOENCODING the engine writes what the reader decodes; this reader
+    # (a Python pipe) asks for UTF-8 explicitly.
+    env = {**os.environ, "MEDPAPER_PROJECT": str(P), "MEDPAPER_ROOT": str(ROOT),
+           "MEDPAPER_STDOUT_ENCODING": "utf-8"}
     env.pop("PYTHONIOENCODING", None)
     why = "用户选择该期刊：范围匹配，近期发表过同类公开数据库研究，审稿周期可接受，费用在预算内。" * 2
     log = P / "temp/check.log"

@@ -251,9 +251,43 @@ def _design_text(ctx: Ctx) -> str:
     return ""
 
 
+# 1.11.0 (#3d): a negated mention ("no meta-analysis", "not a systematic review", "without a
+# meta-analysis", "meta-analysis was not performed", "rather than a meta-analysis") states
+# what the study is NOT. Negation is judged within the clause on both sides of the mention.
+_NEG_BEFORE = re.compile(r"\b(?:no|not|nor|without|neither|rather\s+than|instead\s+of|"
+                         r"other\s+than|unlike|never)\s+(?:(?:a|an|any|formal|the|quantitative|"
+                         r"pooled|separate|full)\s+)*$", re.I)
+_NEG_AFTER = re.compile(r"^[\w\s,'()-]{0,40}?\b(?:was|were|is|are|will\s+be|has\s+been|have\s+been)?"
+                        r"\s*(?:not|n't|never)\s+(?:be\s+)?(?:performed|conducted|done|planned|"
+                        r"undertaken|carried\s+out|feasible|possible|appropriate|used|applicable)\b"
+                        r"|^[\w\s,'-]{0,20}?\b(?:is|was)\s+not\s+applicable\b", re.I)
+
+
+def meta_mentioned_affirmatively(text: str) -> bool:
+    for m in _META.finditer(text):
+        before = re.split(r"[.;:!?\n]", text[:m.start()])[-1]
+        after = re.split(r"[.;:!?\n]", text[m.end():])[0]
+        # the matched stem ("meta-analy") leaves the rest of the word: "sis was not performed"
+        after = re.sub(r"^[a-z]*", "", after, flags=re.I)
+        if _NEG_BEFORE.search(before) or _NEG_AFTER.search(after):
+            continue
+        return True
+    return False
+
+
 def is_meta_analysis(ctx: Ctx) -> bool:
-    """A systematic review / meta-analysis, read from the protocol's Design section."""
-    return bool(_META.search(_design_text(ctx)))
+    """A systematic review / meta-analysis. 1.11.0: the structured study_design in
+    01_protocol/idea.json (1.10.0) decides when present; otherwise the protocol's Design section
+    is read with negation handled ("no meta-analysis" is not a meta-analysis)."""
+    import json
+    try:
+        idea = json.loads(ctx.read("01_protocol/idea.json"))
+    except (OSError, ValueError):
+        idea = {}
+    design = str(idea.get("study_design", "")).strip().casefold() if isinstance(idea, dict) else ""
+    if design:
+        return design in ("meta_analysis", "systematic_review")
+    return meta_mentioned_affirmatively(_design_text(ctx))
 
 
 def journal_requirement(ctx: Ctx) -> str | None:

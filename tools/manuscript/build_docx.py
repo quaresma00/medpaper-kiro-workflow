@@ -1383,6 +1383,12 @@ def audit_manifest(args) -> int:
 
 
 def main() -> int:
+    if "--wait" in sys.argv[1:] and not os.environ.get("MEDPAPER_WAIT_CHILD"):
+        # 1.11.0 (#2g): block with heartbeats; print failures + one summary line.
+        from wfcore import longrun
+        return longrun.run_quiet([sys.executable, *sys.argv],
+                                 wfpaths.project_dir() / ".wf" / "logs" / "build_docx.log",
+                                 "build_docx")
     ap = argparse.ArgumentParser(description="build or audit deterministic journal DOCX files")
     sub = ap.add_subparsers(dest="command", required=True)
     p = sub.add_parser("build")
@@ -1402,6 +1408,9 @@ def main() -> int:
     p.add_argument("--manifest", type=Path, required=True)
     p.add_argument("--style-config", type=Path, required=True)
     p.set_defaults(fn=audit_manifest)
+    for sp in sub.choices.values():
+        sp.add_argument("--wait", action="store_true",
+                        help="block with heartbeats; failures + one summary line (log: .wf/logs)")
     args = ap.parse_args()
     # `project/...` in stage cards is a logical alias for the selected paper folder; the engine
     # never holds paper files. Map every CLI path before build/audit touches the filesystem.

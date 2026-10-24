@@ -51,9 +51,12 @@ unlooked-at.
 4. The builder applies journal-specified size and spacing, with the recorded fallback only
    where the guide is silent. It forces all text black, removes hyperlinks, uses one
    font family throughout, and maps Markdown section headings to the Normal-based
-   `SectionHeading` paragraph style. Across every Word XML part it removes `outlineLvl`,
-   `keepNext`, `keepLines` and `pageBreakBefore`; visible headings therefore have neither a
-   collapsible hierarchy marker nor the left-side black-square control indicator.
+   `SectionHeading` paragraph style. Across every Word XML part it removes `outlineLvl` and
+   `pageBreakBefore`; `keepNext`/`keepLines` are removed from styles and headings only, so
+   headings have neither a collapsible marker nor the black-square indicator. 1.11.0: they are
+   kept where they bind table caption -> table -> footnote and legend <-> figure, rows are
+   `cantSplit`, grouped legends never split (`docx_keep_with_next`). Alternatively the
+   journal's figures-at-end layout keeps all legends together, never interleaved.
    It also converts Shift+Enter/text-wrapping controls to ordinary paragraphs and rejects the
    literal down-arrow character. Use blank lines for paragraph boundaries in Markdown and
    natural wrapping within paragraphs; never pad layout with manual line breaks.
@@ -181,14 +184,16 @@ Before the user submits, list for them what the portal will ask beyond the files
 - Pipeline-authored bundle-facing narrative files are DOCX, never Markdown; journal-supplied
   fixed forms retain their mandated non-Markdown format.
 - All text is black; no external hyperlinks; no Aptos/theme-font leakage when the selected
-  font is Times New Roman; no outline numbering, `outlineLvl`, `keepNext`, `keepLines`,
-  `pageBreakBefore`, paragraph-border residue or collapsible heading level in any Word XML.
+  font is Times New Roman; no outline numbering, `outlineLvl`, `pageBreakBefore`,
+  paragraph-border residue or collapsible heading level in any Word XML; keepNext/keepLines
+  only on captions, table rows, footnotes and legends (never on headings or styles).
 - `References` and `Figure legends` must be visible in the manuscript.
 - Any title-page reference count must equal the distinct citations actually used in the
   canonical manuscript; both the Markdown source and generated Word title page are checked.
 - Figure legends only identify and decode the display; they do not restate result direction
-  or numerical findings. Crowded abbreviation lists appear once under `Declarations and
-  Statements > Abbreviations`, unless an explicitly sourced journal rule requires them local.
+  or numerical findings. Each table footnote and figure legend defines its abbreviations, and
+  the manuscript keeps a central list; only an explicitly sourced journal rule
+  (`central_required`) removes the local definitions.
 - Never invent reviewer contact information or an AI-use disclosure.
 - Do not infer final user approval from this build/QA stage. Present the complete package at
   S24 and preserve any user edits made there.

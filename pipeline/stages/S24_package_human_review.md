@@ -69,6 +69,16 @@ S25 audits exactly these frozen files.
 - `08_submission/package_review_freeze.json`
 
 ## Hard rules
+- 1.11.0: give the reviewer the one bundle path `review_round.py start` prints and its
+  neutral brief (never known deviations or earlier conclusions). Save the full report and
+  `close --report <file>`: every F-numbered finding of every section is listed
+  (`--finding`), kept ones with `--kept ID "reason"` (`review_findings_closed`).
+- 1.11.0: before `rework.py check`, `rework.py preview` shows presentation vs science
+  without recording anything. A number inside a label (Online Resource 2, Table S3, panel or
+  item numbers) is not a fact. Writes outside the sealed round's files are refused at write
+  time. An S19 return never happens automatically: check/seal STOP and you ask the user;
+  only the words '我确认回退' (`rework.py confirm-rewind --words ...` or `seal
+  --rewind-words ...`) authorise it.
 - After the S19 freeze a revision item is classified by content at `rework.py check` (1.9.0): if numbers, citations, table/figure references, table cells and figure data are unchanged it is a PRESENTATION change - only the deterministic checks rerun, the freezes record a presentation delta, there is no return to S19, no new review round and no re-confirmation; just report the change summary to the user. Changed facts go back to S19 as before. Kinds: `journal-switch` (was `journal`; full rewind) and `journal-format` (CSL, target_journal.json formatting fields; presentation).
 - A deleted source is credited with `rework.py mark --deleted-file <path>`.
 - Confirmation binds the uploaded files by visible content; internal QC, notes and receipts never invalidate the user's OK.

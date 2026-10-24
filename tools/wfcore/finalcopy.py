@@ -18,6 +18,7 @@ the `final_copy_verified` gate accepts only while the recorded check matches the
 from __future__ import annotations
 
 import json
+import re
 import zipfile
 from collections import Counter
 from datetime import datetime, timezone
@@ -96,13 +97,61 @@ def compare(project: Path, original: Path, copy: Path) -> list[str]:
         new = Counter(fa[key]) - Counter(fb[key])
         if lost:
             problems.append(f"{copy.name}: {label} removed: " + ", ".join(sorted(lost.elements()))[:160])
-        if new:
+        if new and key == "numbers":
+            # 1.11.0 (#3b): a small correction may add numbers that already exist in the
+            # executed results (n/N and its percentage checked); anything else is refused.
+            untraced = [t for t in sorted(new.elements()) if not traceable(project, t)]
+            if untraced:
+                problems.append(f"{copy.name}: numbers added that no results JSON holds: "
+                                + ", ".join(untraced)[:160])
+            problems += [f"{copy.name}: {p}" for p in ratio_problems(after)]
+        elif new:
             problems.append(f"{copy.name}: {label} added: " + ", ".join(sorted(new.elements()))[:160])
     target = journalspec.load(project)
     if journalspec.blinded(target) and not any(k in copy.name.casefold()
                                                for k in ("title", "cover", "copyright")):
         problems += docxaudit.blinding_problems(copy, docxaudit.identity_strings(project))
     return problems
+
+
+def _pool(project: Path) -> tuple[set[float], set[str]]:
+    import json
+    from .checks.numbers import _walk
+    strings: set[str] = set()
+    for p in sorted((Path(project) / "03_analysis/results").glob("*.json")):
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict):
+            data = {k: v for k, v in data.items() if k != "environment"}
+        _walk(data, strings)
+    floats = set()
+    for s in strings:
+        try:
+            floats.add(float(s))
+        except ValueError:
+            pass
+    return floats, strings
+
+
+def traceable(project: Path, token: str) -> bool:
+    """A number that exists (at its displayed precision) in 03_analysis/results/*.json."""
+    from .checks.numbers import _matches
+    floats, strings = _pool(project)
+    return _matches(token, floats, strings)
+
+
+def ratio_problems(text: str) -> list[str]:
+    """'a/b (p%)' must be internally consistent at the displayed precision."""
+    out = []
+    for m in re.finditer(r"(\d[\d,]*)\s*/\s*(\d[\d,]*)\s*\(\s*(\d+(?:\.\d+)?)\s?%", text):
+        a, b = int(m.group(1).replace(",", "")), int(m.group(2).replace(",", ""))
+        p = m.group(3)
+        dec = len(p.split(".")[1]) if "." in p else 0
+        if b and abs(100.0 * a / b - float(p)) > 0.5 * 10 ** -dec + 1e-9:
+            out.append(f"'{m.group(0)})': {a}/{b} is {100.0 * a / b:.{max(dec, 1)}f}%")
+    return out
 
 
 def check(project: Path) -> tuple[bool, list[str]]:

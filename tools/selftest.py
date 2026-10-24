@@ -22,6 +22,10 @@ import zipfile
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
+# 1.11.0: every subprocess output is captured and decoded as UTF-8 here, so ask the engine for
+# UTF-8 (otherwise it writes the console code page a PowerShell reader decodes).
+os.environ.setdefault("MEDPAPER_STDOUT_ENCODING", "utf-8")
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
@@ -5361,13 +5365,22 @@ def run_v170(tmp: Path) -> None:
     qst.save()
     (Q / "08_submission/manuscript").mkdir(parents=True)
     (Q / "08_submission/manuscript/title_page.md").write_text("# Title page\n", encoding="utf-8")
-    qs = rw(Q, "batch", "--sealed", "--why", "The user wants both changes applied now.",
-            "--plan", plan("q1", "Soften the causal claim and fix the title page affiliation.", [
-                {"kind": "discussion", "request": "Soften the causal claim in the Discussion.",
-                 "affected_sources": ["07_manuscript/discussion.md"], "acceptance_criteria": acc},
-                {"kind": "title-page-or-statements", "request": "Fix the first author affiliation.",
-                 "affected_sources": ["08_submission/manuscript/title_page.md"],
-                 "acceptance_criteria": acc}]))
+    # 1.11.0: an S19 return needs the user's explicit words; without them nothing moves.
+    q1_items = [
+        {"kind": "discussion", "request": "Soften the causal claim in the Discussion.",
+         "affected_sources": ["07_manuscript/discussion.md"], "acceptance_criteria": acc},
+        {"kind": "title-page-or-statements", "request": "Fix the first author affiliation.",
+         "affected_sources": ["08_submission/manuscript/title_page.md"], "acceptance_criteria": acc}]
+    unconfirmed = rw(Q, "batch", "--sealed", "--why", "The user wants both changes applied now.",
+                     "--plan", plan("q0", "Soften the causal claim and fix the title page affiliation.",
+                                    q1_items))
+    q0st = State(Q, ".wf").load()
+    record("1.11.0: a science return to S19 is refused without the user's rewind words",
+           unconfirmed.returncode != 0 and "我确认回退" in _out(unconfirmed)
+           and q0st.current == "S24_package_human_review", _out(unconfirmed)[-200:])
+    # the refused seal left the batch collecting; sealing with the user's words moves it
+    qs = rw(Q, "seal", "--why", "The user wants both changes applied now.",
+            "--rewind-words", "我确认回退")
     qr = load_round(Q)
     qst = State(Q, ".wf").load()
     try:

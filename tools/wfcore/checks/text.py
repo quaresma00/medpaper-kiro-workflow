@@ -42,8 +42,17 @@ BACKSTAGE_RE = re.compile(
     r"\b(?:added|revised|corrected|updated|changed)\s+(?:after|following)\s+(?:the\s+)?"
     r"(?:independent\s+|internal\s+)?review\b|"
     r"\b(?:this|the)\s+revised\s+(?:manuscript|version|draft)\b|\bwrongly\s+(?:kept|included|excluded)\b|"
-    r"\b(?:pipeline|workflow)\s+(?:stage|step|gate)\b",
+    r"\b(?:pipeline|workflow)\s+(?:stage|step|gate)\b|"
+    # 1.11.0 (#2h): review/round/internal/rerun history.
+    r"\b(?:internal|external|editorial)\s+(?:review|check|audit)s?\b(?!\s+(?:board|committee|panel))|"
+    r"\b(?:review|revision|audit)\s+rounds?\b|\bround\s+\d+\s+of\s+(?:the\s+)?review\b|"
+    r"\b(?:re-?runs?|re-?ran|re-?running)\b|\b(?:earlier|previous|prior|original|initial)\s+"
+    r"(?:analys[ie]s|runs?|results|estimates?)\s+(?:of\s+this\s+study|were|was|had)\b|"
+    r"\b(?:added|introduced|included)\s+(?:after|following)\s+(?:the\s+)?(?:review|revision)\b|"
+    r"\bpost\s+hoc\s*\(\s*(?:after|following)\s+review\s*\)",
     re.I)
+# The standard wording for an analysis decided after seeing the data (1.11.0 #2h).
+POST_HOC_PHRASE = "added after the data were examined"
 
 
 # (#10) CRediT contributor role names are journal-template text, not revision history:
@@ -234,7 +243,8 @@ def no_ai_boilerplate(ctx: Ctx) -> Result:
             False, "no_ai_boilerplate",
             f"{rel} describes the pipeline's own review/draft history: " + "; ".join(leaks[:5]),
             ["Delete it. A real change of plan is reported as a protocol deviation or post hoc "
-             "analysis, never by reference to an internal review or an earlier draft."])
+             "analysis, never by reference to an internal review or an earlier draft.",
+             f"Standard wording for a post hoc analysis: '{POST_HOC_PHRASE}'."])
     soft = [ph for ph in AI_TELLS if ph in low]
     if soft:
         return Result(

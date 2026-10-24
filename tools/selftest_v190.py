@@ -114,11 +114,19 @@ def run_rounds(tmp: Path, record, section) -> None:
          "--plan", _plan(tmp, "sci", "results-wording", "07_manuscript/full_manuscript.md",
                          "Correct the hazard ratio in the Results."), "--project", q)
     ms.write_text(ms.read_text(encoding="utf-8").replace("1.87", "1.91"), encoding="utf-8")
+    c1 = _run(q, "tools/rework.py", "check", "--project", q)
+    st1 = json.loads((q / ".wf/state.json").read_text(encoding="utf-8"))
+    # 1.11.0 (#2e): never automatically - the check stops until the user's words are recorded.
+    refused = _run(q, "tools/rework.py", "confirm-rewind", "--words", "OK", "--project", q)
+    _run(q, "tools/rework.py", "confirm-rewind", "--words", "我确认回退", "--project", q)
     c2 = _run(q, "tools/rework.py", "check", "--project", q)
     st2 = json.loads((q / ".wf/state.json").read_text(encoding="utf-8"))
-    record("an S24 round whose facts changed is escalated to S19 as before",
-           "SCIENTIFIC" in c2.stdout and st2["current"] == "S19_human_review"
-           and "manuscript_human_reviewed" not in st2.get("decisions", {}), c2.stdout[-300:])
+    record("an S24 round whose facts changed STOPS for the user's words, then escalates to S19",
+           "SCIENTIFIC" in c1.stdout and "STOPPED" in c1.stdout and c1.returncode == 2
+           and st1["current"] == "S24_package_human_review"
+           and "manuscript_human_reviewed" in st1.get("decisions", {}) and refused.returncode != 0
+           and "SCIENTIFIC" in c2.stdout and st2["current"] == "S19_human_review"
+           and "manuscript_human_reviewed" not in st2.get("decisions", {}), (c1.stdout + c2.stdout)[-400:])
     # 6. kinds
     import rework
     from wfcore import registry

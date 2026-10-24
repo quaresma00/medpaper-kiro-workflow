@@ -66,8 +66,25 @@ def blocked(payload: str) -> str | None:
         except SystemExit:
             pass
     open_round = revision.active(project)
-    allowed = set(open_round.get("allowed_files", [])) if revision.is_scoped(open_round) \
-        and open_round.get("status") == "active" else set()
+    sealed = revision.is_scoped(open_round) and open_round.get("status") == "active"
+    allowed = set(open_round.get("allowed_files", [])) if sealed else set()
+    # 1.11.0 (#2e): while a sealed round is open, ANY paper file outside its scope is refused
+    # at write time (not discovered by `rework.py check` afterwards).
+    outside = revision.out_of_scope(open_round, rels) if sealed else []
+    if outside:
+        return ("BLOCKED by the medpaper pipeline: " + ", ".join(outside[:6]) + " is outside the "
+                f"open revision round {open_round.get('round_id')} (rework.py status lists the "
+                "scope). Add it: python tools/rework.py batch --merge --plan <plan.json>, or edit "
+                "only the listed files.")
+    # 1.11.0 (#3a): in the journal stage (S20+) the frozen presentation layer (legend/footnote
+    # phrasing, labels) may be edited directly; scientific_freeze_intact compares its facts.
+    try:
+        from wfcore.state import State
+        journal_stage = State(project, ".wf").load().current >= "S20"
+    except (Exception, SystemExit):  # noqa: BLE001
+        journal_stage = False
+    if journal_stage:
+        allowed |= {r for r in rels if scifreeze.presentation_editable(project, r)}
     hits = sorted(r for r in rels if r in guarded and r not in allowed)
     if not hits:
         return None

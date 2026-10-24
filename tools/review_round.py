@@ -41,7 +41,7 @@ def _counts(raw: str) -> dict[str, int]:
     return out
 
 
-def main() -> int:
+def _main() -> int:
     ap = argparse.ArgumentParser(description="subagent review rounds (no review package)")
     ap.add_argument("command", choices=["start", "close", "author", "decide", "export", "status"])
     ap.add_argument("answer", nargs="*")
@@ -123,6 +123,19 @@ def main() -> int:
     except (OSError, ValueError, KeyError) as exc:
         print(f"review round error: {exc}", file=sys.stderr)
         return 2
+
+
+def main() -> int:
+    rc = None
+    try:
+        rc = _main()
+        return rc
+    finally:
+        try:  # 1.11.0 (#3g): <paper>/.wf/progress.md stays current
+            from wfcore import progress
+            progress.write(wfpaths.paper_from_cli(progress.project_arg(sys.argv)), "review_round.py " + " ".join(sys.argv[1:3]), rc)
+        except (Exception, SystemExit):  # noqa: BLE001
+            pass
 
 
 if __name__ == "__main__":

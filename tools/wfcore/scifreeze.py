@@ -68,6 +68,17 @@ OPTIONAL_SCIENTIFIC = (
     "06_refs/verified.json",
 )
 
+# 1.11.0 (#3a): the frozen record has two layers. Science = numbers, conclusions, method facts,
+# results provenance (everything else above). Presentation = legend/footnote phrasing, labels,
+# panel-label case, title/keyword wording: editable in the journal stage while the fact
+# comparison (numbers, citekeys, display references - presentation.facts) is unchanged.
+PRESENTATION_LAYER = (
+    "05_figures/legends.md",
+    "04_tables/table_captions.md",
+    "07_manuscript/title.md",
+    "07_manuscript/keywords.md",
+)
+
 # Scientific prose copied from the reviewed source when a journal is selected. Only these
 # participate in the science-preservation delta.
 ADAPTED_TEXT_FILES = (
@@ -211,6 +222,13 @@ def build_freeze(project: Path) -> dict:
         "files": {rel: {"sha256": _sha256(p), "bytes": p.stat().st_size}
                   for rel, p in sorted(files.items())},
     }
+    # 1.11.0 (#3a): presentation-layer files carry their facts, so wording/label/format edits
+    # in the journal stage pass while numbers, citations and display references are unchanged.
+    from . import presentation
+    for rel in payload["files"]:
+        if rel in PRESENTATION_LAYER:
+            payload["files"][rel]["layer"] = "presentation"
+            payload["files"][rel]["facts"] = presentation.facts(project, rel)
     # Bind the freeze to the S19 review ZIP the user released, so the gate can prove the frozen
     # text is the reviewed text (scientific_freeze_intact checks the decision rationale).
     # 1.8.1: bind to the latest subagent review round the user ended; legacy papers without
@@ -301,8 +319,24 @@ def verify_freeze(project: Path) -> tuple[bool, list[str], int]:
             problems.append(f"{rel}: frozen scientific file is gone")
             continue
         if _sha256(p) != meta.get("sha256"):
+            if meta.get("layer") == "presentation" and meta.get("facts") is not None:
+                from . import presentation
+                if presentation.facts(project, rel) == meta["facts"]:
+                    continue  # presentation layer: wording changed, facts identical
+                problems.append(f"{rel}: presentation-layer file changed its facts (numbers, "
+                                "citations or display references) after the freeze")
+                continue
             problems.append(f"{rel}: edited after the scientific freeze")
     return not problems, problems, len(entries)
+
+
+def presentation_editable(project: Path, rel: str) -> bool:
+    """1.11.0 (#3a): a frozen presentation-layer file the journal stage may edit directly."""
+    try:
+        meta = load_freeze(project).get("files", {}).get(rel) or {}
+    except SystemExit:
+        return False
+    return meta.get("layer") == "presentation" and meta.get("facts") is not None
 
 
 # ---------------------------------------------------------------------------
@@ -504,9 +538,9 @@ def _facts(text: str, aliases: dict | None = None) -> dict:
     supplementary legend blocks are ignored because 1.8.0 moves them to the supplementary file."""
     from . import journalspec, presentation
     text = SUPP_LEGEND_RE.sub(" ", text)
-    text = presentation.strip_non_facts(text)  # 1.9.0: ICD-10, 5-minute, (1)-(4) are not values
-    if aliases:
+    if aliases:  # 1.11.0: expand first, so a known alias counts as the ids it stands for
         text = journalspec.expand_aliases(text, aliases)
+    text = presentation.strip_non_facts(text)  # 1.9.0: ICD-10, 5-minute, (1)-(4) are not values
     stripped = CITE_RE.sub(" ", text)
     stripped = ART_RE.sub(" ", stripped)
     return {

@@ -177,6 +177,17 @@ def permits(project: Path, stage: str) -> bool:
                 and stage in revision.get("validation_stages", []))
 
 
+SCOPE_EXEMPT = ("temp/", ".wf/", ".kiro/", "08_submission/notes/")
+
+
+def out_of_scope(revision: dict | None, rels: list[str]) -> list[str]:
+    """1.11.0 (#2e): paper files a write would touch outside the sealed round's scope."""
+    if not (is_scoped(revision) and revision.get("status") == "active"):
+        return []
+    allowed = set(revision.get("allowed_files", [])) | set(revision.get("rebuild_files", []))
+    return sorted(r for r in rels if r not in allowed and not r.startswith(SCOPE_EXEMPT))
+
+
 def guard_outputs(project: Path, outputs: list[Path]) -> None:
     """Builders call this before writing: only the sealed closure may be rebuilt."""
     revision = active(project)
@@ -275,9 +286,15 @@ def certified_drift(project: Path) -> list[str]:
             entries = scifreeze.load_freeze(project).get("files", {})
         except SystemExit:
             entries = {}
+        from . import presentation
         for rel, meta in entries.items():
             p = project / rel
             if not p.is_file() or scifreeze._sha256(p) != meta.get("sha256"):
+                # 1.11.0 (#3a): a presentation-layer edit with unchanged facts is not drift.
+                if p.is_file() and meta.get("layer") == "presentation" \
+                        and meta.get("facts") is not None \
+                        and presentation.facts(project, rel) == meta["facts"]:
+                    continue
                 drift.append(rel)
     revision = active(project)
     allowed = set(revision.get("allowed_files", [])) if is_scoped(revision) else set()

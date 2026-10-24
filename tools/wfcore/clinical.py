@@ -163,13 +163,7 @@ def sections(text: str) -> list[tuple[str, str]]:
 def role_of(heading: str, target: dict | None = None) -> str:
     """Semantic role of a body heading, honouring the journal's names (1.11.0 #3d)."""
     from . import journalspec
-    key = re.sub(r"\s+", " ", heading.strip()).casefold()
-    names = {v.casefold(): k.casefold() for k, v in journalspec.main_text_headings(target or {}).items()}
-    if key in names:
-        return names[key]
-    for canon, syn in journalspec.HEADING_SYNONYMS.items():
-        if key in syn:
-            return canon
+    key = journalspec.section_role(heading, target)
     if key.startswith("abstract"):
         return "abstract"
     if key.startswith("conclusion"):

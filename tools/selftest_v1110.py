@@ -368,6 +368,182 @@ def run_values(tmp: Path, record, section) -> None:
            tl.ok or "chars of prose" not in tl.detail, tl.detail)
 
 
+def run_revision(tmp: Path, record, section) -> None:
+    from hooks import frozen_guard
+    from wfcore import presentation, revision as rv
+    from wfcore.state import State
+    section("1.11.0 #2e label numbers are not facts; preview; rewind needs the user's words; write guard")
+    facts = presentation.text_facts("Details are in Online Resource 2 and Supplementary File 3; see "
+                                    "Appendix 1, Panel 2 and Item 12 of Table S3 and Figure 2B.")
+    real = presentation.text_facts("Mortality was 12.5% in Online Resource 2.")
+    record("numbers inside labels/aliases/sequence numbers are not facts; real values still are",
+           facts["numbers"] == [] and "table S3" in facts["artifacts"] and real["numbers"] == ["12.5"],
+           str(facts) + str(real))
+    src = (ROOT / "tools/rework.py").read_text(encoding="utf-8")
+    import rework
+    record("rework.py has preview and confirm-rewind; only '我确认回退' authorises an S19 return",
+           '"preview"' in src and '"confirm-rewind"' in src and rework._is_rewind_confirmation("我确认回退。")
+           and not rework._is_rewind_confirmation("OK") and not rework._is_rewind_confirmation("可以回退")
+           and "STOPPED" in rework._rewind_request([{"request": "x"}]))
+    p = _paper(tmp / "guard", "S24_package_human_review")
+    _w(p, "07_manuscript/discussion.md", "Text.\n")
+    _w(p, ".wf/revisions/R009.json", {"round_id": "R009", "schema_version": rv.SCHEMA, "status": "active",
+                                      "allowed_files": ["08_submission/manuscript/full_manuscript.md"],
+                                      "rebuild_files": []})
+    st = State(p, ".wf").load()
+    st.data["active_revision_round"] = "R009"
+    st.save()
+    old = os.environ.get("MEDPAPER_PROJECT")
+    os.environ["MEDPAPER_PROJECT"] = str(p)
+    try:
+        out = frozen_guard.blocked(json.dumps({"path": str(p / "07_manuscript/discussion.md")}))
+        inside = frozen_guard.blocked(json.dumps({"path": str(p / "08_submission/manuscript/full_manuscript.md")}))
+        scratch = frozen_guard.blocked(json.dumps({"path": str(p / "temp/notes.md")}))
+    finally:
+        if old is None:
+            os.environ.pop("MEDPAPER_PROJECT", None)
+        else:
+            os.environ["MEDPAPER_PROJECT"] = old
+    record("a write outside the sealed round's scope is refused at write time; scope and temp/ pass",
+           out and "outside the open revision round" in out and inside is None and scratch is None, str(out))
+
+
+def run_repro_long(tmp: Path, record, section) -> None:
+    from wfcore import longrun, reproproof as rp
+    section("1.11.0 #2f reproduction ignores manuscript edits; #2g --wait / quiet output; #2h backstage")
+    keep, side = rp.split_paper_changes(["07_manuscript/results.md", "08_submission/x.docx",
+                                         "03_analysis/results/a.json", "x.txt"])
+    record("only analysis inputs/outputs (and stray files) invalidate a run; manuscript edits do not",
+           keep == ["03_analysis/results/a.json", "x.txt"] and len(side) == 2
+           and rp.INPUT_TREES == ("02_data", "03_analysis/code"), str(keep))
+    log = tmp / "lr" / "child.log"
+    rc = longrun.run_quiet([sys.executable, "-c", "print('line ok'); print('FAIL something broke'); "
+                            "print('done: 1 failure'); raise SystemExit(2)"], log, "demo", heartbeat=1)
+    text = log.read_text(encoding="utf-8")
+    record("--wait runs the command to completion, keeps details in the log and returns its rc",
+           rc == 2 and "line ok" in text and "[wf] finished rc=2" in text)
+    fails, tail = longrun.summarize(text)
+    record("the console gets failure lines and one summary line only",
+           fails == ["FAIL something broke"] and tail.startswith("done"), str(fails) + tail)
+    srcs = {n: (ROOT / n).read_text(encoding="utf-8") for n in
+            ("tools/wfcore/cli.py", "tools/rework.py", "tools/reproduce.py", "tools/manuscript/build_docx.py")}
+    record("wf check, rework.py check, reproduce.py run and build_docx.py accept --wait",
+           all("--wait" in s for s in srcs.values()) and "short(" in srcs["tools/reproduce.py"])
+    from wfcore.checks.text import POST_HOC_PHRASE, backstage_hits
+    hits = backstage_hits("This was added after internal review in the second review round; we re-ran "
+                          "the model. Earlier analyses were revised.")
+    clean = backstage_hits("The internal review board approved the study. Two reviewers screened "
+                           "records independently; a round of chemotherapy was given.")
+    record("backstage list covers review/round/internal/rerun; IRB and clinical 'round' pass; "
+           "post hoc wording suggested", len(hits) >= 3 and not clean
+           and POST_HOC_PHRASE == "added after the data were examined", f"{hits} | {clean}")
+
+
+def run_freeze_final(tmp: Path, record, section) -> None:
+    from wfcore import finalcopy, scifreeze
+    section("1.11.0 #3a freeze layers; #3b traceable final-copy numbers; #3c denominators")
+    p = _paper(tmp / "layers", "S21_authors")
+    _w(p, "07_manuscript/full_manuscript.md", "# T\n\nText 1.87.\n")
+    _w(p, "06_refs/refs.bib", "@article{a, title={A}}\n")
+    _w(p, "06_refs/library.json", {"entries": []})
+    _w(p, "03_analysis/results/primary.json", {"hr": 1.87, "n": 412, "events": 103})
+    _w(p, "05_figures/legends.md", "# Figure legends\n\n## Figure 1. Survival\n\nPanels (A) and (B) show 412 "
+       "patients.\n")
+    frz = scifreeze.build_freeze(p)
+    scifreeze.freeze_path(p).write_text(json.dumps(frz), encoding="utf-8")
+    meta = frz["files"]["05_figures/legends.md"]
+    _w(p, "05_figures/legends.md", "# Figure legends\n\n## Figure 1. Survival\n\nPanels (a) and (b) show the "
+       "412 patients.\n")
+    ok, probs, _ = scifreeze.verify_freeze(p)
+    _w(p, "05_figures/legends.md", "# Figure legends\n\n## Figure 1. Survival\n\nPanels (a) and (b) show 413 "
+       "patients.\n")
+    bad, bad_p, _ = scifreeze.verify_freeze(p)
+    record("legend wording/panel-case edits pass the freeze (facts equal); a changed number does not",
+           meta.get("layer") == "presentation" and ok and not bad and "presentation-layer" in " ".join(bad_p),
+           str(probs) + str(bad_p))
+    record("the science layer stays byte-frozen",
+           "layer" not in frz["files"]["07_manuscript/full_manuscript.md"])
+    record("new numbers in a final copy pass only when they exist in results JSON; n/N (%) is checked",
+           finalcopy.traceable(p, "103") and finalcopy.traceable(p, "1.9")
+           and finalcopy.traceable(p, "7.5") is False
+           and finalcopy.ratio_problems("103/412 (25.0%)") == []
+           and finalcopy.ratio_problems("103/412 (52.0%)") != [])
+    q = _paper(tmp / "prop", "S09_results")
+    from analysis.results import proportion
+    _w(q, "03_analysis/results/demo.json", {"women_cases": proportion(102, 159, "cases"),
+                                            "women_all": proportion(3620, 10000, "all_reports")})
+    _w(q, "07_manuscript/results.md", "Women made up 102/159 (64.2%) of cases versus 36.2% of all reports.\n")
+    mixed = _gate(q, "proportion_denominators", "S09_results", path="07_manuscript/results.md")
+    _w(q, "07_manuscript/results.md", "Women made up 102/159 (64.2%) of cases.\n")
+    single = _gate(q, "proportion_denominators", "S09_results", path="07_manuscript/results.md")
+    _w(q, "07_manuscript/results.md", "Women made up 102/159 (70.0%) of cases.\n")
+    wrong = _gate(q, "proportion_denominators", "S09_results", path="07_manuscript/results.md")
+    record("each percentage traces to numerator/denominator; compared proportions need one denominator",
+           not mixed.ok and "different denominators" in mixed.detail and single.ok
+           and not wrong.ok and "102/159 is 64.2%" in wrong.detail, mixed.detail + " | " + wrong.detail)
+
+
+def run_roles_cards(tmp: Path, record, section) -> None:
+    import wfcore
+    from wfcore import journalspec, reviewrounds as rr  # noqa: F401
+    from wfcore.checks import reporting
+    section("1.11.0 #3d role-based gates and negation; #3e card encoding; #3g progress file")
+    record("headings are matched by role: journal names and synonyms",
+           journalspec.section_role("Statements and Declarations") == "declarations"
+           and journalspec.section_role("Materials and Methods") == "methods"
+           and journalspec.section_role("Patients and Methods", {}) == "methods"
+           and journalspec.section_role("Back matter X", {"declarations_heading": "Back matter X"})
+           == "declarations")
+    neg = ["This cohort study involved no meta-analysis.", "It is not a meta-analysis.",
+           "Descriptive synthesis without meta-analysis.", "A meta-analysis was not performed.",
+           "We did a cross-sectional analysis rather than a systematic review.",
+           "Neither a systematic review nor a meta-analysis was planned."]
+    pos = ["We conducted a systematic review and meta-analysis.", "Random-effects meta-analysis pooled the "
+           "estimates.", "We found no heterogeneity in the meta-analysis."]
+    record("meta-analysis detection handles negation ('no', 'not a', 'without', 'was not performed')",
+           not any(reporting.meta_mentioned_affirmatively(t) for t in neg)
+           and all(reporting.meta_mentioned_affirmatively(t) for t in pos),
+           str([t for t in neg if reporting.meta_mentioned_affirmatively(t)]
+               + [t for t in pos if not reporting.meta_mentioned_affirmatively(t)]))
+    p = _paper(tmp / "meta", "S23_package")
+    _w(p, "01_protocol/protocol_final.md", "# Protocol\n\n## Design\n\nRetrospective cohort; no meta-analysis.\n")
+    from wfcore import registry
+    from wfcore.checks import Ctx
+    from wfcore.state import State
+    pipe = registry.load()
+    ctx = Ctx(pipeline=pipe, state=State(p, ".wf").load(), project=p, stage=pipe.stage("S23_package"), spec={})
+    text_says = reporting.is_meta_analysis(ctx)
+    _w(p, "01_protocol/idea.json", {"study_design": "meta_analysis"})
+    structured = reporting.is_meta_analysis(ctx)
+    record("the structured study_design wins over text search", not text_says and structured)
+    bad_cards = []
+    for card in sorted((ROOT / "pipeline/stages").glob("*.md")):
+        raw = card.read_bytes()
+        try:
+            txt = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            bad_cards.append(card.name + ": not UTF-8")
+            continue
+        if raw.startswith(b"\xef\xbb\xbf") or "\ufffd" in txt or any(
+                m in txt for m in ("锟", "鈥", "閿", "\u00e2\u0080", "\u00c3\u00a9", "鏈", "纭")):
+            bad_cards.append(card.name)
+    s19 = (ROOT / "pipeline/stages/S19_human_review.md").read_text(encoding="utf-8")
+    record("all stage cards are UTF-8 without BOM, U+FFFD or mojibake; S19 asks the closing question in Chinese",
+           not bad_cards and "确认当前版本请回复：我确认这一版" in s19, str(bad_cards))
+    record("console output uses the code page the PowerShell reader decodes (not UTF-8 into a 936 pipe)",
+           wfcore.stream_encoding(False, {}, 936) == "cp936" and wfcore.stream_encoding(True, {}, 936) == "utf-8"
+           and wfcore.stream_encoding(False, {}, 65001) == "utf-8"
+           and wfcore.stream_encoding(False, {"MEDPAPER_STDOUT_ENCODING": "utf-8"}, 936) == "utf-8")
+    q = _paper(tmp / "prog", "S10_tables")
+    env = {**os.environ, "MEDPAPER_PROJECT": str(q), "MEDPAPER_ROOT": str(ROOT), "PYTHONIOENCODING": "utf-8"}
+    subprocess.run([sys.executable, "-B", str(ROOT / "tools/wf.py"), "status", "--brief"], capture_output=True,
+                   env=env, text=True, encoding="utf-8", errors="replace")
+    prog = q / ".wf/progress.md"
+    ptxt = prog.read_text(encoding="utf-8") if prog.is_file() else ""
+    record("wf commands keep <paper>/.wf/progress.md (stage, rounds, last command) for resumption",
+           "current stage: S10_tables" in ptxt and "wf status" in ptxt, ptxt[:200])
+
+
 def run(tmp: Path, record, section) -> None:
     tmp.mkdir(parents=True, exist_ok=True)
     old = os.environ.get("MEDPAPER_PROJECT")
@@ -380,6 +556,10 @@ def run(tmp: Path, record, section) -> None:
         run_review(tmp, record, section)
         run_params(tmp, record, section)
         run_values(tmp, record, section)
+        run_revision(tmp, record, section)
+        run_repro_long(tmp, record, section)
+        run_freeze_final(tmp, record, section)
+        run_roles_cards(tmp, record, section)
     finally:
         if old is None:
             os.environ.pop("MEDPAPER_PROJECT", None)

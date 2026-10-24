@@ -33,6 +33,16 @@ SNAPSHOT_EXCLUDE = (".wf", "temp", ".kiro", REPORT_REL)
 INPUT_EXCLUDE_DIRS = ("02_data/derived",)
 INPUT_EXCLUDE_NAMES = ("__pycache__", ".Rhistory", ".DS_Store")
 RESULTS_DIR = "03_analysis/results"
+# 1.11.0 (#2f): reproduction depends only on data, analysis code, manifest, tolerances and the
+# engine helpers. Edits in these trees during a run are manuscript/package work, not inputs.
+NON_ANALYSIS_PREFIXES = ("00_input/", "01_protocol/", "04_tables/", "05_figures/", "06_refs/",
+                         "07_manuscript/", "08_submission/")
+
+
+def split_paper_changes(changes: list[str]) -> tuple[list[str], list[str]]:
+    """(changes that invalidate the run, non-analysis edits recorded for information)."""
+    keep = [c for c in changes if not c.startswith(NON_ANALYSIS_PREFIXES)]
+    return keep, [c for c in changes if c.startswith(NON_ANALYSIS_PREFIXES)]
 _ISO = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
 
 

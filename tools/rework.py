@@ -373,7 +373,8 @@ def _cmd_batch(args, project: Path, pipe, state: State, kinds: list[str]) -> int
     plan = _read_batch_plan(args.plan.resolve(), kinds, review_stage, pipe)
     if any(u.get("feedback_sha256") == plan["feedback_sha256"] for u in revision["feedback_updates"]):
         print("identical feedback already recorded; no duplicate items")
-        return _seal_round(state, pipe, args.why or plan["feedback_verbatim"]) if args.sealed else 0
+        return _seal_round(state, pipe, args.why or plan["feedback_verbatim"],
+                       getattr(args, "rewind_words", "")) if args.sealed else 0
     first_new = len(revision["items"]) + 1
     for offset, item in enumerate(plan["items"]):
         item["id"] = f"{revision['round_id']}-{first_new + offset:02d}"
@@ -394,7 +395,8 @@ def _cmd_batch(args, project: Path, pipe, state: State, kinds: list[str]) -> int
     if not args.sealed:
         print("More feedback: run batch again. When the user is done: rework.py seal --why \"<their instruction>\"")
         return 0
-    return _seal_round(state, pipe, args.why or plan["feedback_verbatim"])
+    return _seal_round(state, pipe, args.why or plan["feedback_verbatim"],
+                       getattr(args, "rewind_words", ""))
 
 
 def _add_fact_baseline(project: Path, revision: dict) -> None:
@@ -471,6 +473,11 @@ def _classify_for_check(project: Path, pipe, state: State, path: Path, revision:
         _write_round(path, revision)
         print("Open the round at S24 so the science can return to S19, or restore the facts.")
         return 2
+    if not revision.get("rewind_confirmation"):
+        # 1.11.0 (#2e): stop here; nothing is moved or invalidated without the user's words.
+        _write_round(path, revision)
+        print(_rewind_request(pending))
+        return 2
     for item in pending:
         item["change_type"] = "scientific"
     science = [i for i in revision["items"]
@@ -488,7 +495,67 @@ def _classify_for_check(project: Path, pipe, state: State, path: Path, revision:
     return 2
 
 
-def _seal_round(state: State, pipe, why: str) -> int:
+REWIND_PHRASES = ("我确认回退", "I confirm the rewind")
+
+
+def _is_rewind_confirmation(words: str) -> bool:
+    text = str(words or "").strip().strip("\"'“”‘’「」『』").rstrip("。.!！ ").strip()
+    return text == REWIND_PHRASES[0] or text.casefold() == REWIND_PHRASES[1].casefold()
+
+
+def _record_rewind(revision: dict, words: str) -> bool:
+    """True when the user's explicit rewind words are (or were already) recorded."""
+    if revision.get("rewind_confirmation"):
+        return True
+    if words and _is_rewind_confirmation(words):
+        revision["rewind_confirmation"] = {"words": words.strip(), "at": _now()}
+        return True
+    return False
+
+
+def _rewind_request(items: list[dict]) -> str:
+    return ("STOPPED: this would return the round to S19 (re-review, re-freeze, invalidated "
+            "approvals). Nothing was moved. Show the user the reasons above (or "
+            "`rework.py preview`) and ask; only the exact words '" + REWIND_PHRASES[0]
+            + "' (or '" + REWIND_PHRASES[1] + "') authorise it: rework.py confirm-rewind --words "
+            "\"<user's words>\" (or seal --rewind-words ...). Otherwise restore the facts, or "
+            "reclassify: a number inside a label (Online Resource 2, Table S3, panel/item "
+            "numbers) is not a fact. Items: " + "; ".join(i.get("request", "")[:60] for i in items[:4]))
+
+
+def _cmd_preview(project: Path, state: State) -> int:
+    """1.11.0 (#2e): classification dry-run - prints presentation/science, writes nothing."""
+    from wfcore import presentation
+    _path, revision = _load_round(state)
+    if not _classified(project, revision):
+        print("preview: this round has no fact baseline (pre-freeze or legacy); items are "
+              "classified by their declared kind")
+        return 0
+    changed = sorted(_changed_since_baseline(project, revision))
+    verdict = presentation.classify(project, revision["fact_baseline"], changed)
+    print(f"PREVIEW {revision['round_id']}: {verdict['class'].upper()} "
+          f"({len(changed)} changed file(s), {len(verdict['checked'])} fact-checked); nothing recorded")
+    for reason in verdict["reasons"][:12]:
+        print(f"  - {reason}")
+    if verdict["class"] == "scientific" and revision["review_stage"] == "S24_package_human_review":
+        print("check would STOP and ask for '" + REWIND_PHRASES[0] + "' before any S19 return")
+    return 0
+
+
+def _cmd_confirm_rewind(state: State, words: str) -> int:
+    path, revision = _load_round(state)
+    if not _is_rewind_confirmation(words):
+        raise ValueError("not a rewind confirmation: record the user's exact words '"
+                         + REWIND_PHRASES[0] + "' (or '" + REWIND_PHRASES[1] + "')")
+    _record_rewind(revision, words)
+    _write_round(path, revision)
+    state.event("revision_rewind_confirmed", f"{revision['round_id']}: \"{words.strip()}\"")
+    state.save()
+    print(f"{revision['round_id']}: rewind to S19 authorised by the user; run rework.py check (or seal) again")
+    return 0
+
+
+def _seal_round(state: State, pipe, why: str, rewind_words: str = "") -> int:
     if len(why.strip()) < 10:
         raise ValueError("seal requires the user's end-of-batch or apply-now instruction (--why)")
     round_path, revision = _load_round(state)
@@ -514,6 +581,9 @@ def _seal_round(state: State, pipe, why: str) -> int:
             if any(any(s.startswith(("00_input/", "08_submission/")) for s in i["affected_sources"])
                    for i in science):
                 raise ValueError("split scientific sources and journal-package sources into separate items")
+            # 1.11.0 (#2e): never rewind to S19 without the user's explicit words.
+            if not _record_rewind(revision, rewind_words):
+                raise ValueError(_rewind_request(science))
             science_moved = _move_science_to_s19(state, pipe, revision, science)
     scoped.plan_scope(project, pipe, state, revision)
     if _classified(project, revision):
@@ -935,13 +1005,21 @@ def _pipeline(state: State):
     return registry.load(state.config(), overrides.load(state.dir))
 
 
-def main() -> int:
+def _main() -> int:
     kinds = sorted([*ROUTES, "manuscript-copyedit", "word-format-only"])
     parser = argparse.ArgumentParser(
         description="plan, scope and persist user-requested medpaper revision rounds")
     parser.add_argument("command", choices=["plan", "start", "batch", "seal", "check", "build",
                                             "refresh", "status", "mark", "close", "suspend",
-                                            "resume", "progress", "layout"])
+                                            "resume", "progress", "layout", "preview",
+                                            "confirm-rewind"])
+    parser.add_argument("--words", default="", help="confirm-rewind: the user's exact words")
+    parser.add_argument("--rewind-words", default="",
+                        help="seal/batch --sealed: the user's words authorising an S19 return")
+    parser.add_argument("--wait", action="store_true",
+                        help="check: block with heartbeat lines, then failures + one summary line")
+    parser.add_argument("--log", type=Path, default=None,
+                        help="check: full output to this file; stdout keeps failures + summary")
     parser.add_argument("--merge", action="store_true",
                         help="batch: add this feedback to the sealed open round and re-plan it")
     parser.add_argument("--priority", action="store_true",
@@ -1005,7 +1083,15 @@ def main() -> int:
         if args.command == "layout":
             return _cmd_layout(args, project, pipe, state)
         if args.command == "seal":
-            return _seal_round(state, pipe, args.why or "")
+            return _seal_round(state, pipe, args.why or "", args.rewind_words)
+        if args.command == "preview":
+            return _cmd_preview(project, state)
+        if args.command == "confirm-rewind":
+            return _cmd_confirm_rewind(state, args.words)
+        if args.command == "check" and (args.wait or args.log) and not os.environ.get("MEDPAPER_WAIT_CHILD"):
+            from wfcore import longrun
+            return longrun.run_quiet([sys.executable, *sys.argv], args.log or (
+                project / ".wf" / "logs" / "rework_check.log"), label="rework check")
         if args.command == "check":
             path, revision = _load_round(state)
             escalated = _classify_for_check(project, pipe, state, path, revision)
@@ -1053,13 +1139,27 @@ def main() -> int:
         return 0
     # `start`: the legacy single-kind full rewind (explicit fallback).
     tool = paths.tools_dir() / "wf.py"
+    # 1.11.0: the child inherits our stdout, so it picks the encoding its reader decodes.
     env = {**os.environ, "MEDPAPER_PROJECT": str(project),
-           "MEDPAPER_ROOT": str(paths.repo_root()), "PYTHONIOENCODING": "utf-8"}
+           "MEDPAPER_ROOT": str(paths.repo_root())}
     proc = subprocess.run(
         [sys.executable, str(tool), "loop", "--to", target, "--why",
          f"user-requested {args.kind} revision (full rewind): {args.why.strip()}"],
         text=True, env=env)
     return proc.returncode
+
+
+def main() -> int:
+    rc = None
+    try:
+        rc = _main()
+        return rc
+    finally:
+        try:  # 1.11.0 (#3g): <paper>/.wf/progress.md stays current
+            from wfcore import progress
+            progress.write(paths.paper_from_cli(progress.project_arg(sys.argv)), "rework.py " + " ".join(sys.argv[1:3]), rc)
+        except (Exception, SystemExit):  # noqa: BLE001
+            pass
 
 
 if __name__ == "__main__":

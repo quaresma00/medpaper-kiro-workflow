@@ -59,6 +59,7 @@ the effect size and the data's limits are known. This is the last cheap exit.
 - `03_analysis/reproducibility_report.json`
 
 ## Hard rules
+- 1.11.0: decide the provisional target journal or journal type now; S07 records its presentation parameters in `01_protocol/journal_profile.json` so tables and figures are built to them from the start.
 - 1.10.0: keep the `Statistical reporting plan` lines in protocol_final.md. `raw_spot_check`: a script in `03_analysis/spot_check/` (run with `wf run-script`) draws 10 reproducible subjects with `tools/analysis/spotcheck.py` `sample_ids(ids, seed)`, recomputes the key variables from the raw source (`02_data/raw/` files; for a public database the downloaded files) and calls `write_spot_check`; a mismatch is fixed at S04/S05 or carries an explanation.
 - Carry the `Design precedent` lines into `protocol_final.md` and update them if the final
   comparator, denominator or primary outcome changed (`design_precedent_recorded`).

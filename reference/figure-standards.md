@@ -212,12 +212,13 @@ Methods, supplementary Methods or the main Results/Discussion. A legend is not a
 Methods section; target 40-140 words and keep it below 180 words unless the selected journal
 explicitly requires otherwise.
 
-When more than eight defined abbreviations accumulate across figures and tables, or a local
-list exceeds 50 words or dominates its legend, define
-them once under `Declarations and Statements > Abbreviations` and remove repeated local
-definition blocks. Retain local definitions only when the chosen journal's official guide
-explicitly requires them. Apply this at S17 before independent and user review. Thresholds
-are workflow defaults; medical clarity remains the criterion. Never use the literal down-arrow
+1.11.0: each legend defines every abbreviation its figure (and in-figure text) uses, so the
+figure reads on its own; the manuscript also keeps a central list. Only a journal whose guide
+explicitly requires a single central list (`abbreviation_placement = "central_required"`)
+removes local definitions. In-figure labels are the display dictionary's clinical labels -
+never code names, letter codes or processing counts (lines/rows read, files, versions); text
+is >= the journal minimum (default 8 pt) at final print size. Flow diagrams are schematics:
+boxes, counts in analysis units, arrows - no axis titles. Never use the literal down-arrow
 character as shorthand.
 
 Test: delete the text. If it is still needed to decode an axis, group or symbol, retain it

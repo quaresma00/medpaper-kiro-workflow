@@ -229,7 +229,9 @@ def cmd_run(args) -> int:
 
     entries, within = rp.compare(paper, rerun, tols)
     after = runner.tree_snapshot(paper, rp.SNAPSHOT_EXCLUDE)
-    changes = runner.diff_snapshots(before, after)
+    # 1.11.0 (#2f): only analysis inputs/outputs (and anything outside the manuscript/package
+    # trees) can invalidate a run; editing the manuscript meanwhile is recorded, not fatal.
+    changes, side_edits = rp.split_paper_changes(runner.diff_snapshots(before, after))
     all_match = (failed is None and not changes and
                  all(e["status"] in ("match", "not_rerun_acquisition") for e in entries))
     tp = paper / rp.TOLERANCE_REL
@@ -252,6 +254,7 @@ def cmd_run(args) -> int:
         "results": entries,
         "within_tolerance": within,
         "paper_changes": changes[:50],
+        "non_analysis_edits": side_edits[:50],
         "not_rerun": {"acquisition_scripts": acq_scripts,
                       "permitted_result": rp.ACQ_RESULT,
                       "reason": "acquisition is network-bound and is not re-executed; "
@@ -262,15 +265,24 @@ def cmd_run(args) -> int:
     tmp.write_text(json.dumps(report, indent=2, ensure_ascii=False, default=str) + "\n",
                    encoding="utf-8")
     os.replace(tmp, report_path)
+    def short(v) -> str:  # 1.11.0 (#2g): never dump a whole JSON value to the console
+        s = repr(v)
+        return s if len(s) <= 80 else s[:77] + "..."
     for e in entries:
         mark = "=" if e["status"] in ("match", "not_rerun_acquisition") else "!"
-        extra = (f"  first difference {e['first_difference']}: {e['original_value']!r} vs "
-                 f"{e['rerun_value']!r}" if e["status"] == "mismatch" else "")
-        print(f"{mark} {e['file']}  {e['status']}{extra}")
-    for w in within:
-        print(f"~ {w['file']} {w['path']} {w['original_value']!r} vs {w['rerun_value']!r}")
+        extra = (f"  first difference {e['first_difference']}: {short(e['original_value'])} vs "
+                 f"{short(e['rerun_value'])}" if e["status"] == "mismatch" else "")
+        if mark == "!" or len(entries) <= 12:
+            print(f"{mark} {e['file']}  {e['status']}{extra}")
+    for w in within[:10]:
+        print(f"~ {w['file']} {w['path']} {short(w['original_value'])} vs {short(w['rerun_value'])}")
+    matched = sum(e["status"] in ("match", "not_rerun_acquisition") for e in entries)
+    print(f"results: {matched}/{len(entries)} match; details in the report")
     if changes:
         print("the original paper changed during the run: " + ", ".join(changes[:12]))
+    if side_edits:
+        print(f"note: {len(side_edits)} manuscript/package file(s) edited meanwhile (not analysis "
+              "inputs; the run stays valid)")
     if args.keep_sandbox:
         print(f"sandbox kept: {sandbox}")
     else:
@@ -373,7 +385,13 @@ def main() -> int:
     r.add_argument("--project", default=None)
     c = sub.add_parser("check")
     c.add_argument("--project", default=None)
+    r.add_argument("--wait", action="store_true",
+                   help="block with heartbeat lines; print failures + one summary line (log has all)")
     args = ap.parse_args()
+    if args.command == "run" and args.wait:
+        from wfcore import longrun
+        log = Path(args.log) if args.log else paths.paper_from_cli(args.project) / ".wf/logs/reproduce.log"
+        return longrun.run_quiet([sys.executable, *sys.argv], log, "reproduce", max_seconds=4 * 3600)
     if args.command == "run":
         return _run_with_progress(args)
     try:

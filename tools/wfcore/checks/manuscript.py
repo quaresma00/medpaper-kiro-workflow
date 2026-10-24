@@ -109,8 +109,9 @@ def declaration_and_discussion_problems(ctx: Ctx, text: str) -> list[str]:
     target = journalspec.load(ctx.project)
     order = journalspec.declarations_order(target)
     secs = journalspec.markdown_sections(text)
-    problems = journalspec.declaration_order_problems(
-        _subsections(secs.get("declarations and statements", "")), order, "Declarations")
+    decl = next((body for head, body in secs.items()
+                 if journalspec.section_role(head, target) == "declarations"), "")
+    problems = journalspec.declaration_order_problems(_subsections(decl), order, "Declarations")
     title_rel = ctx.src("07_manuscript/title_page.md")
     if ctx.p(title_rel).is_file():
         problems += journalspec.declaration_order_problems(
@@ -167,26 +168,29 @@ def manuscript_structure(ctx: Ctx) -> Result:
         return Result(False, "manuscript_structure", "no level-1 headings found")
     expected = ["abstract", "introduction", "methods", "results", "discussion",
                 "references", "figure legends"]
+    # 1.11.0 (#3d): headings are matched by semantic role (journal names + synonyms).
+    target = journalspec.load(ctx.project)
+    roles = [(journalspec.section_role(h, target), pos) for h, pos in heads]
     positions: dict[str, int] = {}
     for name in expected:
-        matches = [pos for heading, pos in heads if heading.casefold() == name]
+        matches = [pos for role, pos in roles if role == name]
         if len(matches) != 1:
-            problems.append(f"expected exactly one '# {name.title()}', found {len(matches)}")
+            problems.append(f"expected exactly one {name.title()} section (any accepted name), "
+                            f"found {len(matches)}")
         else:
             positions[name] = matches[0]
     if len(positions) == len(expected):
         seq = [positions[x] for x in expected]
         if seq != sorted(seq):
             problems.append("section order must be Abstract, Introduction, Methods, Results, Discussion, References, Figure legends")
-        if heads[-1][0].casefold() != "figure legends":
+        if roles[-1][0] != "figure legends":
             problems.append("Figure legends must be the final level-1 section")
-    declarations = [pos for heading, pos in heads
-                    if heading.casefold() == "declarations and statements"]
+    declarations = [pos for role, pos in roles if role == "declarations"]
     if len(declarations) > 1:
-        problems.append("expected at most one '# Declarations and Statements'")
+        problems.append("expected at most one declarations section")
     elif declarations and "discussion" in positions and "references" in positions and not (
             positions["discussion"] < declarations[0] < positions["references"]):
-        problems.append("Declarations and Statements must be between Discussion and References")
+        problems.append("the declarations section must be between Discussion and References")
     title = heads[0][0]
     if title.casefold() in expected or len(re.findall(r"[A-Za-z][A-Za-z'-]*", title)) < 5:
         problems.append("the first level-1 heading is not a substantive selected title")
@@ -221,7 +225,11 @@ def manuscript_structure(ctx: Ctx) -> Result:
     problems.extend(declaration_and_discussion_problems(ctx, text))
     if problems:
         return Result(False, "manuscript_structure", "; ".join(problems[:8]),
-                      ["Rebuild with tools/manuscript/assemble.py, then apply later edits without moving protected sections."])
+                      ["Rebuild with tools/manuscript/assemble.py, then apply later edits without moving protected sections.",
+                       "A journal's own heading names are legitimate: record them in "
+                       "target_journal.json (main_text_headings, declarations_heading); common "
+                       "synonyms (Materials and Methods, Statements and Declarations, ...) are "
+                       "accepted. Never edit the engine to pass this gate."])
     return Result(True, "manuscript_structure",
                   "selected title plus Abstract/Keywords/body/References/Figure legends are present in journal order")
 

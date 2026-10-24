@@ -67,6 +67,16 @@ requirements are adapted in `08_submission/manuscript/` from S20 on. Re-freeze
 - `07_manuscript/scientific_freeze.json`
 
 ## Hard rules
+- 1.11.0: give the reviewer the one bundle path `review_round.py start` prints and its
+  neutral brief (never known deviations or earlier conclusions). Save the full report and
+  `close --report <file>`: every F-numbered finding of every section is listed
+  (`--finding`), kept ones with `--kept ID "reason"` (`review_findings_closed`).
+- 1.11.0: before `rework.py check`, `rework.py preview` shows presentation vs science
+  without recording anything. A number inside a label (Online Resource 2, Table S3, panel or
+  item numbers) is not a fact. Writes outside the sealed round's files are refused at write
+  time. An S19 return never happens automatically: check/seal STOP and you ask the user;
+  only the words '我确认回退' (`rework.py confirm-rewind --words ...` or `seal
+  --rewind-words ...`) authorise it.
 - Long checks: `wf check --quiet` (failures + one line) or `--summary`; run long ones in the background with `--log temp/check.log` and poll the `[wf] finished rc=` marker.
 - The S18 verdict is not the user's approval; only the recorded `no_further_review` is.
 - `review_round_approved` fails if anything the round covered changed after it closed; run a

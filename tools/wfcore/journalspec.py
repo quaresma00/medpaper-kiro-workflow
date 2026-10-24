@@ -211,6 +211,40 @@ HEADING_SYNONYMS = {
 DEFAULT_KEYWORDS = {"min": 3, "max": 6, "separator": ","}
 
 
+# 1.11.0 (#3d): gates judge a heading by its semantic role, never by one literal string.
+SECTION_SYNONYMS = {
+    "abstract": {"abstract", "summary", "structured abstract"},
+    "references": {"references", "reference list", "literature cited", "bibliography", "works cited"},
+    "figure legends": {"figure legends", "figure captions", "legends to figures", "figure legend",
+                       "legends"},
+    "declarations": {"declarations and statements", "statements and declarations", "declarations",
+                     "statements", "declaration", "declarations of interest and statements",
+                     "ethics and declarations", "compliance with ethical standards",
+                     "additional information", "article information", "back matter"},
+}
+
+
+def section_role(heading: str, target: dict | None = None) -> str:
+    """Canonical role of a level-1 heading: abstract, introduction, methods, results,
+    discussion, references, figure legends, declarations - else the casefolded heading.
+    Journal names come from target_journal.json (main_text_headings, declarations_heading)."""
+    key = re.sub(r"\s+", " ", str(heading).strip().rstrip(":")).casefold()
+    target = target or {}
+    for canon, shown in main_text_headings(target).items():
+        if key == shown.casefold():
+            return canon.casefold()
+    for canon, names in HEADING_SYNONYMS.items():
+        if key in names:
+            return canon
+    decl = str(target.get("declarations_heading", "")).strip().casefold()
+    if decl and key == decl:
+        return "declarations"
+    for canon, names in SECTION_SYNONYMS.items():
+        if key in names:
+            return canon
+    return key
+
+
 def main_text_headings(target: dict) -> dict[str, str]:
     """canonical heading -> the journal's display name (identity when the guide is silent)."""
     out = {c: c for c in CANON_BODY}

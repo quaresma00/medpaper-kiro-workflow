@@ -54,8 +54,20 @@ def _now() -> str:
 # ---------------------------------------------------------------------------
 # fact extraction
 # ---------------------------------------------------------------------------
+# 1.11.0 (#2e): numbers that only label or sequence something - "Online Resource 2",
+# "Supplementary File 3", "Appendix 1", "Panel 2", "Item 12", "Step 3", "Box 1" - are not facts.
+LABEL_NUM_RE = re.compile(
+    r"\b(?:Online\s+Resources?|Electronic\s+Supplementary\s+Materials?|ESM|Additional\s+files?|"
+    r"Supplementary\s+(?:Files?|Materials?|Data|Appendix|Appendices|Methods|Information|Notes?|Text)|"
+    r"Supplemental\s+(?:Files?|Materials?|Data|Digital\s+Content)|Appendix|Appendices|Annex|"
+    r"Data\s+Supplement|eTable|eFigure|eAppendix|eMethods|Panels?|Items?|Steps?|Boxes|Box|"
+    r"Sections?|Chapters?|Footnotes?|Online\s+Supplement)\s*(?:S?\d+[A-Za-z]?)"
+    r"(?:\s*(?:,|and|-|\u2013|to)\s*S?\d+[A-Za-z]?)*", re.I)
+
+
 def strip_non_facts(text: str) -> str:
-    """Remove in-word numbers and list enumerators before counting numbers (#9)."""
+    """Remove label/sequence numbers, in-word numbers and list enumerators (#9, 1.11.0)."""
+    text = LABEL_NUM_RE.sub(" ", text)
     text = IN_WORD_RE.sub(" ", text)
     return ENUM_RE.sub(" ", text)
 

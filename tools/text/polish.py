@@ -305,7 +305,8 @@ def lint_structure(rel: str, text: str) -> list[dict]:
     if leaks:
         flag("backstage_language",
              "mentions the pipeline's review/draft history: " + "; ".join(leaks[:4]) +
-             " - report real changes as protocol deviations or post hoc analyses", "blocking")
+             " - report real changes as protocol deviations or post hoc analyses ('added after "
+             "the data were examined')", "blocking")
 
     em = len(re.findall(r"\u2014|\s--\s", b))
     if em / nwords * 1000 > 4:

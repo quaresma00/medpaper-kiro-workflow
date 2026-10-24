@@ -276,12 +276,20 @@ def _print_visual_debts(pipe, st, proj: Path | None = None) -> None:
 
 
 def _gate_lines(results, proj: Path | None = None) -> None:
+    blocking = False
     for r in results:
         print(f"  [{r.label}] {r.check}")
         if r.detail:
             print(f"         {_loc(r.detail, proj)}")
         for h in r.hints:
             print(f"         -> {_loc(h, proj)}")
+        blocking = blocking or r.blocking
+    if blocking:
+        # 1.11.0 (#3d): every failure has a legitimate path that is not an engine edit.
+        print("  exception path: fix the paper; a journal's own names/rules go in "
+              "target_journal.json; paper targets via `wf config set`; a genuine shape "
+              "difference via `wf override init` (.wf/overrides.toml). Never edit pipeline/, "
+              "tools/ or reference/ for one paper.")
 
 
 def _declared_and_free(pipe) -> tuple[set[str], list[str]]:
@@ -1596,6 +1604,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--summary", action="store_true", help="print one summary line only")
     p.add_argument("--reuse", action="store_true",
                    help="reuse fresh receipts of unchanged pure checks (incremental re-check)")
+    p.add_argument("--wait", action="store_true",
+                   help="block with a heartbeat line per minute, then print failures + one "
+                        "summary line; full output in --log (default .wf/logs/wf_check.log)")
     p.set_defaults(fn=cmd_check)
 
     p = sub.add_parser("migrate", help="adopt this engine's full gate set for completed stages "
@@ -1706,16 +1717,47 @@ def main(argv: list[str] | None = None) -> int:
         ap.error("config set needs KEY and VALUE")
     if args.cmd == "config" and args.action == "get" and not args.key:
         ap.error("config get needs KEY")
+    if getattr(args, "wait", False) and not os.environ.get("MEDPAPER_WAIT_CHILD"):
+        # 1.11.0 (#2g): one blocking call instead of background + sleep polling.
+        from . import longrun
+        try:
+            log = args.log or (paths.project_dir() / ".wf" / "logs" / f"wf_{args.cmd}.log")
+        except (SystemExit, Exception):  # noqa: BLE001 - no paper: log next to the cwd
+            log = args.log or Path.cwd() / f"wf_{args.cmd}.log"
+        return longrun.run_quiet([sys.executable, sys.argv[0], *(argv if argv is not None
+                                                                  else sys.argv[1:])],
+                                 log, f"wf {args.cmd}")
     if getattr(args, "log", None):
-        return _run_logged(args)
+        rc = _run_logged(args)
+        _progress(args, rc)
+        return rc
+    rc = None
     try:
-        return args.fn(args)
+        rc = args.fn(args)
+        return rc
     except paths.EngineWorkspace as exc:
         print(str(exc))
+        rc = 2
         return 2
-    except SystemExit:
+    except SystemExit as exc:
+        rc = exc.code if isinstance(exc.code, int) else 1
         raise
     except KeyError as exc:
         print(f"error: {exc}", file=sys.stderr)
+        rc = 1
         return 1
+    finally:
+        _progress(args, rc)
+
+
+def _progress(args, rc) -> None:
+    """1.11.0 (#3g): keep <paper>/.wf/progress.md current after every paper command."""
+    if args.cmd in ("doctor", "checks", "papers", "invariants", "archetype", "new", "init"):
+        return
+    try:
+        from . import progress
+        progress.write(paths.project_dir(), " ".join(["wf", args.cmd] + (
+            [str(args.stage)] if getattr(args, "stage", None) else [])), rc)
+    except (Exception, SystemExit):  # noqa: BLE001 - no paper selected
+        pass
 
