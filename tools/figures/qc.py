@@ -62,6 +62,37 @@ PROVENANCE_KEYS = ("script", "script_sha256", "source_hashes", "render_hashes")
 SIDECAR_OPTIONAL_KEYS = ("engine", *PROVENANCE_KEYS, "population")
 
 
+RENDER_STALE_SECONDS = 1800
+
+
+def render_in_progress(png_rel: str, wait: float | None = None) -> str:
+    """1.12.0 (A2): '' when no render of this figure is running, else a short reason.
+
+    save_medpaper() writes 05_figures/qc/<stem>.rendering before it publishes the outputs and
+    removes it after the sidecar is written; staged '<stem>.render-tmp.png' files exist while
+    the devices draw. QC waits briefly for both to disappear instead of comparing a new PNG
+    with the previous sidecar (the old race reported 'render changed after save_medpaper').
+    A marker older than RENDER_STALE_SECONDS is an interrupted render, not one in progress.
+    """
+    import os
+    import time
+    root = project_root()
+    png = root / png_rel
+    marker = root / "05_figures" / "qc" / f"{Path(png_rel).stem}.rendering"
+    staged = png.with_name(png.stem + ".render-tmp" + png.suffix)
+    wait = float(os.environ.get("MEDPAPER_RENDER_WAIT", "20")) if wait is None else wait
+    deadline = time.monotonic() + max(wait, 0.0)
+    while True:
+        fresh = marker.is_file() and time.time() - marker.stat().st_mtime < RENDER_STALE_SECONDS
+        busy = fresh or staged.is_file()
+        if not busy:  # a stale marker is an interrupted render: provenance judges the bytes
+            return ""
+        if time.monotonic() >= deadline:
+            return (f"render in progress ({marker.name if fresh else staged.name} present); "
+                    "re-run qc.py when save_medpaper() has finished")
+        time.sleep(0.5)
+
+
 def targets() -> dict:
     """[targets] from pipeline.toml with the paper's .wf/config.toml overrides."""
     from wfcore import registry
@@ -272,15 +303,25 @@ def qc_figure(entry: dict, tgt: dict, arch_reg: dict | None = None) -> dict:
     elements_found: dict = {}
     engine = None
     sidecar = project_root() / "05_figures" / "qc" / f"{Path(png_rel).stem}.artist.json"
+    busy = render_in_progress(png_rel) if png_rel else ""
     if sidecar.exists():
         art = json.loads(sidecar.read_text(encoding="utf-8"))
         schema = _schema_problems(art, Path(png_rel).stem)
         add("artist_audit_schema", not schema,
             "; ".join(schema) if schema else "sidecar schema valid")
         engine = art.get("engine", "python")
-        if engine == "R":
+        if engine == "R" and busy:
+            add("r_render_provenance", False, busy, severity="warn")
+        elif engine == "R":
             if any(k in art for k in PROVENANCE_KEYS):
                 problems = _r_provenance_problems(art, entry, png_rel)
+                if problems:
+                    # Compare atomically: if the sidecar was rewritten while we hashed (a
+                    # render finished in between), judge the new receipt once more.
+                    fresh = json.loads(sidecar.read_text(encoding="utf-8"))
+                    if fresh != art:
+                        art = fresh
+                        problems = _r_provenance_problems(art, entry, png_rel)
                 add("r_render_provenance", not problems,
                     "; ".join(problems[:6]) if problems
                     else "R script, result inputs and rendered outputs match the render receipt")

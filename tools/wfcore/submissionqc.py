@@ -34,6 +34,15 @@ def _xml_parts(path: Path) -> tuple[dict, object]:
     return xmls, ET.fromstring(xmls["word/document.xml"])
 
 
+def row_status(problems, na: bool = False, warn: bool = False) -> str:
+    """1.12.0 (A5): an advisory (warn-severity) result is a WARN row and never blocks."""
+    if na:
+        return "N/A"
+    if not problems:
+        return "PASS"
+    return "WARN" if warn else "FAIL"
+
+
 def measure(ctx) -> list[dict]:
     """Rows of {item, status PASS|FAIL|N/A, evidence}; deterministic for unchanged files."""
     from .checks import get, load_all
@@ -43,8 +52,8 @@ def measure(ctx) -> list[dict]:
     project = ctx.project
     rows: list[dict] = []
 
-    def row(item, problems, evidence, na=False):
-        rows.append({"item": item, "status": "N/A" if na else ("FAIL" if problems else "PASS"),
+    def row(item, problems, evidence, na=False, warn=False):
+        rows.append({"item": item, "status": row_status(problems, na, warn),
                      "evidence": ("; ".join(problems[:3]) if problems else evidence)})
     try:
         manifest = json.loads((project / MANIFEST_REL).read_text(encoding="utf-8"))
@@ -109,7 +118,8 @@ def measure(ctx) -> list[dict]:
         res = fn(type(ctx)(ctx.pipeline, ctx.state, project, ctx.stage, {"check": name}))
         row({"journal_limits_met": "Word counts, references and display items within typed caps",
              "title_page_reference_count": "Title-page reference count matches citations"}[name],
-            [] if res.ok else [res.detail], res.detail)
+            [] if res.ok else [res.detail], res.detail,
+            warn=(not res.ok and res.severity == "warn"))
     supp = ctx.psrc("07_manuscript/supplementary_methods.md").is_file()
     pdf_needed = bool(target) and supp and journalspec.si_format(target) == "pdf"
     pdfs = [i for i in items if str(i.get("role", "")).casefold() == "supplementary_pdf"]

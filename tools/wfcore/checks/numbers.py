@@ -264,6 +264,39 @@ def _offenders(text: str, floats, strings, allowed, stated=frozenset(),
     return bad
 
 
+def _read_cells(path, tries: int = 4, pause: float = 0.5):
+    """Numeric cells of one workbook; a PermissionError (Excel holding the file) is retried."""
+    import time
+    for attempt in range(tries):
+        try:
+            return xlsxlite.numeric_cell_values(path)
+        except PermissionError:
+            if attempt == tries - 1:
+                raise
+            time.sleep(pause)
+    return []
+
+
+DISPLAY_DICTIONARY = "01_protocol/display_dictionary.json"
+
+
+def footnote_constants(ctx: Ctx) -> list[str]:
+    """1.12.0 (A3): explanatory constants a table footnote states (e.g. 'per 1000 reports'),
+    registered in the display dictionary as footnote_constants [{value, reason}]. A constant
+    without a reason (>= 10 characters) is ignored."""
+    try:
+        data = json.loads(ctx.p(DISPLAY_DICTIONARY).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    out = []
+    for item in (data.get("footnote_constants") or []) if isinstance(data, dict) else []:
+        if isinstance(item, dict) and len(str(item.get("reason", "")).strip()) >= 10:
+            value = str(item.get("value", "")).strip()
+            if value:
+                out += [value, _plain(value)]
+    return out
+
+
 # ---------------------------------------------------------------------------
 # checks
 # ---------------------------------------------------------------------------
@@ -290,9 +323,19 @@ def numbers_have_provenance(ctx: Ctx) -> Result:
     explicit = _explicit_allowlist(ctx)
     if source == "tables":
         offenders = []
-        for p in ctx.glob("04_tables/main/*.xlsx") + ctx.glob("04_tables/supplementary/*.xlsx"):
+        allowed = set(allowed) | set(footnote_constants(ctx))
+        books = [p for p in ctx.glob("04_tables/main/*.xlsx") + ctx.glob("04_tables/supplementary/*.xlsx")
+                 if not p.name.startswith("~$")]  # 1.12.0 (A3): Office lock files are not tables
+        for p in books:
             try:
-                cells = xlsxlite.numeric_cell_values(p)
+                cells = _read_cells(p)
+            except OSError as exc:
+                # 1.12.0 (A3): a locked/unreadable workbook is an IO problem, not missing provenance.
+                return Result(False, "numbers_have_provenance",
+                              f"IO problem (not a provenance failure): cannot read {p.name}: "
+                              f"{type(exc).__name__}",
+                              ["Close the workbook in Excel (or any viewer holding it) and run the "
+                               "check again; nothing in the table needs to change."])
             except Exception as exc:  # noqa: BLE001 - report, do not crash the gate
                 return Result(False, "numbers_have_provenance", f"cannot read {p.name}: {exc}")
             for sheet, ref, val in cells:

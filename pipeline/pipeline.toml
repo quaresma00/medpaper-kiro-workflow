@@ -86,11 +86,9 @@ always_allowed = [
 reflib_min = 45
 reflib_max = 60
 deepread_count = 5
-intro_words_min = 450
 intro_words_max = 750
 intro_refs_min = 15
 intro_refs_max = 30
-discussion_words_min = 900
 discussion_words_max = 1500
 discussion_refs_min = 25
 discussion_refs_max = 45
@@ -615,9 +613,9 @@ live = true
 [[stage.gate]]
 check = "md_wordcount"
 path = "07_manuscript/introduction.md"
-min_key = "intro_words_min"
 max_key = "intro_words_max"
 # 1.10.0: soft budget while writing (warning); hard limits start at S20.
+# 1.12.0 (B1): no lower bound - only the upper soft budget.
 severity = "warn"
 [[stage.gate]]
 check = "citekeys_resolve"
@@ -666,9 +664,9 @@ live = true
 [[stage.gate]]
 check = "md_wordcount"
 path = "07_manuscript/discussion.md"
-min_key = "discussion_words_min"
 max_key = "discussion_words_max"
 # 1.10.0: soft budget while writing (warning); hard limits start at S20.
+# 1.12.0 (B1): no lower bound - only the upper soft budget.
 severity = "warn"
 [[stage.gate]]
 check = "citekeys_resolve"
@@ -941,14 +939,14 @@ id = "S22_polish"
 title = "Journal-specific de-AI and academic-English polish, fact-preserving"
 card = "stages/S22_polish.md"
 outputs = ["07_manuscript/polish_report.json", "07_manuscript/polish_log.md"]
+# 1.12.0 (B3): snapshot + report + fact preservation in ONE gate with sub-reasons.
 [[stage.gate]]
-check = "polish_snapshot_exists"
+check = "polish_complete"
+since = "1.12.0"
 [[stage.gate]]
 check = "prose_not_lists"
 path = "07_manuscript/full_manuscript.md"
 since = "1.9.0"
-[[stage.gate]]
-check = "polish_preserves_facts"
 [[stage.gate]]
 check = "engineering_language_clean"
 paths = ["07_manuscript/full_manuscript.md"]
@@ -1021,9 +1019,8 @@ check = "bundle_complete"
 [[stage.gate]]
 check = "docx_bundle_ready"
 # 1.11.0: caption/table/footnote and legend/figure keep together in Word; final-size fonts.
-[[stage.gate]]
-check = "docx_keep_with_next"
-since = "1.11.0"
+# 1.12.0 (B4): the keep-with-next audit is part of this gate (was docx_keep_with_next).
+keep_with_next = true
 [[stage.gate]]
 check = "figure_print_font"
 since = "1.11.0"

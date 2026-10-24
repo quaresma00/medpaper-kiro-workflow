@@ -99,9 +99,48 @@ def polish_preserves_facts(ctx: Ctx) -> Result:
     )
 
 
+@check("polish_complete")
+def polish_complete(ctx: Ctx) -> Result:
+    """1.12.0 (B3): one polish gate. Sub-reasons: snapshot taken before editing, lint report
+    present, every number/citekey/display reference preserved. Replaces three gate lines
+    (polish_snapshot_exists, polish_report, polish_preserves_facts) that always failed
+    together while polishing was in progress."""
+    parts: list[str] = []
+    hints: list[str] = []
+    snap = polish_snapshot_exists(ctx)
+    if not snap.ok:
+        parts.append(f"snapshot: {snap.detail}")
+        hints += snap.hints[:1]
+    rep = _report(ctx)
+    if isinstance(rep, Result):
+        parts.append(f"report: {rep.detail}")
+        hints += rep.hints[:1]
+    if snap.ok:  # without a snapshot there is nothing to compare against
+        facts = polish_preserves_facts(ctx)
+        if not facts.ok:
+            parts.append(f"facts: {facts.detail}")
+            hints += facts.hints
+    if parts:
+        return Result(False, "polish_complete", "; ".join(parts), hints)
+    return Result(True, "polish_complete",
+                  f"snapshot ({snap.detail}), lint report present, every number, citekey and "
+                  "display reference survived the polish")
+
+
+def _report_pending(ctx: Ctx):
+    """The lint report, or a pending pass when it is missing: polish_complete reports that
+    once (1.12.0 B3) instead of every report-reading gate failing on the same file."""
+    rep = _report(ctx)
+    if isinstance(rep, Result) and "missing" in rep.detail:
+        return None
+    return rep
+
+
 @check("ai_tells_clean")
 def ai_tells_clean(ctx: Ctx) -> Result:
-    rep = _report(ctx)
+    rep = _report_pending(ctx)
+    if rep is None:
+        return Result(True, "ai_tells_clean", "pending: the lint report is missing (see polish_complete)")
     if isinstance(rep, Result):
         return rep
     tier_a = [x for x in rep.get("ai_tells", []) if x.get("tier") == "A"]
@@ -132,7 +171,9 @@ def ai_tells_clean(ctx: Ctx) -> Result:
 
 @check("style_consistent")
 def style_consistent(ctx: Ctx) -> Result:
-    rep = _report(ctx)
+    rep = _report_pending(ctx)
+    if rep is None:
+        return Result(True, "style_consistent", "pending: the lint report is missing (see polish_complete)")
     if isinstance(rep, Result):
         return rep
     blocking = [x for x in rep.get("style", []) if x.get("severity") == "blocking"]

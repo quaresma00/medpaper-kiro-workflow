@@ -592,6 +592,14 @@ scale_fill_medpaper <- function(name = "okabe_ito", ...) scale_fill_manual(value
       lo <- if (flipped) dat$xmin else dat$ymin; hi <- if (flipped) dat$xmax else dat$ymax
       origin <- ifelse(abs(lo) <= abs(hi), lo, hi)
       rng <- max(abs(c(lo, hi)), 1)
+      # 1.12.0 (A6): a stacked segment starts where another segment of the same bar ends;
+      # only the segments that start the stack must sit on zero.
+      key <- paste(dat$PANEL, if (flipped) dat$y else dat$x)
+      cont <- vapply(seq_along(origin), function(j) {
+        k <- setdiff(which(key == key[j]), j)
+        length(k) > 0 && isTRUE(any(abs(c(lo[k], hi[k]) - origin[j]) <= 1e-9 * rng, na.rm = TRUE))
+      }, logical(1))
+      origin <- if (any(!cont)) origin[!cont] else origin[which.min(abs(origin))]
       for (pp in seq_along(b$layout$panel_params)) {
         r <- if (flipped) b$layout$panel_params[[pp]]$x.range else b$layout$panel_params[[pp]]$y.range
         if (is.null(r)) next
@@ -942,6 +950,11 @@ save_medpaper <- function(plot, stem, width = "single", height_mm = NULL, dpi = 
   dir.create(qc_dir, recursive = TRUE, showWarnings = FALSE)
   sidecar <- file.path(qc_dir, paste0(name, ".artist.json"))
   if (.mf_in_engine(sidecar)) stop("refusing to write a sidecar inside the engine", call. = FALSE)
+  # 1.12.0 (A2): render-in-progress marker, removed once the sidecar matches the new bytes;
+  # qc.py waits for it instead of comparing new outputs with the previous receipt.
+  marker <- file.path(qc_dir, paste0(name, ".rendering"))
+  writeLines(format(Sys.time(), "%Y-%m-%dT%H:%M:%S"), marker)
+  on.exit(unlink(marker), add = TRUE)
 
   # Provenance: which script drew this, from which results, into which bytes. qc.py refuses
   # the figure once any of them changes, so a stale render cannot reach the package.
@@ -966,6 +979,7 @@ save_medpaper <- function(plot, stem, width = "single", height_mm = NULL, dpi = 
             "tick_label_collisions", "interior_voids", "elements", "figure_text",
             "script", "script_sha256", "source_hashes", "render_hashes", "population")
   .mf_write_json(audit[keys], sidecar)
+  unlink(marker)
 
   px <- c(floor(w_mm / 25.4 * dpi), floor(h_mm / 25.4 * dpi))
   cat(sprintf("wrote %s.png%s%s  %sx%s mm @ %d dpi\n", name, if (!is.null(tif)) paste0(" + ", name, ".tiff") else "",

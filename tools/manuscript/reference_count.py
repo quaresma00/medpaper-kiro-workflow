@@ -56,6 +56,20 @@ def main() -> int:
         help="with sync, add 'Number of references' when the title page lacks it; use only if required")
     args = parser.parse_args()
     project = wfpaths.paper_from_cli(args.project)
+    if args.command == "show":
+        # 1.12.0 (C5): before S17/S21 the inputs simply do not exist yet - report, not crash.
+        manuscript, title_page = paths(project)
+        actual = (actual_reference_count(manuscript.read_text(encoding="utf-8", errors="replace"))
+                  if manuscript.is_file() else None)
+        print("actual distinct citations: "
+              + (str(actual) if actual is not None else "not yet available (no full_manuscript.md; S17)"))
+        if not title_page.is_file():
+            print("title-page field: not yet available (title_page.md is written at S21)")
+            return 0
+        values = declared_reference_counts(title_page.read_text(encoding="utf-8", errors="replace"))
+        print("title-page field: " + (str(values[0]) if len(values) == 1 else
+                                      "absent" if not values else "duplicate"))
+        return 0 if len(values) <= 1 else 2
     try:
         _, title_page, _, title_text, actual = load(project)
     except (FileNotFoundError, OSError) as exc:
@@ -63,12 +77,6 @@ def main() -> int:
         return 2
 
     values = declared_reference_counts(title_text)
-    if args.command == "show":
-        print(f"actual distinct citations: {actual}")
-        print("title-page field: " + (str(values[0]) if len(values) == 1 else
-                                      "absent" if not values else "duplicate"))
-        return 0 if len(values) <= 1 else 2
-
     if args.command == "check":
         if len(values) > 1:
             print("reference count: title page contains more than one count field", file=sys.stderr)

@@ -25,10 +25,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--edit", action="append", default=[], help="one manual edit (repeatable)")
     ap.add_argument("--words", default="", help="the author's authorisation, verbatim")
     ap.add_argument("--project", type=Path, default=None)
-    args = ap.parse_args(argv)
+    from wfcore import argtext  # 1.12.0 (C1): --words-file/--words-b64, mojibake repaired
+    args = ap.parse_args(argtext.fix_argv(sys.argv[1:] if argv is None else argv))
     project = paths.paper_from_cli(args.project)
     try:
         if args.command == "record":
+            argtext.verify(args.words, "--words")
             data = finalcopy.record(project, args.edit, args.words)
             print(f"recorded {len(data['edits'])} manual edit(s); now run: final_copy.py check")
             return 0

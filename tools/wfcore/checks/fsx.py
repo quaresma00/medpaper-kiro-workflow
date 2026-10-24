@@ -68,6 +68,12 @@ def no_future_artifacts(ctx: Ctx) -> Result:
 @check("single_section_written")
 def single_section_written(ctx: Ctx) -> Result:
     """A manuscript stage may add only its own declared manuscript file(s)."""
+    # 1.12.0 (A1): judged only for the stage being advanced. Re-checking a finished stage (or
+    # any stage other than the active one) sees later stages' legitimate files and used to
+    # fail for that reason alone.
+    if ctx.stage.id != ctx.state.current or ctx.state.is_done(ctx.stage.id):
+        return Result(True, "single_section_written",
+                      f"{ctx.stage.id} is not the active stage; judged only when it is advanced")
     manuscript_stages = [
         s for s in ctx.pipeline.stages
         if any(o.startswith("07_manuscript/") and o.endswith(".md") for o in s.outputs)
@@ -122,7 +128,10 @@ def temp_clean(ctx: Ctx) -> Result:
     tmp = ctx.project / ctx.pipeline.layout.get("temp_dir", "temp")
     if not tmp.exists():
         return Result(True, "temp_clean", "no temp dir")
-    leftovers = [p for p in tmp.rglob("*") if p.is_file() and p.name != ".gitkeep"]
+    # 1.12.0 (C4): temp/logs/ is a log directory (--log, reproduce --log, --wait), not scratch.
+    logs = tmp / "logs"
+    leftovers = [p for p in tmp.rglob("*") if p.is_file() and p.name != ".gitkeep"
+                 and logs not in p.parents]
     if leftovers:
         names = ", ".join(p.name for p in leftovers[:8])
         return Result(

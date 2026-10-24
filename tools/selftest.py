@@ -1764,10 +1764,12 @@ def run_visual_deferral(proj: Path) -> None:
     st.data.get("decisions", {}).pop("figures_visually_confirmed", None)
     st.save()
     r = run("visual_confirmation", "S11_figures", "deferred", name="figures_visually_confirmed")
-    record("unrecorded visual decision still blocks S11",
-           not r.ok and "has not been recorded" in r.detail, r.detail)
-    record("the block explains that DEFER is available in deferred mode",
-           any("DEFER" in h for h in r.hints), "; ".join(r.hints)[:110])
+    record("1.12.0 B2: deferred mode needs no recorded DEFER - an unrecorded decision passes S11 "
+           "as deferred and outstanding", r.ok and "outstanding" in r.detail, r.detail)
+    r = run("visual_confirmation", "S11_figures", "inline", name="figures_visually_confirmed")
+    record("inline mode: an unrecorded visual decision still blocks S11 and offers deferral",
+           not r.ok and "has not been recorded" in r.detail
+           and any("deferred" in h for h in r.hints), "; ".join(r.hints)[:110])
 
     why = ("deterministic QC green for 1 figure: dpi, margins, fonts, overlap, glyphs and "
            "archetype elements all pass; judgement of colour and clutter deferred to S23")
@@ -4908,12 +4910,13 @@ def run_v160(tmp: Path) -> None:
                   {"check": "md_sections", "path": "notes.md", "headings": ["A", "B"]},
                   {"check": "reference_provenance", "live": True}]
     res = gates.run_stage(pipe, gst, G, stage)
-    record("a missing output stops the gate; dependents are reported pending, not run",
-           [r.check for r in res] == ["outputs_exist", "dependent_checks_pending"]
-           and res[-1].blocking, str([r.check for r in res]))
+    record("a missing output stops the gate; ONE 'pending outputs' line, dependents not run",
+           [r.check for r in res] == ["outputs_pending"] and res[-1].blocking
+           and "pending outputs" in res[-1].detail and "2 remaining" in res[-1].detail,
+           str([(r.check, r.detail) for r in res]))
     from wfcore import cli
     record("pending dependents cannot be forced past",
-           "dependent_checks_pending" in cli.NON_OVERRIDABLE_GATES)
+           "outputs_pending" in cli.NON_OVERRIDABLE_GATES)
     stage.gate = [{"check": "md_sections", "path": "notes.md", "headings": ["A", "B"]}]
     calls = {"n": 0}
     real = checks_mod.REGISTRY["md_sections"]
@@ -5825,6 +5828,8 @@ def main() -> int:
         selftest_v1100.run(tmp / "v1100_root", record, section)
         import selftest_v1110
         selftest_v1110.run(tmp / "v1110_root", record, section)
+        import selftest_v1120
+        selftest_v1120.run(tmp / "v1120_root", record, section)
         run_new_wiring()
         section("isolation")
         record("selftest did not touch the real papers root or user home",

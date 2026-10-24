@@ -61,7 +61,7 @@ def run_stage(pipeline, state, project: Path, stage, *, reuse: bool = False,
     if reuse or record:
         from .gatecache import Receipts
         receipts = Receipts(project, pipeline, state)
-    for spec in stage.gate:
+    for idx, spec in enumerate(stage.gate):
         spec = _resolve_manuscript_paths(spec, project)
         name = spec.get("check")
         fn = checks.get(name)
@@ -89,14 +89,16 @@ def run_stage(pipeline, state, project: Path, stage, *, reuse: bool = False,
             res = Result(False, name, f"check raised {type(exc).__name__}: {exc}")
         if "severity" in spec and not res.ok:
             res.severity = spec["severity"]
-        results.append(res)
         if res.blocking and name in STOP_ON_FAIL:
+            # 1.12.0 (B3): ONE status line instead of outputs_exist + dependent_checks_pending.
+            # Not forceable: the remaining checks were not run, so their verdict is unknown.
+            remaining = len(stage.gate) - idx - 1
             results.append(Result(
-                False, "dependent_checks_pending",
-                "required outputs are missing; the remaining checks of this gate were not run "
-                "and cannot be forced",
-                ["Create the missing outputs listed above, then run `wf check` again."]))
+                False, "outputs_pending",
+                f"pending outputs - {res.detail}; {remaining} remaining check(s) not run yet",
+                ["Create the missing outputs, then run `wf check` again."]))
             break
+        results.append(res)
     if receipts:
         receipts.save()
     return results

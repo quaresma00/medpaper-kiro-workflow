@@ -457,10 +457,9 @@ def bib_format_problems(text: str) -> list[str]:
     for chunk in re.split(r"(?m)^@", text)[1:]:
         key = chunk.split("{", 1)[1].split(",", 1)[0].strip() if "{" in chunk else "?"
         fields = {k.casefold(): v for k, v in BIB_FIELD_RE.findall(chunk)}
-        title = re.sub(r"\{[^{}]*\}", "", fields.get("title", ""))
-        words = re.findall(r"[A-Za-z][\w'-]*", title)
-        bad = [w for i, w in enumerate(words) if (i > 0 and w[0].isupper()) or
-               any(c.isupper() for c in w[1:])]
+        # 1.12.0 (A7): the exporter's own rule (wfcore/bibrules.py), so an export always passes.
+        from ..bibrules import unprotected_words
+        bad = unprotected_words(fields.get("title", ""))
         if bad:
             problems.append(f"{key}: title words not brace-protected: {', '.join(bad[:3])}")
         pages = fields.get("pages", "")

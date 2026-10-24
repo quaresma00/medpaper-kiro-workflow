@@ -331,8 +331,9 @@ def _log_target(raw: str, project: str | None) -> Path:
         return log
     if paths.within(log, paper) and not any(paths.within(log, paper / d)
                                             for d in ("temp", ".wf", ".kiro")):
-        raise ValueError(f"--log inside the paper must be under temp/ (the run would otherwise "
-                         f"see the paper change): {log}")
+        raise ValueError(f"--log inside the paper must be under .wf/logs/ (official log dir, "
+                         f"1.12.0) or temp/logs/ (the run would otherwise see the paper "
+                         f"change): {log}")
     return log
 
 

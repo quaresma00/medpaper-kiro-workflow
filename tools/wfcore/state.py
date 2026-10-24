@@ -108,8 +108,13 @@ class State:
                 "current_before": current, "current_after": self.data["current"],
             })
             self.data["pipeline_version"] = pipeline_version
+            # 1.12.0 (C2): pipeline_version records the engine that last opened this state; the
+            # paper's gate set moves only with `wf migrate --yes` (engine_pin). The event says
+            # so instead of implying the paper moved.
             self.event("pipeline_migration",
-                       f"{old_version} -> {pipeline_version}; current {current} -> {self.data['current']}")
+                       f"engine {old_version} -> {pipeline_version} opened this paper; paper stays "
+                       f"pinned to {self.data.get('engine_pin')} (`wf migrate --yes` adopts the new "
+                       f"gate set); current {current} -> {self.data['current']}")
             self._note_legacy_revision()
             self._note_on_demand_checklist(old_version)
             self._note_v180(old_version)
@@ -182,6 +187,9 @@ class State:
                  if e.get("kind") in ("requirements_added", "requirements_changed",
                                       "requirements_relaxed")]
         self.data["engine_pin"] = engine_version
+        # 1.12.0 (C2): an explicit migration also brings the recorded engine version along, so
+        # pin and pipeline_version agree after `wf migrate --yes`.
+        self.data["pipeline_version"] = engine_version
         self.data.setdefault("pin_migrations", []).append(
             {"at": _now(), "from": old, "to": engine_version})
         self.event("engine_pin_migrated", f"{old} -> {engine_version}")
@@ -369,6 +377,9 @@ class State:
             self.event("paper_override_skip", f"{skipped_sid}: {reason}")
         if next_sid:
             nxt = self.stage_info(next_sid)
+            if nxt.get("completed_at"):
+                # 1.12.0 (C3): re-entering a stage that finished before is a revisit.
+                nxt["loops"] = nxt.get("loops", 0) + 1
             nxt["status"] = "active"
             nxt.setdefault("started_at", _now())
             self.data["current"] = next_sid

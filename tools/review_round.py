@@ -56,7 +56,9 @@ def _main() -> int:
     ap.add_argument("--words", default="")
     ap.add_argument("--report", type=Path, default=None,
                     help="the reviewer's saved full report; every numbered finding must be closed")
-    args = ap.parse_args()
+    from wfcore import argtext
+    # 1.12.0 (C1): --words-file <utf-8 file> / --words-b64, and mis-decoded text repaired.
+    args = ap.parse_args(argtext.fix_argv(sys.argv[1:]))
     project = wfpaths.paper_from_cli(args.project)
     state = State(project, ".wf").load()
     scope = args.scope or ("package" if state.current >= "S24" else "manuscript")
@@ -64,14 +66,17 @@ def _main() -> int:
         if args.command == "start":
             rnd = rr.start(project, scope, state.current, delta=args.delta)
             bundle = rr.write_bundle(project, rnd)
-            print(f"review round {rnd['id']} ({rnd['mode']}) opened, {len(rnd['reviewed'])} file(s).")
+            print(f"review round {rnd['id']} ({rnd['mode']}) opened, {len(rnd['reviewed'])} file(s)."
+                  + (f" Linked to {rnd['linked_to']} (awaiting the user)." if rnd.get("linked_to") else ""))
             print(f"Pass the medpaper-reviewer subagent this ONE path (it reads everything itself):\n"
                   f"  {bundle / 'MANIFEST.md'}")
             print("Brief to send unchanged - add nothing about known deviations, earlier "
                   "conclusions or what you expect:")
             print("  " + rr.BRIEF.format(rid=rnd["id"], scope=scope, mode=rnd["mode"],
                                           bundle=bundle).replace("\n", "\n  "))
-            print("Save its full report to a file and close with --report <file>.")
+            print(f"The reviewer writes its full report to {bundle / 'report.md'} (its only "
+                  "writable file); then close with --report (defaults to that file). Do not "
+                  "paraphrase the findings.")
             print("Bundle contents (current files):")
             for rel in rnd["reviewed"]:
                 print(f"  {rel}")
@@ -80,6 +85,11 @@ def _main() -> int:
                 print(readerreview.evidence_block(project, delta=args.delta))
             return 0
         if args.command == "close":
+            if args.report is None:  # 1.12.0 (E2): the reviewer's own file in the bundle
+                last = rr.latest(project, scope)
+                default = project / rr.BUNDLE_DIR / str((last or {}).get("id", "")) / "report.md"
+                if last and default.is_file():
+                    args.report = default
             rnd = rr.close(project, scope, _counts(args.findings),
                            [{"file": f, "summary": s} for f, s in args.change],
                            [{"item": i, "reason": r} for i, r in args.kept],
@@ -118,7 +128,9 @@ def _main() -> int:
             out = rr.export(project, scope)
             print(f"read-only review copy (user request only): {out}")
             return 0
-        print(json.dumps(rr.load(project)[scope][-3:], indent=2, ensure_ascii=False)[:4000])
+        # 1.12.0 (C6): always valid JSON - a compact per-round summary (never a truncated
+        # dump), ASCII-escaped so no console code page or control character can break it.
+        print(json.dumps(rr.status_summary(project, scope), indent=1, ensure_ascii=True))
         return 0
     except (OSError, ValueError, KeyError) as exc:
         print(f"review round error: {exc}", file=sys.stderr)

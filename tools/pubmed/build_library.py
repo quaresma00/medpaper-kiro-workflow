@@ -127,14 +127,8 @@ def _bib_escape(s: str) -> str:
     return "".join(out)
 
 
-COLON_COMMON = {
-    "a", "an", "the", "results", "findings", "evidence", "lessons", "insights", "implications",
-    "analysis", "study", "review", "protocol", "rationale", "design", "update", "report",
-    "experience", "outcomes", "comparison", "assessment", "evaluation", "association", "role",
-    "impact", "effect", "effects", "risk", "trends", "challenges", "current", "new", "is", "does",
-    "do", "are", "can", "should", "what", "when", "how", "why", "who", "where", "from", "toward",
-    "towards", "beyond", "time", "more", "less", "no", "not", "one", "two", "three",
-}
+from wfcore.bibrules import COLON_COMMON  # noqa: E402,F401 - 1.12.0 (A7): one shared rule
+from wfcore.bibrules import protect_title as _protect_title  # noqa: E402
 
 
 def protect_title(title: str) -> str:
@@ -142,28 +136,10 @@ def protect_title(title: str) -> str:
 
     PubMed titles are sentence case, so any capital after the first word marks a proper noun
     (da {Vinci}, {Food} and {Drug} {Administration}) and any internal capital an acronym
-    ({MAUDE}, {COVID}-19, {mRNA}).
+    ({MAUDE}, {COVID}-19, {mRNA}). An ordinary word after a colon stays unbraced (1.9.0 #14).
+    The rule lives in wfcore/bibrules.py, which bib_format_clean uses too (1.12.0).
     """
-    out = []
-    after_colon = False
-    for i, tok in enumerate(re.split(r"(\s+)", title)):
-        core = tok.strip("()[]:;,.\"'")
-        if tok.isspace() or not core or "{" in tok:
-            out.append(tok)
-            continue
-        upper_inside = any(ch.isupper() for ch in core[1:])
-        # 1.9.0 (#14): the capital PubMed puts after a colon is style, not a proper noun; leave
-        # an ordinary word unbraced so the journal's CSL decides its case consistently.
-        colon_word = after_colon and core.casefold() in COLON_COMMON
-        after_colon = tok.rstrip().endswith(":")
-        if colon_word and not upper_inside:
-            out.append(tok)
-        elif (i > 0 and core[:1].isupper()) or upper_inside:
-            start = tok.find(core)
-            out.append(tok[:start] + "{" + core + "}" + tok[start + len(core):])
-        else:
-            out.append(tok)
-    return "".join(out)
+    return _protect_title(title)
 
 
 def expand_pages(pages: str) -> str:

@@ -16,6 +16,15 @@ from pathlib import Path
 
 FAIL_RE = re.compile(r"\b(FAIL|BLOCK\w*|RED|ERROR|error|NOT REPRODUCED|refused|STOPPED|Traceback)\b")
 MAX_FAIL_LINES = 20
+# 1.12.0 (C8): agent hosts kill a command that is silent for ~60 s; beat well inside that.
+HEARTBEAT_SECONDS = 25
+
+
+def _heartbeat() -> float:
+    try:
+        return min(float(os.environ.get("MEDPAPER_HEARTBEAT", HEARTBEAT_SECONDS)), 30.0)
+    except ValueError:
+        return float(HEARTBEAT_SECONDS)
 
 
 def summarize(text: str) -> tuple[list[str], str]:
@@ -26,7 +35,8 @@ def summarize(text: str) -> tuple[list[str], str]:
 
 
 def run_quiet(cmd: list[str], log: Path, label: str = "command", max_seconds: int = 3600,
-              heartbeat: int = 60) -> int:
+              heartbeat: float | None = None) -> int:
+    heartbeat = min(float(heartbeat), 30.0) if heartbeat else _heartbeat()
     log = Path(log)
     log.parent.mkdir(parents=True, exist_ok=True)
     cmd = [c for c in cmd if c not in ("--wait",)]
@@ -37,10 +47,11 @@ def run_quiet(cmd: list[str], log: Path, label: str = "command", max_seconds: in
     start = time.monotonic()
     with log.open("w", encoding="utf-8") as fh:
         proc = subprocess.Popen(cmd, stdout=fh, stderr=subprocess.STDOUT, env=env)
+        print(f"[{label}] started (heartbeat every {heartbeat:g} s; log: {log})", flush=True)
         nxt = heartbeat
         while True:
             try:
-                rc = proc.wait(timeout=1)
+                rc = proc.wait(timeout=min(1.0, heartbeat))
                 break
             except subprocess.TimeoutExpired:
                 pass

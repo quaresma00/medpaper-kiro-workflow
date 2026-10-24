@@ -112,6 +112,26 @@ def write_text_copies(project: Path, rels) -> list[str]:
     return written
 
 
+def prior_coverage(project: Path) -> dict[str, set[str]]:
+    """Paper-relative path -> every hash an earlier review saw (coverage record + rounds)."""
+    out: dict[str, set[str]] = {}
+    for rel, digest in _coverage(project).items():
+        out.setdefault(rel, set()).add(digest.upper())
+    try:
+        from .reviewrounds import load
+        rounds = load(project).get("manuscript", [])
+    except Exception:  # noqa: BLE001 - unreadable rounds simply add no coverage
+        rounds = []
+    for rnd in rounds:
+        if not rnd.get("closed_at"):
+            continue
+        for rel in rnd.get("reviewed", []):
+            for src in (rnd.get("inputs") or {}, rnd.get("after") or {}):
+                if src.get(rel):
+                    out.setdefault(rel, set()).add(str(src[rel]).upper())
+    return out
+
+
 def record_coverage(project: Path) -> None:
     (project / COVERAGE_REL).parent.mkdir(parents=True, exist_ok=True)
     (project / COVERAGE_REL).write_text(json.dumps(reader_inputs(project), indent=2) + "\n",
@@ -144,23 +164,23 @@ def verify(project: Path) -> list[str]:
             return [f"cannot inventory the review inputs: {exc}"]
         claimed = blocks[0] if isinstance(blocks[0], dict) else {}
         claimed = {str(k): str(v).upper() for k, v in claimed.items()}
-        if delta:
-            # Unchanged files keep the coverage of the last passing review (same hash).
-            covered = _coverage(project)
-            if not covered:
-                problems.append("delta review needs an earlier passing full review on record")
-            for rel, digest in covered.items():
-                if rel not in claimed and current.get(rel, "").upper() == digest:
-                    claimed[rel] = digest
-            missed = sorted(set(delta_inputs(project)) - set(blocks[0]))
-            if missed:
-                problems.append("delta review skipped changed/dependent file(s): " + ", ".join(missed[:6]))
-        missing = sorted(set(current) - set(claimed))
-        changed = sorted(k for k in current if k in claimed and claimed[k] != current[k])
-        if missing:
-            problems.append("reviewer was not given: " + ", ".join(missing[:6]))
+        # 1.12.0 (A4): coverage is always incremental. A file is covered when ANY earlier
+        # passing review or closed manuscript review round saw exactly its current bytes;
+        # only files whose hash changed since then need a (delta) review.
+        known = prior_coverage(project)
+        if delta and not known:
+            problems.append("delta review needs an earlier passing full review on record")
+        for rel, digest in claimed.items():
+            known.setdefault(rel, set()).add(digest)
+        current_u = {k: v.upper() for k, v in current.items()}
+        uncovered = sorted(k for k, v in current_u.items() if v not in known.get(k, set()))
+        never = [k for k in uncovered if k not in known]
+        changed = [k for k in uncovered if k in known]
+        if never:
+            problems.append("reviewer was not given: " + ", ".join(never[:6]))
         if changed:
-            problems.append("changed since the review: " + ", ".join(changed[:6]))
+            problems.append("changed since the review (re-review only these: "
+                            "review_round.py start --delta): " + ", ".join(changed[:6]))
     for heading in SECTIONS:
         match = re.search(r"(?mi)^#{1,3}\s+" + re.escape(heading) + r"\s*$\n(.*?)(?=^#{1,3}\s|\Z)",
                           report, re.S | re.M)

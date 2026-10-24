@@ -459,7 +459,8 @@ def _add_page_numbers(doc, font: str, size: float) -> None:
 
 
 def normalize_docx(path: Path, style: dict, kind: str, *, legend_bold: bool = True,
-                   reference_separator: str = "space", blind: bool = False) -> None:
+                   reference_separator: str = "space", blind: bool = False,
+                   line_numbers: str = "none") -> None:
     doc = Document(path)
     if blind:  # 1.9.0 (#13): no author identity in the review-facing file's metadata
         cp = doc.core_properties
@@ -555,12 +556,35 @@ def normalize_docx(path: Path, style: dict, kind: str, *, legend_bold: bool = Tr
         else:
             section.page_width, section.page_height = short, long_
             section.orientation = WD_ORIENT.PORTRAIT
+        _set_line_numbers(section._sectPr, line_numbers if kind == "manuscript" else "none")
 
     doc.save(path)
     _sanitize_package_xml(path, font)
     # 1.9.0: identical source -> identical bytes (fixed zip dates and docProps timestamps);
     # blinded files also lose creator/lastModifiedBy/company.
     determinism.normalize(path, blind=blind)
+
+
+# Schema order of the w:sectPr children that may follow w:lnNumType (ECMA-376 CT_SectPr).
+_AFTER_LNNUM = ("pgNumType", "cols", "formProt", "vAlign", "noEndnote", "titlePg",
+                "textDirection", "bidi", "rtlGutter", "docGrid", "printerSettings", "sectPrChange")
+
+
+def _set_line_numbers(sect_pr, mode: str) -> None:
+    """1.12.0 (C7): w:lnNumType per section from target_journal.json `line_numbers`."""
+    from docx.oxml import OxmlElement
+    for old in sect_pr.findall(qn("w:lnNumType")):
+        sect_pr.remove(old)
+    if mode not in ("continuous", "per_page"):
+        return
+    ln = OxmlElement("w:lnNumType")
+    ln.set(qn("w:countBy"), "1")
+    ln.set(qn("w:restart"), "continuous" if mode == "continuous" else "newPage")
+    anchor = next((c for c in sect_pr if c.tag in {qn(f"w:{t}") for t in _AFTER_LNNUM}), None)
+    if anchor is not None:
+        anchor.addprevious(ln)
+    else:
+        sect_pr.append(ln)
 
 
 def _sanitize_package_xml(path: Path, font: str) -> None:
@@ -1314,7 +1338,8 @@ def build(args) -> int:
                  and args.kind not in ("title_page", "cover_letter"))
         normalize_docx(args.output, style, args.kind,
                        legend_bold=bool(spec["legend_style"].get("bold", True)),
-                       reference_separator=spec["reference_separator"], blind=blind)
+                       reference_separator=spec["reference_separator"], blind=blind,
+                       line_numbers=spec.get("line_numbers", "none"))
         problems = audit_docx(args.output, style, args.kind,
                               planned_figure_ids() if args.kind == "manuscript" else None,
                               figure_legend_cap(), spec)

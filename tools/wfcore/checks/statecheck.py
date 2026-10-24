@@ -24,6 +24,26 @@ def _visual_mode(ctx: Ctx) -> str:
     return mode if mode in VISUAL_MODES else "inline"
 
 
+def parked_visual(pipeline, state, mode: str) -> list[tuple[str, str, bool]]:
+    """Outstanding visual looks: (decision, stage, explicit DEFER?).
+
+    Explicit: a recorded DEFER. Implicit (1.12.0 B2): in deferred mode a visual decision
+    whose rendering stage was completed without recording anything."""
+    out: list[tuple[str, str, bool]] = []
+    decisions = state.data.get("decisions") or {}
+    for name, rec in sorted(decisions.items()):
+        if str(rec.get("value", "")).strip() == DEFER:
+            out.append((name, str(rec.get("stage", "?")), True))
+    if mode == "deferred":
+        for st in getattr(pipeline, "stages", []):
+            for g in st.gate:
+                name = g.get("check") == "visual_confirmation" and g.get("name")
+                if (name and name not in decisions and state.status_of(st.id) == "done"
+                        and all(n != name for n, _, _ in out)):
+                    out.append((name, st.id, False))
+    return out
+
+
 @check("decision_recorded")
 def decision_recorded(ctx: Ctx) -> Result:
     name = ctx.spec["name"]
@@ -72,6 +92,12 @@ def visual_confirmation(ctx: Ctx) -> Result:
     deferrable = mode == "deferred"
     rec = ctx.state.decision(name)
 
+    if not rec and deferrable:
+        # 1.12.0 (B2): deferral is the default and needs no recorded decision. The look stays
+        # owed: visual_debts_cleared (S23, non-overridable) counts this unrecorded decision.
+        return Result(True, "visual_confirmation",
+                      f"{name}: {artifact} look deferred to the S23 consolidated pass (default; "
+                      "no decision needed - outstanding until S23)")
     if not rec:
         hints = [f'.venv/Scripts/python.exe tools/wf.py decide {name} YES --why "<per item: what you saw>"']
         if deferrable:
@@ -136,9 +162,9 @@ def visual_debts_cleared(ctx: Ctx) -> Result:
     """
     outstanding: list[str] = []
 
-    for name, rec in sorted((ctx.state.data.get("decisions") or {}).items()):
-        if str(rec.get("value", "")).strip() == DEFER:
-            outstanding.append(f"decision {name} is still {DEFER} (parked at {rec.get('stage', '?')})")
+    for name, where, explicit in parked_visual(ctx.pipeline, ctx.state, _visual_mode(ctx)):
+        outstanding.append(f"decision {name} is still {DEFER} (parked at {where})" if explicit
+                           else f"decision {name} not recorded yet (look deferred by default at {where})")
 
     unseen: list[str] = []
     if ctx.p(QC_REPORT).exists():

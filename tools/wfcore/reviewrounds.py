@@ -154,8 +154,14 @@ def start(project: Path, scope: str, stage: str, delta: bool = False) -> dict:
     rounds = data[scope]
     if rounds and not rounds[-1].get("closed_at"):
         raise ValueError(f"round {rounds[-1]['id']} is still open; close it first")
+    linked = None
     if rounds and rounds[-1].get("user_decision") is None:
-        raise ValueError(f"round {rounds[-1]['id']} awaits the user's answer (decide)")
+        # 1.12.0 (C6): a delta/evidence round may start while the previous one awaits the
+        # user; it is linked to that round, so no review ever happens outside review_round.
+        if not delta:
+            raise ValueError(f"round {rounds[-1]['id']} awaits the user's answer (decide); "
+                             "a delta/evidence round may start now with --delta")
+        linked = rounds[-1]["id"]
     current = inputs(project, scope)
     prev = rounds[-1] if rounds else None
     if delta and prev:
@@ -177,6 +183,9 @@ def start(project: Path, scope: str, stage: str, delta: bool = False) -> dict:
            "user_decision": None,
            # 1.11.0 (#1f): the round closes against the reviewer's saved, numbered report.
            "protocol": PROTOCOL}
+    if linked:
+        rnd["linked_to"] = linked
+        rounds[-1]["superseded_by"] = rid
     rounds.append(rnd)
     _save(project, data)
     return rnd
@@ -332,6 +341,8 @@ def decide(project: Path, scope: str, answer: str, words: str) -> dict:
     rnd = data[scope][-1] if data[scope] else None
     if not rnd or not rnd.get("closed_at"):
         raise ValueError("close the round (report to the user) before recording the answer")
+    from .argtext import verify as _verify_text
+    _verify_text(words, "the user's words")  # 1.12.0 (C1): no mojibake ever stored
     if answer == DONE:
         if not is_confirmation(words):
             raise ValueError(f"not a confirmation: ask the user to state exactly "
@@ -349,8 +360,32 @@ def decide(project: Path, scope: str, answer: str, words: str) -> dict:
         rnd["confirmed_version"] = version_id(current)
     rnd.update(user_decision=answer, user_words=words.strip(), decided_at=_now())
     _save(project, data)
+    stored = load(project)[scope][-1].get("user_words", "")
+    if stored != words.strip():  # read back what was written
+        raise ValueError("the stored user words differ from the input; re-record with --words-file")
     _write_summary(project, scope, data[scope])
     return rnd
+
+
+def status_summary(project: Path, scope: str) -> dict:
+    """Compact, always-valid status for `review_round.py status` (1.12.0 C6)."""
+    rounds = load(project)[scope]
+
+    def short(text, n=160):
+        text = " ".join(str(text or "").split())
+        return text if len(text) <= n else text[:n - 3] + "..."
+    out = []
+    for r in rounds[-3:]:
+        out.append({
+            "id": r.get("id"), "mode": r.get("mode"), "stage": r.get("stage"),
+            "started_at": r.get("started_at"), "closed_at": r.get("closed_at"),
+            "reviewed": len(r.get("reviewed", [])), "findings": r.get("findings") or {},
+            "changes": len(r.get("changes", [])),
+            "pending_author": [f.get("id") for f in pending_author(r)],
+            "user_decision": r.get("user_decision"), "user_words": short(r.get("user_words")),
+            "linked_to": r.get("linked_to"), "superseded_by": r.get("superseded_by"),
+            "report": r.get("report")})
+    return {"scope": scope, "rounds_total": len(rounds), "latest": out}
 
 
 def author_decide(project: Path, scope: str, fid: str, choice: str, words: str) -> dict:
@@ -359,6 +394,8 @@ def author_decide(project: Path, scope: str, fid: str, choice: str, words: str) 
         raise ValueError("author decision must be change or keep")
     if len(words.strip()) < 2:
         raise ValueError("record the author's words")
+    from .argtext import verify as _verify_text
+    _verify_text(words, "the author's words")
     data = load(project)
     rnd = data[scope][-1] if data[scope] else None
     if not rnd or not rnd.get("closed_at"):

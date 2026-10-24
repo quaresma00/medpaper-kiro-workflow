@@ -306,6 +306,18 @@ def running_title_position(target: dict) -> str:
     return "manuscript" if value in ("manuscript", "main", "first_page") else "title_page"
 
 
+LINE_NUMBER_MODES = ("continuous", "per_page", "none")
+
+
+def line_numbers(target: dict) -> str:
+    """1.12.0 (C7): target_journal.json `line_numbers`: continuous | per_page | none."""
+    value = target.get("line_numbers", "none")
+    if value is True:
+        return "continuous"
+    value = str(value or "none").strip().casefold().replace("-", "_")
+    return value if value in LINE_NUMBER_MODES else "none"
+
+
 def si_format(target: dict) -> str:
     value = str(target.get("si_format", "pdf")).strip().lower()
     return value if value in ("pdf", "docx") else "pdf"

@@ -423,7 +423,9 @@ def _move_science_to_s19(state: State, pipe, revision: dict, science: list[dict]
     origin = revision["review_stage"]
     revision["review_stage"] = "S19_human_review"
     state.stage_info(origin)["status"] = "pending"
-    state.stage_info("S19_human_review")["status"] = "active"
+    s19 = state.stage_info("S19_human_review")
+    s19["loops"] = s19.get("loops", 0) + 1  # 1.12.0 (C3): a confirmed rewind is a revisit
+    s19["status"] = "active"
     state.data["current"] = "S19_human_review"
     state.data["resume_package_revision"] = revision["round_id"]
     state.event("revision_science_to_s19",
@@ -1051,7 +1053,14 @@ def _main() -> int:
     parser.add_argument("--quiet", action="store_true",
                         help="check: print failures only")
     parser.add_argument("--project", type=Path, default=None)
-    args = parser.parse_args()
+    from wfcore import argtext  # 1.12.0 (C1): --words-file/--why-file, mojibake repaired
+    args = parser.parse_args(argtext.fix_argv(sys.argv[1:]))
+    for opt in ("words", "rewind_words", "why"):
+        why = argtext.suspicious(getattr(args, opt, "") or "")
+        if why:
+            print(f"rework error: --{opt.replace('_', '-')} {why}; pass it with "
+                  f"--{opt.replace('_', '-')}-file <utf-8 file>", file=sys.stderr)
+            return 2
     project = paths.paper_from_cli(args.project)
     try:
         state = State(project, ".wf").load()

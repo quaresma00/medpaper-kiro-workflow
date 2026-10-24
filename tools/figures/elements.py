@@ -113,6 +113,30 @@ def bar_artist(fig) -> tuple[bool, str]:
     return bool(bars), f"{len(bars)} bar container(s)"
 
 
+def _stack_bases(patches, along: str):
+    """Start of every bar's first segment when the bars are stacked along `along` ('y' =
+    vertical bars), else None. Stacked = several segments share a category position and each
+    segment starts where the previous one ends."""
+    pos = (lambda p: p.get_x()) if along == "y" else (lambda p: p.get_y())
+    start = (lambda p: float(p.get_y())) if along == "y" else (lambda p: float(p.get_x()))
+    size = (lambda p: float(p.get_height())) if along == "y" else (lambda p: float(p.get_width()))
+    groups: dict[float, list] = {}
+    for p in patches:
+        groups.setdefault(round(float(pos(p)), 6), []).append(p)
+    if not any(len(g) > 1 for g in groups.values()):
+        return None
+    if len(groups) == 1 and len({round(size(p), 6) for p in patches}) == 1:
+        return None  # equal touching bars of one series (e.g. width-1 bars), not a stack
+    bases = []
+    for g in groups.values():
+        segs = sorted(g, key=start)
+        for a, b in zip(segs, segs[1:]):
+            if abs(start(b) - (start(a) + size(a))) > 1e-6 * max(1.0, abs(start(b))):
+                return None
+        bases.append(start(segs[0]))
+    return bases
+
+
 def baseline_zero(fig) -> tuple[bool, str]:
     """Bar charts must include zero on the value axis.
 
@@ -129,7 +153,14 @@ def baseline_zero(fig) -> tuple[bool, str]:
         checked += 1
         y0s = {round(float(p.get_y()), 6) for p in patches}
         x0s = {round(float(p.get_x()), 6) for p in patches}
-        if len(y0s) == 1 and len(x0s) > 1:
+        v_stack, h_stack = _stack_bases(patches, "y"), _stack_bases(patches, "x")
+        if v_stack is not None:
+            # 1.12.0 (A6): stacked bars - each segment starts on the previous segment's top;
+            # only the first segment of every bar must start at zero.
+            orient, lo, base = "stacked vertical", ax.get_ylim()[0], max(v_stack, key=abs)
+        elif h_stack is not None:
+            orient, lo, base = "stacked horizontal", ax.get_xlim()[0], max(h_stack, key=abs)
+        elif len(y0s) == 1 and len(x0s) > 1:
             orient, lo, base = "vertical", ax.get_ylim()[0], next(iter(y0s))
         elif len(x0s) == 1 and len(y0s) > 1:
             orient, lo, base = "horizontal", ax.get_xlim()[0], next(iter(x0s))

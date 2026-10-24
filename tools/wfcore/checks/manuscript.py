@@ -526,6 +526,14 @@ def docx_bundle_ready(ctx: Ctx) -> Result:
             problems.append("the journal takes supplementary files as PDF (si_format): build with "
                             "build_docx.py --kind supplementary --pdf and list the PDF as role "
                             "'supplementary_pdf'")
+    # 1.12.0 (B4): docx_keep_with_next merged here - the same bundle DOCX audit, one gate line.
+    # Gated by the stage spec so S24/S25 keep their pre-1.12 behaviour unless they ask for it.
+    pinned = getattr(ctx.state, "pin_excludes", None)
+    if ctx.spec.get("keep_with_next") and not (pinned and pinned(ctx.stage.id, "1.11.0")):
+        from .v1110 import docx_keep_with_next
+        keep = docx_keep_with_next(ctx)
+        if not keep.ok:
+            problems.append(keep.detail)
     if problems:
         return Result(False, "docx_bundle_ready", "; ".join(sorted(set(problems))[:10]),
                       ["Rebuild affected Word files with tools/manuscript/build_docx.py."])

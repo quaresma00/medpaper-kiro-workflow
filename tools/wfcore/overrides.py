@@ -70,6 +70,8 @@ PROTECTED_CHECKS = frozenset({
     "journal_variant_ready",
     "numbers_have_provenance",
     "polish_preserves_facts",
+    "polish_complete",
+    "outputs_pending",
     "package_content_matches_baseline",
     "bundle_matches_freeze",
     "submission_audit_matches_freeze",

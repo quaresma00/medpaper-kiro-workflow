@@ -340,7 +340,7 @@ def run_checks(tmp: Path, record, section) -> None:
     s = _run(q, "tools/wf.py", "check", "--summary")
     lines = [ln for ln in s.stdout.splitlines() if ln.startswith("S03_protocol")]
     record("wf check --summary prints one result line", len(lines) == 1 and "passing" in lines[0]
-           and "outputs_exist" in lines[0] and "->" not in s.stdout,
+           and "outputs_pending" in lines[0] and "->" not in s.stdout,
            s.stdout[-200:])
     # 8. engine pin
     from wfcore.state import State

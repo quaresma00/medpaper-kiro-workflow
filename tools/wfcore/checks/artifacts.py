@@ -222,6 +222,9 @@ def legends_cover_plan(ctx: Ctx) -> Result:
         for e in _entries(plan, groups):
             eid = str(e.get("id", "")).strip()
             key = next((k for k in blocks if _same_id(k, eid)), None)
+            plan_note = e.get("footnotes") or e.get("footnote") or e.get("legend")
+            if key is None and rel == CAPTIONS and plan_note:
+                continue  # 1.12.0 (A8): the plan entry carries the table's footnote itself
             if key is None:
                 problems.append(f"{rel}: no {what} for {eid}")
             elif len(blocks[key].strip()) < minlen:
@@ -236,8 +239,8 @@ def legends_cover_plan(ctx: Ctx) -> Result:
                     (problems if hard else long_legends).append(
                         f"{rel}: {what} for {eid} is {words} words "
                         + (f"(journal maximum {cap})" if hard else f"(advisory {cap})"))
-        if rel == CAPTIONS and "abbrevi" not in text.lower() and "footnote" not in text.lower():
-            problems.append(f"{rel}: no footnote/abbreviation block anywhere - three-line tables need one")
+        # 1.12.0 (A8): the old file-wide search for the words 'abbrevi'/'footnote' is gone; the
+        # per-table caption/footnote entry above is the structural requirement.
 
     if problems:
         return Result(

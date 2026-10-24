@@ -34,6 +34,8 @@ NON_OVERRIDABLE_GATES = {
     # Checks that were not run because required outputs are missing are not "failed and
     # forceable"; they are unknown. Forcing past them would advance on untested gates.
     "dependent_checks_pending",
+    # 1.12.0 (B3): the merged "pending outputs" line (outputs_exist + dependent_checks_pending).
+    "outputs_pending",
     "data_acquisition_complete",
     "reference_provenance",
     "refs_library",
@@ -262,11 +264,11 @@ def _print_visual_debts(pipe, st, proj: Path | None = None) -> None:
     A deferred look is a promise made many stages before it comes due. Printing it here is
     what keeps it from being lost to a context reset between S11 and S23.
     """
-    parked = sorted(name for name, rec in (st.data.get("decisions") or {}).items()
-                    if str(rec.get("value", "")).strip() == "DEFER")
+    from .checks.statecheck import parked_visual
+    mode = str(pipe.targets.get("visual_review_mode", "inline")).strip().lower()
+    parked = sorted(name for name, _, _ in parked_visual(pipe, st, mode))
     if not parked:
         return
-    mode = str(pipe.targets.get("visual_review_mode", "inline")).strip().lower()
     print(f"DEFERRED VISUAL REVIEWS  (visual_review_mode = {mode})")
     for name in parked:
         print(f"  !! {name} is parked - due at S23_package, before the submission bundle")
@@ -526,6 +528,9 @@ def cmd_status(args) -> int:
         print(json.dumps({
             "engine_cwd_warning": bool(warning),
             "pipeline": pipe.meta.get("name"),
+            "engine_version": pipe.meta.get("version"),
+            "state_pipeline_version": st.data.get("pipeline_version"),
+            "engine_pin": st.engine_pin,
             "current": stage.id,
             "index": stage.index + 1,
             "total": len(pipe.stages),
@@ -549,6 +554,10 @@ def cmd_status(args) -> int:
     print(BAR)
     print(f"engine  {paths.repo_root()}")
     print(f"paper   {proj}   ({_PROJECT_SOURCE or paths.describe_project_source(pipe.layout)})")
+    # 1.12.0 (C2): both versions, always - the engine that last opened the state and the
+    # gate set the paper is pinned to (changes only with `wf migrate --yes`).
+    print(f"version engine {pipe.meta.get('version')}; state recorded by "
+          f"{st.data.get('pipeline_version', '?')}; paper pinned to {st.engine_pin}")
     if st.engine_pin != str(pipe.meta.get("version")):
         print(f"pin     paper pinned to engine {st.engine_pin} (engine {pipe.meta.get('version')}); "
               "completed stages keep their gate set - `wf migrate` to adopt the new one")
@@ -669,13 +678,39 @@ def cmd_check(args) -> int:
         return 0 if ok else 2
     print(f"gate: {stage.id} - {stage.title}")
     print(DASH)
-    _gate_lines(results, proj)
+    if getattr(args, "all", False):
+        _gate_lines(results, proj)
+    else:
+        # 1.12.0 (B3): failures and warnings only, plus one summary line; the full listing
+        # (every PASS with its detail) goes to .wf/logs/check_<stage>.log.
+        _gate_lines([r for r in results if not r.ok], proj)
+        full = _write_check_log(proj, stage, results)
+        if full:
+            print(f"  ({len([r for r in results if r.ok])} passing check(s) not shown; full "
+                  f"listing: {full}; or `wf check --all`)")
     print(DASH)
     if ok:
         print(f"GREEN ({warned} warning(s))" if warned else "GREEN")
         return 0
-    print(f"RED - {blocking} blocking issue(s)")
+    failing = [r.check for r in results if r.blocking]
+    print(f"RED - {blocking} blocking issue(s): {', '.join(failing)}")
     return 2
+
+
+def _write_check_log(proj: Path, stage, results) -> str:
+    try:
+        log = proj / ".wf" / "logs" / f"check_{stage.id}.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        lines = [f"gate: {stage.id} - {stage.title}"]
+        for r in results:
+            lines.append(f"  [{r.label}] {r.check}")
+            if r.detail:
+                lines.append(f"         {r.detail}")
+            lines += [f"         -> {h}" for h in r.hints]
+        log.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return str(log)
+    except OSError:
+        return ""
 
 
 def cmd_migrate(args) -> int:
@@ -871,7 +906,16 @@ def cmd_decide(args) -> int:
     if len(args.why.strip()) < 40:
         print("rationale too short (need >= 40 chars). A decision without a reason is a guess.")
         return 1
+    from . import argtext
+    if argtext.suspicious(args.why):  # 1.12.0 (C1): never store mojibake
+        print(f"refusing: --why {argtext.suspicious(args.why)}; pass it with --why-file "
+              "<utf-8 file> (or --why-b64)")
+        return 1
     st.record_decision(args.name, args.value, args.why)
+    stored = json.loads(st.file.read_text(encoding="utf-8")).get("decisions", {}).get(args.name, {})
+    if argtext.suspicious(stored.get("rationale", "")):
+        print("warning: the stored rationale does not read back cleanly; re-record it with --why-file")
+        return 1
     st.add_note(f"[DECISION] {args.name} = {args.value}\n{args.why}")
     print(f"recorded {args.name} = {args.value}")
     return 0
@@ -1602,10 +1646,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--log", type=Path, help=log_help)
     p.add_argument("--quiet", action="store_true", help="print failing checks and one summary line")
     p.add_argument("--summary", action="store_true", help="print one summary line only")
+    p.add_argument("--all", action="store_true",
+                   help="also print every passing check (default: failures, warnings and one "
+                        "summary line; the full listing is in .wf/logs/check_<stage>.log)")
     p.add_argument("--reuse", action="store_true",
                    help="reuse fresh receipts of unchanged pure checks (incremental re-check)")
     p.add_argument("--wait", action="store_true",
-                   help="block with a heartbeat line per minute, then print failures + one "
+                   help="block with a heartbeat line every 25 s, then print failures + one "
                         "summary line; full output in --log (default .wf/logs/wf_check.log)")
     p.set_defaults(fn=cmd_check)
 
@@ -1711,7 +1758,10 @@ def _run_logged(args) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from . import argtext
     ap = build_parser()
+    # 1.12.0 (C1): --why-file/--why-b64 and mis-decoded Chinese text are fixed before parsing.
+    argv = argtext.fix_argv(sys.argv[1:] if argv is None else argv)
     args = ap.parse_args(argv)
     if args.cmd == "config" and args.action == "set" and (not args.key or args.value is None):
         ap.error("config set needs KEY and VALUE")

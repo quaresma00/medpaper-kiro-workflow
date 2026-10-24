@@ -123,7 +123,23 @@ def audit_spec(project: Path) -> dict:
             "word_tables": target.get("word_tables") is True,
             "main_figures": counts["main_figures"], "supp_figures": counts["supp_figures"],
             "main_tables": counts["main_tables"],
+            "line_numbers": journalspec.line_numbers(target),
             "table_orientation": table_overrides(project, counts["plan"])}
+
+
+def line_number_problems(root, mode: str) -> list[str]:
+    """1.12.0 (C7): every section carries w:lnNumType with the journal's restart rule."""
+    if mode not in ("continuous", "per_page"):
+        return []
+    want = "continuous" if mode == "continuous" else "newPage"
+    sects = root.findall(".//w:sectPr", NS)
+    bad = [i + 1 for i, sp in enumerate(sects)
+           if (ln := sp.find("w:lnNumType", NS)) is None
+           or (ln.get(f"{{{W}}}restart") or "newPage") != want]
+    if not sects or bad:
+        return [f"line numbers ({mode}) required by the journal are missing or wrong in "
+                f"section(s) {bad or [1]}; rebuild with build_docx.py"]
+    return []
 
 
 def legend_problems(root, expected: list[str], cap: int, label: str = "",
@@ -515,6 +531,7 @@ def extra_problems(name: str, xmls: dict[str, bytes], root, role: str, spec: dic
         if spec is not None:
             out += [f"{name}: {p}" for p in legend_style_problems(root, spec["legend_style"])]
             out += [f"{name}: {p}" for p in display_problems(root, spec, role)]
+            out += [f"{name}: {p}" for p in line_number_problems(root, spec.get("line_numbers", "none"))]
     if role in ("supplementary", "manuscript"):
         text = "\n".join(t for t, _, _ in paragraphs(root))
         out += [f"{name}: {p}" for p in pipeline_code_problems(text)]
