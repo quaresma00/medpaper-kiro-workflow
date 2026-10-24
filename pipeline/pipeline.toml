@@ -14,7 +14,7 @@
 
 [meta]
 name = "medpaper"
-version = "1.11.0"
+version = "1.12.0"
 schema = 1
 description = "Medical/clinical research pipeline: idea -> feasibility -> data -> analysis -> artifacts -> manuscript -> submission package."
 
@@ -373,6 +373,11 @@ check = "legend_no_results_restatement"
 check = "forbidden_symbols_absent"
 paths = ["05_figures/legends.md", "04_tables/table_captions.md"]
 
+# 1.12.0 (F2): each additional display item states what it adds.
+[[stage.gate]]
+check = "display_items_justified"
+path = "01_protocol/artifact_plan.json"
+since = "1.12.0"
 [[stage]]
 id = "S08_methods"
 title = "Write Methods"
@@ -462,6 +467,12 @@ check = "visual_confirmation"
 name = "tables_visually_confirmed"
 artifact = "rendered tables"
 
+# 1.12.0 (F1): first-clinical-reader check, advisory while drafting.
+[[stage.gate]]
+check = "first_reader_displays"
+kinds = ["table"]
+severity = "warn"
+since = "1.12.0"
 [[stage]]
 id = "S11_figures"
 title = "Render figures + deterministic QC + visual verification loop"
@@ -508,6 +519,11 @@ patterns = ["05_figures/code/**/*.py", "05_figures/code/**/*.R", "05_figures/cod
 [[stage.gate]]
 check = "temp_clean"
 
+[[stage.gate]]
+check = "first_reader_displays"
+kinds = ["figure"]
+severity = "warn"
+since = "1.12.0"
 [[stage]]
 id = "S09_results"
 title = "Write Results from the final tables and figures"
@@ -574,6 +590,11 @@ path = "07_manuscript/results.md"
 [[stage.gate]]
 check = "numbers_cross_match"
 
+# 1.12.0 (F1): blocking here - every display reads on its own before the prose builds on it.
+[[stage.gate]]
+check = "first_reader_displays"
+include = ["abbreviations", "engineering", "flow_units", "non_redundancy"]
+since = "1.12.0"
 [[stage]]
 id = "S13_reflib"
 title = "Build verified reference library by argumentative role (abstracts mandatory)"
@@ -837,10 +858,6 @@ check = "revision_rounds_closed"
 check = "review_round_approved"
 since = "1.8.1"
 scope = "manuscript"
-[[stage.gate]]
-check = "explicit_confirmation"
-since = "1.10.0"
-scope = "manuscript"
 # 1.11.0: every numbered finding of every round closed (changed / kept + reason / author).
 [[stage.gate]]
 check = "review_findings_closed"
@@ -1019,7 +1036,9 @@ check = "bundle_complete"
 [[stage.gate]]
 check = "docx_bundle_ready"
 # 1.11.0: caption/table/footnote and legend/figure keep together in Word; final-size fonts.
-# 1.12.0 (B4): the keep-with-next audit is part of this gate (was docx_keep_with_next).
+# 1.12.0 (B4): the keep-with-next audit is part of this gate (was docx_keep_with_next);
+# supplementary_methods_clean runs inside it; journal limits and the title-page reference
+# count are rows of submission_checklist_measured (one line each, not two).
 keep_with_next = true
 [[stage.gate]]
 check = "figure_print_font"
@@ -1027,16 +1046,10 @@ since = "1.11.0"
 # S23 pre-audit: the same measured checks S25 confirms (final-DOCX word counts, references,
 # display items), so the independent audit is a confirmation rather than a first discovery.
 [[stage.gate]]
-check = "journal_limits_met"
-[[stage.gate]]
 check = "submission_checklist_measured"
-[[stage.gate]]
-check = "supplementary_methods_clean"
 [[stage.gate]]
 check = "reference_provenance"
 live = true
-[[stage.gate]]
-check = "title_page_reference_count"
 [[stage.gate]]
 check = "package_content_matches_baseline"
 [[stage.gate]]
@@ -1097,8 +1110,6 @@ check = "submission_checklist_measured"
 check = "reference_provenance"
 live = true
 [[stage.gate]]
-check = "title_page_reference_count"
-[[stage.gate]]
 check = "package_content_matches_baseline"
 [[stage.gate]]
 check = "guidelines_sourced"
@@ -1117,10 +1128,6 @@ check = "reporting_checklist_complete"
 [[stage.gate]]
 check = "review_round_approved"
 since = "1.8.1"
-scope = "package"
-[[stage.gate]]
-check = "explicit_confirmation"
-since = "1.10.0"
 scope = "package"
 [[stage.gate]]
 check = "review_findings_closed"
@@ -1156,8 +1163,6 @@ check = "docx_bundle_ready"
 check = "reference_provenance"
 live = true
 [[stage.gate]]
-check = "title_page_reference_count"
-[[stage.gate]]
 check = "package_content_matches_baseline"
 [[stage.gate]]
 check = "guidelines_sourced"
@@ -1166,8 +1171,6 @@ check = "bundle_matches_freeze"
 [[stage.gate]]
 check = "submission_audit_matches_freeze"
 path = "08_submission/independent_submission_audit.md"
-[[stage.gate]]
-check = "journal_limits_met"
 [[stage.gate]]
 check = "submission_checklist_measured"
 [[stage.gate]]

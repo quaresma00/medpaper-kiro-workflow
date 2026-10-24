@@ -122,8 +122,28 @@ class State:
             self._note_v190(old_version, pipeline_version)
             self._note_v1100(old_version, pipeline_version)
             self._note_v1110(old_version, pipeline_version)
+            self._note_v1120(old_version, pipeline_version)
             self.save()
         return changed
+
+    def _note_v1120(self, old_version: str, new_version: str) -> None:
+        """1.12.0: a lighter engine. Event only; no file or stage is touched."""
+        if (version_tuple(old_version) >= (1, 12, 0) or version_tuple(new_version) < (1, 12, 0)
+                or self.data.get("v1120_migration_noted")):
+            return
+        self.data["v1120_migration_noted"] = True
+        self.event("requirements_changed",
+                   "1.12.0: fewer false positives (re-checks of finished stages, render/QC race, "
+                   "locked workbooks, stacked bars, bib export rule, incremental review "
+                   "coverage, WARN checklist rows); merged gate lines (pending outputs, one "
+                   "polish gate, keep-with-next inside docx_bundle_ready); no section word "
+                   "minimums; deferred visual looks need no DEFER decision (still owed at S23); "
+                   "short stage cards with reference/stage_details/; `wf handoff`; reviewer "
+                   "report written to the review bundle; medpaper-clinical-writer + "
+                   "tools/manuscript/writer_bundle.py; first-reader display check (warn S10/S11, "
+                   "block S12); display items need a non-redundancy line; Word line numbers "
+                   "from target_journal.json line_numbers. New gates are since=1.12.0: "
+                   "completed stages keep the pinned gate set. Paper files were not modified.")
 
     def _note_v1110(self, old_version: str, new_version: str) -> None:
         """1.11.0: the clinical presentation layer. Event only; no file or stage is touched."""

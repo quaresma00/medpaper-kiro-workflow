@@ -13,6 +13,12 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+
+def _card(name) -> str:
+    """1.12.0 (D1): a stage card plus its reference/stage_details/ long form."""
+    from wfcore.registry import card_full_text
+    return card_full_text(name)
+
 sys.path.insert(0, str(ROOT / "tools"))
 
 NUMERIC_CSL = """<?xml version="1.0" encoding="utf-8"?>
@@ -606,7 +612,9 @@ def card_commands() -> list[tuple[str, str, str]]:
     """(card, tool, argument string) for every engine command shown in a stage card."""
     import re
     out = []
-    for card in sorted((ROOT / "pipeline/stages").glob("*.md")):
+    # 1.12.0 (D1): the long forms in reference/stage_details/ carry commands too.
+    for card in sorted((ROOT / "pipeline/stages").glob("*.md")) + \
+            sorted((ROOT / "reference/stage_details").glob("*.md")):
         text = card.read_text(encoding="utf-8")
         lines = [ln.strip() for block in re.findall(r"```[^\n]*\n(.*?)```", text, re.S)
                  for ln in block.splitlines()]
@@ -671,7 +679,7 @@ def run_runtime(tmp: Path, record, section) -> None:
            len(cmds) > 40 and not bad, "; ".join(bad[:6]))
     record("the S25 card returns to S24 with `wf loop --to` (no positional stage)",
            "loop --to S24_package_human_review" in
-           (ROOT / "pipeline/stages/S25_submission_audit.md").read_text(encoding="utf-8"))
+           _card("S25_submission_audit"))
     P = _rw_paper(tmp / "rt", "S03_protocol")
     # 1.11.0: without PYTHONIOENCODING the engine writes what the reader decodes; this reader
     # (a Python pipe) asks for UTF-8 explicitly.

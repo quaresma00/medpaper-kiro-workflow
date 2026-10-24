@@ -1189,6 +1189,37 @@ def prepare_source(kind: str, inputs: list[Path], project: Path, workdir: Path,
     return [out]
 
 
+def draft_docx(project: Path, output: Path) -> Path:
+    """1.12.0 (F3): a reader-view Word build of the assembled draft for review bundles (S17+).
+
+    Not an upload: no receipt, no audit gate. Uses the journal style when S20 wrote one, the
+    medical-manuscript fallbacks otherwise, and refs.bib when present (no CSL)."""
+    project = Path(project)
+    src = project / scifreeze.resolve(project, "07_manuscript/full_manuscript.md")
+    if not src.is_file():
+        raise FileNotFoundError(src)
+    style_path = project / "08_submission/docx_style.json"
+    style = load_style(style_path) if style_path.is_file() else load_style_defaults()
+    bib = project / "06_refs/refs.bib"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="medpaper_draft_") as work:
+        rendered = prepare_source("manuscript", [src], project, Path(work), style)
+        run_pandoc(rendered, output, bib if bib.is_file() else None, None)
+    spec = docxaudit.audit_spec(project)
+    normalize_docx(output, style, "manuscript",
+                   legend_bold=bool(spec["legend_style"].get("bold", True)),
+                   reference_separator=spec["reference_separator"],
+                   line_numbers=spec.get("line_numbers", "none"))
+    return output
+
+
+def load_style_defaults() -> dict:
+    with tempfile.TemporaryDirectory(prefix="medpaper_style_") as work:
+        empty = Path(work) / "style.json"
+        empty.write_text("{}", encoding="utf-8")
+        return load_style(empty)
+
+
 CSL_PATCH_REL = "08_submission/csl_patch.json"
 
 

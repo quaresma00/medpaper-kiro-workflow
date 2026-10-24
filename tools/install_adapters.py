@@ -2,7 +2,7 @@
 """Wire the pipeline into Kiro, at engine level, paper level and optionally user level.
 
     python tools/install_adapters.py                  # engine .kiro files (maintenance workspace)
-    python tools/install_adapters.py --global         # + user-level skill and the two read-only agents
+    python tools/install_adapters.py --global         # + user-level skill and the three agents
     python tools/install_adapters.py --paper <DIR>    # (re)render a paper's .kiro (e.g. engine moved)
     python tools/install_adapters.py --check [--global] [--paper DIR]   # drift only, exit 2 on drift
 

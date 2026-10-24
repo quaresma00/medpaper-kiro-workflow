@@ -280,6 +280,21 @@ def run_b(tmp: Path, record, section) -> None:
     record("B4 docx_keep_with_next is part of docx_bundle_ready (one gate line at S23)",
            not any(g["check"] == "docx_keep_with_next" for g in s23)
            and any(g["check"] == "docx_bundle_ready" and g.get("keep_with_next") for g in s23))
+    pipe = registry.load()
+    names = {s.id: [g["check"] for g in s.gate] for s in pipe.stages}
+    dup_free = (all("explicit_confirmation" not in names[s] for s in ("S19_human_review",
+                                                                       "S24_package_human_review"))
+                and all("review_round_approved" in names[s] for s in ("S19_human_review",
+                                                                       "S24_package_human_review"))
+                and not {"supplementary_methods_clean", "journal_limits_met",
+                         "title_page_reference_count"} & set(names["S23_package"])
+                and "submission_checklist_measured" in names["S23_package"]
+                and "docx_bundle_ready" in names["S23_package"]
+                and not {"journal_limits_met", "title_page_reference_count"} & set(names["S25_submission_audit"]))
+    total = sum(len(v) for v in names.values())
+    record("B4 duplicate gate lines merged (confirmation inside review_round_approved; SI clean "
+           "inside docx_bundle_ready; limits/reference count as checklist rows); fewer gate "
+           f"entries than 1.11.0 (287 -> {total})", dup_free and total < 287, str(total))
 
 
 # ------------------------------------------------------------------------------ group C
@@ -443,8 +458,177 @@ def run_c(tmp: Path, record, section) -> None:
            and "started" in beat.stdout and time.monotonic() - t0 < 30, beat.stdout[-300:])
 
 
+# ------------------------------------------------------------------------------ group D
+def run_d(tmp: Path, record, section) -> None:
+    import re
+    from wfcore import registry
+    section("1.12.0 D: slim stage cards and skill")
+    cards = sorted((ROOT / "pipeline/stages").glob("S*.md"))
+    sizes = {c.stem: len(c.read_text(encoding="utf-8")) for c in cards}
+    over = {k: v for k, v in sizes.items() if v > registry.CARD_MAX_CHARS}
+    record(f"D1 every stage card <= {registry.CARD_MAX_CHARS} characters (max {max(sizes.values())})",
+           len(cards) == 25 and not over, str(over))
+    texts = {c.stem: c.read_text(encoding="utf-8") for c in cards}
+    skill = (ROOT / ".kiro/skills/medpaper-pipeline/SKILL.md").read_text(encoding="utf-8")
+    refs = sorted({m for t in [*texts.values(), skill]
+                   for m in re.findall(r"reference/[\w./-]+\.(?:md|toml)", t)})
+    missing = [r for r in refs if not (ROOT / r).is_file()]
+    record("D1 every reference/ file a card or the skill points to exists",
+           refs and not missing, str(missing))
+    writers = [s for s in ("S08_methods", "S09_results", "S14_introduction", "S16_discussion",
+                           "S19_human_review")
+               if "medpaper-clinical-writer" not in texts[s] or "writer_bundle.py" not in texts[s]]
+    stale = [k for k, t in {**texts, "SKILL": skill}.items()
+             if "temp/check.log" in t or "temp/repro.log" in t or "visually_confirmed DEFER" in t]
+    record("D1 cards delegate prose to the clinical writer, carry no DEFER recording and no "
+           "temp/ log paths", not writers and not stale, f"{writers} {stale}")
+    record("D2 SKILL.md is slim and has the execution-economy section (handoff, --wait, logs, "
+           "one reproduce per round, cheaper models)",
+           len(skill) <= 9000 and "Execution economy" in skill and "wf handoff" in skill
+           and "--wait" in skill and ".wf/logs/" in skill and "reproduce once per round" in skill
+           and "cheaper model" in skill and (ROOT / "reference/skill_details.md").is_file(),
+           str(len(skill)))
+
+
+# ------------------------------------------------------------------------------ group E
+def _review_paper(base: Path) -> Path:
+    import selftest_v180 as v180
+    p, _ = v180._paper(base, None)
+    plan = json.loads((p / "01_protocol/artifact_plan.json").read_text(encoding="utf-8"))
+    plan["supp_figures"], plan["supp_tables"] = [], []
+    _w(p, "01_protocol/artifact_plan.json", plan)
+    _w(p, "07_manuscript/full_manuscript.md", "# Title\n\n# Results\n\nText of the results.\n")
+    return p
+
+
+def run_e(tmp: Path, record, section) -> None:
+    import selftest_v190 as v190
+    from wfcore import adapters, reviewrounds as rr
+    section("1.12.0 E: wf handoff, reviewer report on disk, clinical writer")
+    p = _paper(tmp / "e1", "S09_results")
+    h = v190._run(p, "tools/wf.py", "handoff")
+    md = v190._run(p, "tools/wf.py", "handoff", "--md")
+    lines = h.stdout.strip().splitlines()
+    record("E1 `wf handoff` prints a compact pack: paper, versions, stage + card, gate summary, "
+           "questions, last events, next command (<= 60 lines; --md)",
+           h.returncode == 0 and len(lines) <= 60 and "stage: S09_results" in h.stdout
+           and "paper pinned to" in h.stdout and "gate:" in h.stdout and "next:" in h.stdout
+           and "last events:" in h.stdout and md.stdout.startswith("# medpaper handoff"),
+           h.stdout[-400:] + h.stderr[-200:])
+
+    # E2 reviewer writes only its report; close reads it by default
+    agent = (ROOT / ".kiro/agents/medpaper-reviewer.md").read_text(encoding="utf-8")
+    q = _review_paper(tmp / "e2")
+    st = v190._run(q, "tools/review_round.py", "start", "--scope", "manuscript")
+    rid = (rr.latest(q, "manuscript") or {}).get("id", "")
+    _w(q, f".wf/review_bundle/{rid}/report.md", "# Review\n\n## Verdict\nReady; no findings.\n")
+    cl = v190._run(q, "tools/review_round.py", "close", "--scope", "manuscript")
+    last = rr.latest(q, "manuscript") or {}
+    record("E2 reviewer agent may write only .wf/review_bundle/<round>/report.md (paper areas "
+           "denied); start names the file; close --report defaults to it",
+           '"write"' in agent and ".wf/review_bundle/*/report.md" in agent
+           and 'match: ["0*/**"' in agent and "capability: shell" in agent
+           and "report.md" in st.stdout and cl.returncode == 0
+           and last.get("report") == f".wf/review_reports/{rid}.md",
+           st.stdout[-200:] + cl.stdout[-200:] + cl.stderr[-200:])
+
+    # E3 clinical writer agent + writer bundle
+    writer = (ROOT / ".kiro/agents/medpaper-clinical-writer.md").read_text(encoding="utf-8")
+    sys.path.insert(0, str(ROOT / "tools/manuscript"))
+    import writer_bundle as wb
+    record("E3 medpaper-clinical-writer is installed (global agents) and cannot read the "
+           "analysis layer or run commands",
+           "medpaper-clinical-writer.md" in adapters.GLOBAL_AGENTS
+           and '"03_analysis/**"' in writer and "capability: shell" in writer
+           and "does not apply to you" in writer and "07_manuscript/*.md" in writer)
+    p = _paper(tmp / "e3", "S09_results")
+    _w(p, "01_protocol/display_dictionary.json", {"terms": [
+        {"internal": "comp_a", "aliases": ["Composite A"], "label": "Portal vascular disease",
+         "abbreviation": "PVD", "definition": "portal vein thrombosis or nodular hyperplasia"},
+        {"internal": "exposed", "label": "Exposed group", "definition": "reports naming the drug"}]})
+    _w(p, "03_analysis/results/main.json", {"comp_a": {"exposed": {"hr": 1.87, "hr_low": 1.2,
+                                                                   "strict_contrast_x": 4}},
+                                            "raw_lines_read": 24812, "environment": {"python": "3"}})
+    _w(p, "01_protocol/protocol_final.md", "# Protocol\n\nWe ran `parse_raw.py` from "
+       "03_analysis/code/x.py; comp_a was compared using age_years.\n")
+    out = wb.build(p, "S09_results")
+    texts = {f.name: f.read_text(encoding="utf-8") for f in out.glob("*.md")}
+    blob = "\n".join(texts.values())
+    lint = wb.lint(p, "S09_results")
+    record("E3 writer bundle: clinical labels and result sentences only - no internal keys, "
+           "paths or code; its lint passes",
+           "Hazard ratio, Portal vascular disease, Exposed group: 1.87" in blob
+           and not any(k in blob for k in ("comp_a", "strict_contrast", "raw_lines_read",
+                                           "age_years", ".py", "03_analysis", "environment"))
+           and "Write: 07_manuscript/results.md" in texts.get("MANIFEST.md", "") and not lint,
+           str(lint[:4]) + " | " + texts.get("results_in_words.md", "")[:300])
+
+
+# ------------------------------------------------------------------------------ group F
+def run_f(tmp: Path, record, section) -> None:
+    from wfcore import registry, reviewrounds as rr
+    section("1.12.0 F: earlier, cheap, deterministic detection")
+    p = _paper(tmp / "f1", "S12_reconcile")
+    _w(p, "01_protocol/artifact_plan.json", {
+        "main_figures": [], "supp_figures": [], "supp_tables": [],
+        "main_tables": [{"id": "Table 1", "file": "04_tables/main/T1.xlsx"}]})
+    _xlsx(p, "04_tables/main/T1.xlsx", [["Characteristic", "Exposed"], ["Age", "61"],
+                                         ["Female sex", "64 (40%)"]])
+    _w(p, "04_tables/table_captions.md", "# Table captions\n\n## Table 1. Characteristics\n\n"
+       "Values are counts with percentages\n")
+    bad = _gate(p, "first_reader_displays", "S12_reconcile",
+                include=["abbreviations", "engineering", "flow_units"])
+    _xlsx(p, "04_tables/main/T1.xlsx", [["Characteristic", "Exposed"], ["Age, years", "61"],
+                                         ["Female sex", "64 (40%)"]])
+    _w(p, "04_tables/table_captions.md", "# Table captions\n\n## Table 1. Characteristics\n\n"
+       "Values are n (%) of the 160 exposed patients.\n")
+    good = _gate(p, "first_reader_displays", "S12_reconcile",
+                 include=["abbreviations", "engineering", "flow_units"])
+    specs = {s.id: [g for g in s.gate if g["check"] == "first_reader_displays"]
+             for s in registry.load().stages}
+    record("F1 first_reader_displays: units, denominator, end punctuation per display; warn at "
+           "S10/S11, blocking (with abbreviations/language/flow units) at S12",
+           not bad.ok and "unit not stated" in bad.detail and "denominator" in bad.detail
+           and "punctuation" in bad.detail and good.ok
+           and specs["S10_tables"][0].get("severity") == "warn"
+           and specs["S11_figures"][0].get("severity") == "warn"
+           and "severity" not in specs["S12_reconcile"][0], bad.detail[:200] + " | " + good.detail)
+
+    p = _paper(tmp / "f2", "S07_artifacts")
+    plan = {"main_figures": [{"id": "Figure 1", "file": "a.png"}, {"id": "Figure 2", "file": "b.png"}],
+            "main_tables": [], "supp_figures": [], "supp_tables": []}
+    _w(p, "01_protocol/artifact_plan.json", plan)
+    missing = _gate(p, "display_items_justified", "S07_artifacts")
+    plan["main_figures"][1]["non_redundancy"] = "shows the time course that Figure 1 cannot"
+    _w(p, "01_protocol/artifact_plan.json", plan)
+    ok = _gate(p, "display_items_justified", "S07_artifacts")
+    wired = [s.id for s in registry.load().stages
+             if any(g["check"] == "display_items_justified" for g in s.gate)]
+    s12 = next(g for g in registry.load().stage("S12_reconcile").gate
+               if g["check"] == "first_reader_displays")
+    record("F2 an added display item needs a one-line non-redundancy justification (S07, "
+           "re-checked at S12 inside the first-reader line)", not missing.ok
+           and "Figure 2" in missing.detail and ok.ok and wired == ["S07_artifacts"]
+           and "non_redundancy" in s12.get("include", []), missing.detail + str(wired))
+
+    q = _review_paper(tmp / "f3")
+    with _env(MEDPAPER_NO_PREVIEW=1):
+        rnd = rr.start(q, "manuscript", "S18_independent_review")
+        out = rr.write_bundle(q, rnd)
+    man = (out / "MANIFEST.md").read_text(encoding="utf-8")
+    built = (out / "draft/manuscript_draft.docx").is_file()
+    record("F3 from S17 the review bundle carries a Word build of the draft (+ text copy) or "
+           "states why not; previews are skipped/unavailable with a note",
+           (built and "manuscript_draft.docx" in man and (out / "files/manuscript_draft.docx.txt").is_file()
+            and "preview skipped" in man) or (not built and "DOCX draft build unavailable" in man),
+           man[-400:])
+
+
 def run(tmp: Path, record, section) -> None:
     tmp.mkdir(parents=True, exist_ok=True)
     run_a(tmp, record, section)
     run_b(tmp, record, section)
     run_c(tmp, record, section)
+    run_d(tmp, record, section)
+    run_e(tmp, record, section)
+    run_f(tmp, record, section)

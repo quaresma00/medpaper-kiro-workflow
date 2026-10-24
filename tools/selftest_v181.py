@@ -10,6 +10,12 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+
+def _card(name) -> str:
+    """1.12.0 (D1): a stage card plus its reference/stage_details/ long form."""
+    from wfcore.registry import card_full_text
+    return card_full_text(name)
+
 sys.path.insert(0, str(ROOT / "tools"))
 
 
@@ -209,7 +215,7 @@ def run_review(tmp: Path, record, section) -> None:
     raw = tomllib.loads((ROOT / "pipeline/pipeline.toml").read_text(encoding="utf-8"))
     stages = {s["id"]: s for s in raw["stage"]}
     gates = {sid: [g["check"] for g in stages[sid]["gate"]] for sid in stages}
-    cards = "".join((ROOT / "pipeline/stages" / f"{sid}.md").read_text(encoding="utf-8")
+    cards = "".join(_card(sid)
                     for sid in ("S18_independent_review", "S19_human_review",
                                 "S24_package_human_review", "S25_submission_audit"))
     record("default flow builds no review package (gates, outputs and cards)",

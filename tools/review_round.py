@@ -54,6 +54,8 @@ def _main() -> int:
     ap.add_argument("--change", nargs=2, action="append", default=[], metavar=("FILE", "SUMMARY"))
     ap.add_argument("--kept", nargs=2, action="append", default=[], metavar=("ITEM", "REASON"))
     ap.add_argument("--words", default="")
+    ap.add_argument("--words-file", help="UTF-8 file holding --words (avoids shell code pages)")
+    ap.add_argument("--words-b64", help="base64 of the UTF-8 --words text")
     ap.add_argument("--report", type=Path, default=None,
                     help="the reviewer's saved full report; every numbered finding must be closed")
     from wfcore import argtext

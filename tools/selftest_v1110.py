@@ -16,6 +16,12 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+
+def _card(name) -> str:
+    """1.12.0 (D1): a stage card plus its reference/stage_details/ long form."""
+    from wfcore.registry import card_full_text
+    return card_full_text(name)
+
 sys.path.insert(0, str(ROOT / "tools"))
 
 
@@ -135,7 +141,7 @@ def run_engineering(tmp: Path, record, section) -> None:
            {"normalization", "string", "field", "record", "snapshot", "collapsed", "pipeline", "script",
             "heuristic", "cluster rule", "re-executed", "reproduced identically", "lines read", "frozen",
             "parsed", "regex", "alphanumeric", "token", "deduplicated by key"} <= terms, str(sorted(terms)))
-    card = (ROOT / "pipeline/stages/S08_methods.md").read_text(encoding="utf-8")
+    card = _card("S08_methods")
     record("S08 card states the layering rule (principles in Methods, implementation in supplement)",
            "Supplementary Methods" in card and "principle" in card.casefold() and "1.11.0" in card)
 
@@ -286,7 +292,7 @@ def run_review(tmp: Path, record, section) -> None:
     g = _gate(p, "review_findings_closed", "S19_human_review", scope="manuscript")
     record("review_findings_closed gate passes with all F-numbers closed", g.ok and "3 numbered" in g.detail, g.detail)
     agent = (ROOT / ".kiro/agents/medpaper-reviewer.md").read_text(encoding="utf-8")
-    card = (ROOT / "pipeline/stages/S18_independent_review.md").read_text(encoding="utf-8")
+    card = _card("S18_independent_review")
     record("reviewer agent and S18 card carry the perspectives from round 1 and the neutral-brief rule",
            "first-time clinical reader" in agent and "every section" in agent.casefold()
            and "known deviations" in card and "MANIFEST.md" in card)
@@ -527,7 +533,7 @@ def run_roles_cards(tmp: Path, record, section) -> None:
         if raw.startswith(b"\xef\xbb\xbf") or "\ufffd" in txt or any(
                 m in txt for m in ("锟", "鈥", "閿", "\u00e2\u0080", "\u00c3\u00a9", "鏈", "纭")):
             bad_cards.append(card.name)
-    s19 = (ROOT / "pipeline/stages/S19_human_review.md").read_text(encoding="utf-8")
+    s19 = _card("S19_human_review")
     record("all stage cards are UTF-8 without BOM, U+FFFD or mojibake; S19 asks the closing question in Chinese",
            not bad_cards and "确认当前版本请回复：我确认这一版" in s19, str(bad_cards))
     record("console output uses the code page the PowerShell reader decodes (not UTF-8 into a 936 pipe)",

@@ -24,6 +24,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("command", choices=("record", "check", "status"))
     ap.add_argument("--edit", action="append", default=[], help="one manual edit (repeatable)")
     ap.add_argument("--words", default="", help="the author's authorisation, verbatim")
+    ap.add_argument("--words-file", help="UTF-8 file holding --words (avoids shell code pages)")
+    ap.add_argument("--words-b64", help="base64 of the UTF-8 --words text")
     ap.add_argument("--project", type=Path, default=None)
     from wfcore import argtext  # 1.12.0 (C1): --words-file/--words-b64, mojibake repaired
     args = ap.parse_args(argtext.fix_argv(sys.argv[1:] if argv is None else argv))

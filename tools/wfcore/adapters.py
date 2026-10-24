@@ -84,9 +84,11 @@ Hard rules, several mechanically enforced by the gates:
 - Every manuscript number must already exist in `03_analysis/results/*.json`, written by
   `write_results()` (Python `${tool}analysis/results.py`, R `${tool}R/medresults.R`), which
   records the environment. S06 re-executes the analysis in a sandbox (`python
-  "${tool}reproduce.py" run --log <paper>/temp/repro.log`, in the background; read the log's
-  last lines every 2-3 minutes, done at `REPRODUCE DONE`; `REUSED` when nothing changed) and
-  the result must be identical.
+  "${tool}reproduce.py" run --wait`, one blocking call with a heartbeat; log in `.wf/logs/`;
+  `REUSED` when nothing changed) and the result must be identical.
+- Context for a new session or a delegated step: pass the output of `${wf} handoff`, not a
+  hand-written brief. Manuscript prose (S08/S09/S14/S16 and post-review rewrites) is written
+  by the `medpaper-clinical-writer` agent from `.wf/writer_bundle/<stage>/`.
 - Python for acquisition, cleaning, xlsx tables, Word and gates; R for figures (default) and
   R-strong statistics: `${engine}/reference/language_policy.toml`.
 - Draft scientific sections only at their active stages; S17 assembles the canonical full text.
@@ -208,4 +210,34 @@ def global_agents_dir() -> Path:
     return Path.home() / ".kiro" / "agents"
 
 
-GLOBAL_AGENTS = ("medpaper-reviewer.md", "medpaper-deepreader.md")
+GLOBAL_AGENTS = ("medpaper-reviewer.md", "medpaper-deepreader.md",
+                 "medpaper-clinical-writer.md")  # 1.12.0 (E3)
+
+# 1.12.0 (E2/E3): what each delegated agent may write. None = strictly read-only.
+AGENT_WRITE_SCOPE = {"medpaper-deepreader": None,
+                     "medpaper-reviewer": ".wf/review_bundle/*/report.md",
+                     "medpaper-clinical-writer": "07_manuscript/*.md"}
+
+
+def agent_scope_problems(name: str, text: str) -> list[str]:
+    """Why an agent definition is broader than its write scope ([] = as designed)."""
+    import re
+    head = text.split("\n---", 2)[0] if text.startswith("---") else text[:3000]
+    scope = AGENT_WRITE_SCOPE.get(name)
+    out = []
+    for cap in ("shell", "mcp", "subagent"):
+        if not re.search(rf"capability: {cap}\s*\n\s*effect: deny", head):
+            out.append(f"{cap} not denied")
+    if scope is None:
+        if 'tools: ["read"]' not in head or not re.search(r"capability: fs_write\s*\n\s*effect: deny", head):
+            out.append("not read-only")
+        return out
+    allows = re.findall(r"capability: fs_write\s*\n\s*match: \[([^\]]*)\]\s*\n\s*effect: allow", head)
+    if 'tools: ["read", "write"]' not in head or len(allows) != 1 or scope not in allows[0]:
+        out.append(f"write is not limited to {scope}")
+    elif any(p.strip(' "') and scope.split("/")[-1] not in p
+             for p in allows[0].split(",")):
+        out.append(f"write allow-list holds more than {scope}-type paths")
+    if not re.search(r"capability: fs_write\s*\n\s*match: \[[^\]]*\]\s*\n\s*effect: deny", head):
+        out.append("no fs_write deny list for the paper's other files")
+    return out

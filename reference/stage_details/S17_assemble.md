@@ -1,0 +1,84 @@
+# S17 - Select the title and assemble the complete manuscript - details
+
+> Long form of `pipeline/stages/S17_assemble.md` (moved out of the card in 1.12.0 so the
+> card stays short). Read only the section you need; the card has the commands.
+>
+> 1.12.0 supersedes older wording below where they differ: long runs use `--wait` (one
+> blocking call, heartbeat <= 30 s) and logs live in `.wf/logs/` (or `temp/logs/`);
+> `wf check` prints failures + one summary line by default; in `deferred` visual mode no
+> DEFER decision is recorded (the look is owed at S23); the `medpaper-reviewer` agent
+> writes only its own `report.md` in the review bundle; declaration and section heading
+> names come from `target_journal.json` (defaults otherwise).
+
+## Purpose
+Create the first complete paper before asking for author or affiliation details. The paper
+must be readable as one medical-journal manuscript and becomes the canonical scientific
+source for review, user editing, polishing and packaging.
+
+## Procedure
+1. Read the protocol, final results, finished sections, artifact plan, table captions and
+   figure legends. Generate several title candidates internally and select the single best
+   one without asking the user. Score for design accuracy, population/exposure/outcome
+   specificity, searchability, brevity and freedom from causal or novelty overclaim. Write
+   only the selected title to `project/07_manuscript/title.md` as one level-1 heading.
+2. Write `project/07_manuscript/abstract.md` after all scientific sections are final. Use
+   the structure most appropriate to the design. Every number must already occur in a
+   results JSON and every conclusion must agree with the Discussion.
+3. Write `project/07_manuscript/keywords.md` as one line:
+   `Keywords: term 1, term 2, term 3`. Use 3-6 specific, MeSH-aligned terms where suitable
+   (or the journal's keywords.min/max once known). Commas separate terms in the source; the
+   DOCX build applies the journal's separator. No slash, ampersand or conjunction padding.
+4. Assemble the exact order with the deterministic tool:
+   First, write the central abbreviation list in optional `07_manuscript/statements.md`
+   under `# Declarations and Statements` > `## Abbreviations` (one `term, expansion` per line
+   or semicolon-separated; keep mixed case such as eGFR). 1.11.0: this list is in ADDITION to
+   the local ones - every table footnote and figure legend keeps defining the abbreviations
+   it uses, so each display reads on its own (`display_abbreviations_defined`). Remove local
+   blocks only when the chosen journal explicitly requires a single central list. No
+   author/admin details or blank declaration sections are needed here. Then run:
+```
+.\.venv\Scripts\python.exe tools/manuscript/assemble.py
+```
+   It writes `project/07_manuscript/full_manuscript.md` in this order: selected title,
+   Abstract, Keywords, Introduction, Methods, Results, Discussion, References, Figure
+   legends, with the optional Declarations and Statements section between Discussion and
+   References. Supplementary Methods remains a separate file. The References heading must be
+   present even though Pandoc later expands the bibliography beneath it. The assembler and
+   gate require exactly one `Figure legends` section title and one identifier per figure;
+   never repeat `Figure N.` at the start of the corresponding legend body.
+5. Read the assembled file from beginning to end. Fix the source section, abstract,
+   keywords or legend file and re-run the assembler; do not hand-splice the first build.
+   The S17 gate runs `assemble.py --check`, so omissions or manual divergence fail even
+   when the visible heading structure still looks valid.
+6. `analysis_reproduces` is re-checked here: any analysis code, raw data or results edit since
+   the S06 proof needs a new run before S17 can close:
+   `.\.venv\Scripts\python.exe tools/reproduce.py run --wait`, in the
+   background; check the log every 2-3 minutes (last lines only), finished at `REPRODUCE DONE`,
+   never short polling loops. It ends at once with `REUSED` when only presentation changed.
+
+## Outputs
+- `07_manuscript/title.md`
+- `07_manuscript/abstract.md`
+- `07_manuscript/keywords.md`
+- `07_manuscript/full_manuscript.md`
+- `07_manuscript/statements.md` (optional abbreviation list only; administrative facts wait)
+
+## Hard rules
+- 1.10.0 length health check: `draft_length_targets` and the 45-60 reference band (`reference_library_health`) only warn - report them in the advance note; trim to a journal's limits after S20. Every library entry is cited or has a reason in `06_refs/uncited_reasons.json` `{"<key>": "<why not cited>"}` (blocking).
+- Keywords: the source line is comma-joined. The count follows `target_journal.json` keywords.min/max when a journal is already known (default 3-6); the journal's separator and its heading names (e.g. `main_text_headings` "Materials and Methods") are applied by the DOCX build, not in Markdown.
+- Body text is continuous paragraphs (1.9.0). Lists only where a sentence truly cannot carry the content (rarely more than one short list per section); every result, count, criterion, covariate and sensitivity finding is written as a sentence. `prose_not_lists` fails above `body_list_items_max` items or `body_list_share_max` of the blocks.
+- Do not ask for or invent authors, affiliations, ORCIDs, grants or correspondence details.
+- Do not present title choices. Select the strongest accurate title automatically.
+- Keywords appear immediately after the Abstract and nowhere before it.
+- `References` and `Figure legends` are explicit level-1 sections; figure legends are the
+  final manuscript section.
+- `full_manuscript.md` is the canonical assembled view after this stage. Later scientific or
+  human edits return through `tools/rework.py` to the owning component source, then rebuild
+  this file; never patch it as a detached manuscript.
+
+## Close
+```
+.\.venv\Scripts\python.exe tools/wf.py check
+.\.venv\Scripts\python.exe tools/wf.py advance --note "full manuscript assembled; selected title: <title>; keywords=<n>; figure legends=<n>"
+```
+

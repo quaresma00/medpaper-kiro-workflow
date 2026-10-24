@@ -1,89 +1,56 @@
 # S19 - Review rounds on the complete paper, then the user's release
 
-## Purpose
-Improve the complete scientific paper in subagent review rounds, report each round to the user
-once, and stop when the user confirms with the exact sentence 我确认这一版. Then freeze.
-
-## This stage needs the user
-Only for one answer per round. Do not ask permission per finding or per small change, and do
-not prepare any export package. Do not ask for authors, affiliations, funding or other
-title-page administration here.
+Goal: improve the paper in subagent review rounds, report each round once, stop when the
+user confirms with the exact sentence 我确认这一版, then freeze the science.
+Details (fixing rules, rework routing, preview/confirm-rewind): `reference/stage_details/S19_human_review.md`.
 
 ## One round
-1. **Review.** Round 1 was opened at S18 and its review is
-   `07_manuscript/independent_publishability_review.md`. For a later round:
+1. Review. Round 1 is the S18 review. Later rounds (allowed even while the previous round
+   awaits the user; they are linked to it):
 ```
 .\.venv\Scripts\python.exe tools/review_round.py start --delta
 ```
-   Invoke the read-only `medpaper-reviewer` agent as a subagent with exactly the printed paths
-   (the current manuscript, supplementary Methods, tables via their fresh `.wf/review_text/`
-   copies, rendered figure PNGs, legends, captions). `--delta` gives it only what changed since
-   the last round plus dependants; omit it for a full re-read. Never use an older extract.
-2. **Fix on your own judgement.** Apply every change that makes the paper better: correct
-   errors, clarify, tighten, fix inconsistencies. Skip a finding only with a reason (wrong,
-   out of scope, would weaken the paper, or needs a fact only the user has). Edit the owning
-   source (component Markdown, results via the producing analysis, table/figure code), then
-   rebuild only its dependants and run `tools/manuscript/assemble.py --check`. A changed number
-   reruns its analysis. If the science is already frozen (a round that came back from S24) or
-   a rework round is open, route the change through `tools/rework.py` (batch --sealed, check,
-   mark, close) and re-freeze afterwards with `scientific_freeze.py capture --force`.
-3. **Close and report once.**
+   Give the `medpaper-reviewer` agent only the printed bundle path and brief; it writes its
+   report to `.wf/review_bundle/<round>/report.md`.
+2. Fix on your own judgement. Batch ALL analysis edits of the round into one plan, re-run the
+   chain once and reproduce once (`.\.venv\Scripts\python.exe tools/reproduce.py run --wait`).
+   Prose rewrites go to the `medpaper-clinical-writer` agent:
+```
+.\.venv\Scripts\python.exe tools/manuscript/writer_bundle.py build --stage S19_human_review --target 07_manuscript/<section>.md
+.\.venv\Scripts\python.exe tools/manuscript/assemble.py --check
+```
+   Edit owning sources only, rebuild dependants. Science already frozen or a rework round
+   open -> `tools/rework.py` (`preview` first; an S19 return needs the user's 我确认回退).
+3. Close against the saved report (default: the bundle's report.md); every F-numbered finding
+   listed once; numbers/grouping/conclusion_strength are changed or `author`, never kept:
 ```
 .\.venv\Scripts\python.exe tools/review_round.py close --findings critical=<n>,major=<n>,minor=<n> --finding <id> <category> <status> "<one line>" --change <file> "<one line>" --kept "<id>" "<why not changed>"
 ```
-   List every finding once: `--finding <id> <numbers|grouping|conclusion_strength|other> <changed|kept|author> "<one line>"`.
-   numbers/grouping/conclusion_strength findings are never `kept` on your preference: change
-   them, or mark `author` and list them as pending author decisions (record each answer with
-   `review_round.py author <id> change|keep --words "<user's words>"`).
-   Then send the user ONE concise message: issues found grouped by severity; what changed (file
-   + one line each); what was deliberately not changed and why; the paths of the manuscript,
-   tables and figures; pending author decisions. End with one question:
+   Author answers: `review_round.py author <id> change|keep --words-file <utf-8 file>`.
+4. ONE message to the user: findings by severity, changes (file + one line), what was kept
+   and why, paths, pending author decisions. End with:
    > 本轮审阅与修改已完成。需要再审一轮请直接说明；确认当前版本请回复：我确认这一版
-   Only that exact sentence (or "I confirm this version") confirms; "无需继续审阅", "OK",
-   "可以" do not - ask again for the sentence.
-4. **Record the answer.**
+   Only that sentence (or "I confirm this version") confirms.
+5. Record the answer (Chinese words: prefer `--words-file`; mojibake is refused):
 ```
 .\.venv\Scripts\python.exe tools/review_round.py decide another_round --words "<user's words>"
 .\.venv\Scripts\python.exe tools/review_round.py decide no_further_review --words "我确认这一版"
 ```
-   `another_round` -> run the next round. `no_further_review` also records
-   `manuscript_human_reviewed=NO_FURTHER_REVIEW` bound to the round id and version hash, writes
-   `07_manuscript/human_review.md` from the round record. Silence, thanks, "continue" or "looks
-   fine" are not confirmation. User feedback given in between is handled in the next
-   round's fixes like a finding. Optional, only if the user explicitly asks for an outside
-   reviewer copy: `tools/review_round.py export` (read-only copy + one-page change summary).
 
 ## Freeze the science
-After `no_further_review`:
 ```
 .\.venv\Scripts\python.exe tools/manuscript/scientific_freeze.py capture
 ```
-The freeze binds to the latest round. `07_manuscript/` is read-only from here; journal
-requirements are adapted in `08_submission/manuscript/` from S20 on. Re-freeze
-(`capture --force`) only after a reworked scientific change.
+`07_manuscript/` is read-only from here; journal edits go to `08_submission/manuscript/`.
 
 ## Outputs
 - `07_manuscript/human_review.md` (generated by `review_round.py`)
 - `07_manuscript/scientific_freeze.json`
 
-## Hard rules
-- 1.11.0: give the reviewer the one bundle path `review_round.py start` prints and its
-  neutral brief (never known deviations or earlier conclusions). Save the full report and
-  `close --report <file>`: every F-numbered finding of every section is listed
-  (`--finding`), kept ones with `--kept ID "reason"` (`review_findings_closed`).
-- 1.11.0: before `rework.py check`, `rework.py preview` shows presentation vs science
-  without recording anything. A number inside a label (Online Resource 2, Table S3, panel or
-  item numbers) is not a fact. Writes outside the sealed round's files are refused at write
-  time. An S19 return never happens automatically: check/seal STOP and you ask the user;
-  only the words '我确认回退' (`rework.py confirm-rewind --words ...` or `seal
-  --rewind-words ...`) authorise it.
-- Long checks: `wf check --quiet` (failures + one line) or `--summary`; run long ones in the background with `--log temp/check.log` and poll the `[wf] finished rc=` marker.
-- The S18 verdict is not the user's approval; only the recorded `no_further_review` is.
-- `review_round_approved` fails if anything the round covered changed after it closed; run a
-  new round (`--delta` is fine).
-- Never change a number without rerunning the analysis that produced it.
-- Efficiency comes from delta rounds and dependency-scoped rebuilds, never from skipping a
-  finding's fix, a gate or a figure.
+## Gate
+review round approved and bound to the latest round, findings closed, explicit
+confirmation, revision rounds closed, freeze captured (non-overridable). Do not ask for
+authors here. Export copies only when the user asks (`review_round.py export`).
 
 ## Close
 ```

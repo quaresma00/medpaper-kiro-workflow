@@ -243,6 +243,14 @@ def review_round_approved(ctx: Ctx) -> Result:
             return Result(True, "review_round_approved",
                           "legacy S24 confirmation (before 1.8.1 review rounds) with a package freeze")
     problems = rr.problems(ctx.project, scope, ctx.state.decision(cfg["decision"]))
+    pinned = getattr(ctx.state, "pin_excludes", None)
+    if not problems and not (pinned and pinned(ctx.stage.id, "1.10.0")):
+        # 1.12.0 (B4): explicit_confirmation merged here - the exact sentence bound to the
+        # current version is part of the approval, reported in the same gate line.
+        from .v1100 import explicit_confirmation
+        conf = explicit_confirmation(ctx)
+        if not conf.ok:
+            problems = [conf.detail]
     if problems:
         return Result(False, "review_round_approved", "; ".join(problems[:6]), [
             "One round: .venv/Scripts/python.exe tools/review_round.py start [--delta]; invoke "

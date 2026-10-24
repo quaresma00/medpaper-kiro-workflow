@@ -18,6 +18,12 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+
+def _card(name) -> str:
+    """1.12.0 (D1): a stage card plus its reference/stage_details/ long form."""
+    from wfcore.registry import card_full_text
+    return card_full_text(name)
+
 sys.path.insert(0, str(ROOT / "tools"))
 
 
@@ -101,9 +107,9 @@ def run_order(tmp: Path, record, section) -> None:
             ("S07", "figure_text_planned"), ("S08", "reference_provenance"),
             ("S09", "displays_final_for_results"), ("S09", "effects_with_intervals"),
             ("S13", "argument_roles_covered"), ("S17", "reference_library_health"),
-            ("S19", "explicit_confirmation"), ("S20", "display_plan_fits_journal"),
-            ("S21", "declarations_assessed"), ("S21", "display_plan_fits_journal"),
-            ("S24", "explicit_confirmation")}
+            ("S20", "display_plan_fits_journal"),
+            ("S21", "declarations_assessed"), ("S21", "display_plan_fits_journal")}
+    # 1.12.0 (B4): explicit_confirmation runs inside review_round_approved (S19/S24).
     free = set(raw["freeform"]["globs"])
     record("every 1.10.0 gate is wired with since = 1.10.0; its files are declared freeform",
            new == want and {"02_data/variable_crosswalk.json", "03_analysis/spot_check.json",
@@ -112,9 +118,11 @@ def run_order(tmp: Path, record, section) -> None:
                             "08_submission/declarations_assessment.json"} <= free,
            str(sorted(want ^ new)))
     later = {s["id"]: {g["check"] for g in s["gate"]} for s in raw["stage"]}
-    record("after S20 the journal's typed limits are hard (journal_limits_met at S22/S23/S25)",
-           all("journal_limits_met" in later[s] for s in
-               ("S22_polish", "S23_package", "S25_submission_audit")))
+    # 1.12.0 (B4): at S23/S25 the limits are a row of submission_checklist_measured.
+    record("after S20 the journal's typed limits are hard (journal_limits_met at S22; measured "
+           "checklist row at S23/S25)",
+           "journal_limits_met" in later["S22_polish"] and all(
+               "submission_checklist_measured" in later[s] for s in ("S23_package", "S25_submission_audit")))
     r = tmp / "len"
     p = _paper(r, "S17_assemble")
     _w(p, "07_manuscript/full_manuscript.md",
@@ -372,7 +380,7 @@ def run_review(tmp: Path, record, section) -> None:
     record("export on request: read-only files + a one-page change summary",
            ex.returncode == 0 and "CHANGES.md" in names and "07_manuscript/full_manuscript.md" in names
            and mode == 0o444, ex.stdout + ex.stderr)
-    cards = "".join((ROOT / f"pipeline/stages/{n}.md").read_text(encoding="utf-8")
+    cards = "".join(_card(n)
                     for n in ("S19_human_review", "S24_package_human_review"))
     record("cards ask for the exact sentence and mention export only as optional on request",
            cards.count("我确认这一版") >= 4 and "review_round.py export" in cards

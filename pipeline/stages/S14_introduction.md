@@ -17,11 +17,15 @@ this stage only.
    3. What is not established - the specific gap, narrow enough to be closable by this
       study. This is the sentence the reviewer tests the whole paper against.
    4. The objective. One sentence, matching `protocol_final.md` word for word in substance.
-2. Write `project/07_manuscript/introduction.md`. Cite with pandoc markers `[@key]`, keys
-   from `refs.bib` only.
-3. Check the count targets:
+2. Write `project/07_manuscript/introduction.md` through the `medpaper-clinical-writer` agent
+   (1.12.0): build its bundle and pass the printed MANIFEST path. Cite with pandoc markers
+   `[@key]`, keys from `refs.bib` only.
 ```
-.\.venv\Scripts\python.exe tools/wf.py config list        # intro_words_min/max, intro_refs_min/max
+.\.venv\Scripts\python.exe tools/manuscript/writer_bundle.py build --stage S14_introduction
+```
+3. Check the soft upper budgets (no lower bound) and the engineering-language lint:
+```
+.\.venv\Scripts\python.exe tools/wf.py config list        # intro_words_max, intro_refs_min/max
 .\.venv\Scripts\python.exe tools/wf.py check
 ```
    If the target journal turns out to want something different, change the target rather

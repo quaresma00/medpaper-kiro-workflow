@@ -104,6 +104,28 @@ class Pipeline:
         return out
 
 
+DETAILS_DIR = "reference/stage_details"
+CARD_MAX_CHARS = 4000  # 1.12.0 (D1): hard limit; target 3000. Detail lives in DETAILS_DIR.
+
+
+def card_details_path(card: str | Path) -> Path:
+    """reference/stage_details/<card name>: the long form a slim card points to."""
+    name = Path(str(card)).name
+    if not name.endswith(".md"):
+        name += ".md"
+    return paths.repo_root() / DETAILS_DIR / name
+
+
+def card_full_text(card: str | Path) -> str:
+    """A stage card plus its details file (what the stage documents in full)."""
+    name = Path(str(card)).name
+    if not name.endswith(".md"):
+        name += ".md"
+    text = (paths.pipeline_dir() / "stages" / name).read_text(encoding="utf-8")
+    details = card_details_path(name)
+    return text + ("\n" + details.read_text(encoding="utf-8") if details.is_file() else "")
+
+
 def effective_targets(project: Path | None) -> dict:
     """[targets] of pipeline.toml overlaid by [targets] of <paper>/.wf/config.toml."""
     out = dict(tomllib.loads(paths.pipeline_file().read_text(encoding="utf-8")).get("targets", {}))

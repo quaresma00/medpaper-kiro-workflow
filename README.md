@@ -2,7 +2,16 @@
 
 一套面向医学与临床研究的 Kiro 工作流。它把“研究想法”推进为经过数据、文献、统计结果、图表、人工复核和期刊规则共同校验的投稿包，而不是只让 AI 一次性写出一篇看似完整的论文。
 
-当前版本：`1.11.0`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE + R 4.3+
+当前版本：`1.12.0`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE + R 4.3+
+
+## 1.12.0 变化（精简与修误报）
+
+- **误报修复**：回查已完成阶段不再判 `single_section_written`；R 渲染中 QC 等待 `.rendering` 标记、报“渲染中”而非失败；Excel 锁文件 `~$*` 忽略、被占用的工作簿报 IO 问题，表注说明性常数登记在显示词典 `footnote_constants`；审阅覆盖改为增量（只要求改动文件）；清单 WARN 不再显示为 FAIL；堆叠柱合法；bib 导出与检查共用一条规则；表注改为逐表结构检查。
+- **更轻**：删去引言/讨论字数下限；默认推迟目视检查无需记录 DEFER（仍在 S23 结清）；“缺少产出”合并为一行；polish 三条合一；`docx_keep_with_next` 并入 `docx_bundle_ready`，确认句并入 `review_round_approved`，S23/S25 重复的期刊上限、参考文献计数、补充方法检查改为清单行（门禁条目 287→281）；`wf check` 默认只打印失败项+一行摘要，完整清单写 `.wf/logs/`。
+- **CLI**：`--words/--why` 中文乱码自动修复，另支持 `--words-file/--words-b64`，写入后回读校验；`wf status` 同时显示引擎版本、状态记录版本与论文锁定版本（只有 `wf migrate --yes` 改锁定）；回退/重进计入 `loops`；`.wf/logs/`（或 `temp/logs/`）为日志目录；`reference_count.py show` 在标题页生成前不报错；`review_round.py status` 输出合法 JSON，等待用户答复时可开 delta 轮；`target_journal.json` 的 `line_numbers` 控制 Word 行号；`--wait` 心跳 ≤30 s。
+- **卡片与编排**：每张阶段卡 ≤4000 字符（细节移至 `reference/stage_details/`），SKILL.md 精简并新增“执行经济”；`wf handoff` 输出 ≤60 行的交接包；审阅代理只可写自己的 `report.md`，`close` 默认读取；新增 `medpaper-clinical-writer` 代理与 `tools/manuscript/writer_bundle.py`（只含临床标签、文字化结果、表图文字，无代码/键名/日志）。
+- **提前发现**：`first_reader_displays`（单位、分母、句末标点、期刊禁用图内标题；S10/S11 警告、S12 阻断并含缩写/工程用语/流程图单位）；新增展示项须写 `non_redundancy`；S17 起审阅包附草稿 DOCX（可转换时附页面预览）。
+- **迁移**：只记事件；新门禁 `since = "1.12.0"`，已完成阶段沿用锁定门禁集。
 
 ## 1.11.0 变化（临床表述层）
 

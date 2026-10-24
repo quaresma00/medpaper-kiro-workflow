@@ -22,10 +22,11 @@ from pathlib import Path
 PROVISIONAL = "01_protocol/journal_profile.json"
 TARGET = "08_submission/target_journal.json"
 KEYS = ("font_min_pt", "figure_width_mm", "panel_label_case", "line_art_dpi", "number_format",
-        "spelling", "heading_names")
+        "spelling", "heading_names", "in_figure_title")
+# in_figure_title (1.12.0 F1): false = the journal puts titles in the legend only.
 DEFAULTS = {"font_min_pt": 8.0, "figure_width_mm": {"single": 90.0, "1.5": 140.0, "double": 180.0},
             "panel_label_case": "upper", "line_art_dpi": 600, "number_format": {},
-            "spelling": None, "heading_names": {}}
+            "spelling": None, "heading_names": {}, "in_figure_title": None}
 
 
 def _json(path: Path) -> dict:

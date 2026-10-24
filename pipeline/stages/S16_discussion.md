@@ -1,55 +1,33 @@
 # S16 - Discussion
 
-## Purpose
-Interpret the finding against the literature you actually read. One file, this stage only.
+Goal: interpret the finding against the literature actually read. One file, this stage only.
+Details (move-by-move structure, inputs): `reference/stage_details/S16_discussion.md`.
 
-## Inputs
-- `06_refs/deepread/*.md` - the ~5 full texts, read
-- `06_refs/library.json` - abstracts for the wider context
-- `03_analysis/notes.md` -> `Discussion points`, `Limitations`, `Surprises`
-- `07_manuscript/results.md` - what you may interpret (and nothing beyond it)
-- `01_protocol/protocol_diff.md` - deviations that must be owned as limitations
-
-## Procedure
-1. Structure, in this order:
-   1. **Principal finding** - one paragraph, plain, no hedging, no new numbers.
-   2. **Comparison with prior work** - this is where the deep reads earn their place.
-      Where you agree, say with whom and why. Where you disagree, name the study and give a
-      mechanistic or methodological reason (population, exposure definition, follow-up,
-      adjustment set, era). Every deep-read paper must appear here; the gate checks it.
-   3. **Interpretation / mechanism** - clearly labelled as inference, not as demonstrated.
-   4. **Clinical or research implications** - proportionate to the evidence. A single
-      observational study does not change practice.
-   5. **Strengths and limitations** - specific and quantified. Include every protocol
-      deviation from `protocol_diff.md`, residual confounding, generalisability limits,
-      power, and measurement error. State the direction each bias would push the estimate.
-   6. **Conclusion** - two or three sentences, no stronger than the Results support.
-   Write these as **continuous prose with no subheadings**: each move opens with a topic
-   sentence that carries the transition. Subheadings appear only if the journal guide frozen
-   at S20 requires them (`discussion_subheadings: true`); `manuscript_structure` rejects them
-   otherwise. Adjacent citations go in one group, `[@a; @b; @c]`, so they render as [1-3].
-2. Write `project/07_manuscript/discussion.md` with pandoc citations `[@key]`.
-3. Check the counts: `.\.venv\Scripts\python.exe tools/wf.py check` (word and reference targets, and that every
-   deep-read paper is cited).
+## Do
+1. Build the writer bundle (deep-read notes, library, results in words, display dictionary,
+   journal profile, exemplars) and delegate the prose to the `medpaper-clinical-writer`
+   agent with the printed MANIFEST path:
+```
+.\.venv\Scripts\python.exe tools/manuscript/writer_bundle.py build --stage S16_discussion
+```
+2. Structure, as continuous prose without subheadings (only if the journal requires them):
+   principal finding (no new numbers) -> comparison with prior work (every deep-read paper,
+   with a methodological reason for disagreement) -> interpretation, labelled as inference ->
+   proportionate implications -> specific strengths and limitations (every protocol deviation,
+   direction of each bias) -> a two-to-three-sentence conclusion. Adjacent citations in one
+   group `[@a; @b]`.
+3. Review the written `07_manuscript/discussion.md`, then `wf check` (engineering language,
+   prose, citations, deep reads cited, soft word/reference budget).
 
 ## Outputs
 - `07_manuscript/discussion.md`
 
-## Hard rules
-- Word and reference targets are soft budgets (warnings) until S20.
-- Body text is continuous paragraphs (1.9.0). Lists only where a sentence truly cannot carry the content (rarely more than one short list per section); every result, count, criterion, covariate and sensitivity finding is written as a sentence. `prose_not_lists` fails above `body_list_items_max` items or `body_list_share_max` of the blocks.
-- ONE section file this stage.
-- Never mention the pipeline's own history (independent review, earlier draft, previous
-  version, reviewer). A change of analysis is a "protocol deviation" or "post hoc analysis".
-- No new results. Own numbers must already be in `results.md` and a results JSON. A prior
-  study's number is allowed only in the same sentence as `[@key]` of that study (verified
-  library, ideally deep-read); `number_allowlist.tsv` never applies here (1.10.0).
-- No causal language for an observational design. "Associated with", not "leads to".
-- Limitations are not a list of generic caveats. "Single-centre design" alone is not a
-  limitation section; say what it does to the estimate.
-- Do not claim a finding is "the first" unless S02's search supports it, and cite that.
-- No stock closers: not "further studies are warranted" as the whole future-work paragraph,
-  not "paves the way", not "holds promise".
+## Gate
+citekeys resolve and are live-verified, deep reads cited, numbers traceable (a prior
+study's number only in the same sentence as its verified citation), engineering language,
+continuous prose; word/reference counts are soft upper budgets until S20. No causal
+language for observational designs, no pipeline history, no stock closers, no unsupported
+"first".
 
 ## Close
 ```

@@ -1,0 +1,73 @@
+# S01 - Intake: normalize the research idea - details
+
+> Long form of `pipeline/stages/S01_intake.md` (moved out of the card in 1.12.0 so the
+> card stays short). Read only the section you need; the card has the commands.
+>
+> 1.12.0 supersedes older wording below where they differ: long runs use `--wait` (one
+> blocking call, heartbeat <= 30 s) and logs live in `.wf/logs/` (or `temp/logs/`);
+> `wf check` prints failures + one summary line by default; in `deferred` visual mode no
+> DEFER decision is recorded (the look is owed at S23); the `medpaper-reviewer` agent
+> writes only its own `report.md` in the review bundle; declaration and section heading
+> names come from `target_journal.json` (defaults otherwise).
+
+## Purpose
+Turn the user's free-form idea document into a machine-readable spec, so that every
+later stage argues against the same target instead of a remembered paraphrase.
+
+## Inputs
+- The user's research idea file. It belongs in `project/00_input/`. If the user pasted
+  it into chat instead, save it there first (`project/00_input/idea_source.md`).
+
+## Procedure
+1. Read the idea file in full. Do not summarize from the filename or a partial read.
+2. Extract the study skeleton. Where the idea is silent, write `null` and add the gap to
+   `open_questions` - never fill a gap with a plausible guess.
+3. Write `project/01_protocol/idea.json`:
+
+```json
+{
+  "title_working": "",
+  "design": "cross-sectional | cohort | case-control | RCT | diagnostic accuracy | prognostic model | meta-analysis | secondary analysis of <db>",
+  "population": {"who": "", "setting": "", "inclusion": [], "exclusion": []},
+  "exposure": {"name": "", "definition": null, "measurement": null},
+  "comparator": {"name": "", "definition": null},
+  "outcomes": {"primary": [{"name": "", "definition": null, "timing": null}], "secondary": []},
+  "covariates_proposed": [],
+  "claimed_novelty": "one sentence: what is not yet known that this would establish",
+  "data_source_candidates": [{"name": "", "access": "public | licensed | institutional | to-be-collected", "why": ""}],
+  "study_design": "cross_sectional | cohort_retrospective | cohort_prospective | case_control | rct | diagnostic_accuracy | prognostic_model | mendelian_randomization | meta_analysis | systematic_review | secondary_analysis | qualitative | case_report | other",
+  "data_source": {"type": "public_database | own_centre_retrospective | prospective_collection | biospecimens | third_party_registry | published_studies (or a list)", "name": "", "third_party": true, "redistributable": false, "deidentified": true, "vulnerable_populations": []},
+  "open_questions": ["every ambiguity you had to leave unresolved"]
+}
+```
+4. Create `project/03_analysis/notes.md` with these four headings and a first pass at each.
+   This file is the ONLY legitimate source for Introduction and Discussion framing later:
+
+```markdown
+# Notes
+## Introduction points
+## Discussion points
+## Limitations
+## Surprises / must-not-forget
+```
+5. If `open_questions` contains anything that would change the design, ask the user now.
+   Do not proceed on assumptions about population, exposure definition, or outcome timing.
+
+## Outputs
+- `01_protocol/idea.json`
+- `03_analysis/notes.md`
+
+## Hard rules
+- 1.10.0 `study_basis_recorded`: `study_design` and `data_source` are required structured fields (true/false/"unknown"). If the idea does not state them, ask the user now in one question; ethics, consent and data availability are later judged from them (S21).
+- Spelling system (1.9.0): new papers are American English (`.wf/config.toml` spelling = "american"). If the user wants British, record it now: `wf config set spelling british`. Table and R/Python figure builders read it (and the chosen journal's `target_journal.json` spelling later), so switching is a rebuild, never a scientific change.
+- If people will code, classify or adjudicate any variable, ask now in the same question who
+  they are: role, specialty and years of experience for each coder and the adjudicator.
+  Record it in `idea.json` (`human_coders`); Methods needs it and it cannot be reconstructed later.
+- No literature search yet. That is S02, and it must be recorded through the PubMed client.
+- Do not write any manuscript prose in this stage.
+
+## Close
+```
+.\.venv\Scripts\python.exe tools/wf.py check
+.\.venv\Scripts\python.exe tools/wf.py advance --note "idea normalized; design=<x>; unresolved: <...>"
+```

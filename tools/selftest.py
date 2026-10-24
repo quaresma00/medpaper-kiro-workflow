@@ -27,6 +27,12 @@ from pathlib import Path
 os.environ.setdefault("MEDPAPER_STDOUT_ENCODING", "utf-8")
 
 ROOT = Path(__file__).resolve().parents[1]
+
+def _card(name) -> str:
+    """1.12.0 (D1): a stage card plus its reference/stage_details/ long form."""
+    from wfcore.registry import card_full_text
+    return card_full_text(name)
+
 sys.path.insert(0, str(ROOT / "tools"))
 
 PASS, FAIL = "PASS", "FAIL"
@@ -2109,14 +2115,19 @@ def run_codex_integration() -> None:
 
     # Delegated review agents. A reviewer that can write files or advance a stage is not a
     # reviewer, so read-only is the property under test, not merely their existence.
-    for name, stages in (("medpaper-reviewer", "S18/S25"), ("medpaper-deepreader", "S15")):
+    from wfcore import adapters as _adapters
+    for name, stages in (("medpaper-reviewer", "S18/S25"), ("medpaper-deepreader", "S15"),
+                         ("medpaper-clinical-writer", "S08/S09/S14/S16/S19")):
         path = ROOT / f".kiro/agents/{name}.md"
         if not path.is_file():
             record(f"{name} agent exists", False, f"missing .kiro/agents/{name}.md")
             continue
         text = path.read_text(encoding="utf-8")
-        record(f"{name} is read-only", 'tools: ["read"]' in text,
-               f"used at {stages}; tools must be read-only")
+        # 1.12.0: deepreader read-only; reviewer writes only its report.md; the clinical
+        # writer only manuscript prose files.
+        scope_problems = _adapters.agent_scope_problems(name, text)
+        record(f"{name} writes nothing beyond {_adapters.AGENT_WRITE_SCOPE[name] or 'nothing (read-only)'}",
+               not scope_problems, f"used at {stages}: {scope_problems}")
         denied = [cap for cap in ("fs_write", "shell", "mcp", "subagent")
                   if f"capability: {cap}" not in text]
         record(f"{name} denies write/shell/mcp/subagent", not denied,
@@ -2133,13 +2144,13 @@ def run_codex_integration() -> None:
     for stage_id, agent in (("S15_deepread", "medpaper-deepreader"),
                             ("S18_independent_review", "medpaper-reviewer"),
                             ("S25_submission_audit", "medpaper-reviewer")):
-        card = (ROOT / f"pipeline/stages/{stage_id}.md").read_text(encoding="utf-8")
+        card = _card(stage_id)
         record(f"{stage_id} names its delegate", agent in card,
                f"card must name `{agent}` so the work is not done in the main context")
 
     record("pipeline and skill versions agree",
-           pipe["meta"]["version"] == "1.11.0" and 'version: "2.4.0"' in skill,
-           f'pipeline={pipe["meta"]["version"]}, skill=2.4.0 (Kiro adapter revision)')
+           pipe["meta"]["version"] == "1.12.0" and 'version: "2.5.0"' in skill,
+           f'pipeline={pipe["meta"]["version"]}, skill=2.5.0 (Kiro adapter revision)')
     record("all 25 stage cards exist",
            len(pipe["stage"]) == 25 and
            all((ROOT / "pipeline" / s["card"]).is_file() for s in pipe["stage"]),
@@ -2157,17 +2168,17 @@ def run_codex_integration() -> None:
     authors = next(s for s in pipe["stage"] if s["id"] == "S21_authors")
     package_human = next(s for s in pipe["stage"] if s["id"] == "S24_package_human_review")
     final_audit = next(s for s in pipe["stage"] if s["id"] == "S25_submission_audit")
-    review_card = (ROOT / "pipeline/stages/S18_independent_review.md").read_text(encoding="utf-8")
-    package_card = (ROOT / "pipeline/stages/S23_package.md").read_text(encoding="utf-8")
-    package_human_card = (ROOT / "pipeline/stages/S24_package_human_review.md").read_text(encoding="utf-8")
-    human_card = (ROOT / "pipeline/stages/S19_human_review.md").read_text(encoding="utf-8")
-    journal_card = (ROOT / "pipeline/stages/S20_journal.md").read_text(encoding="utf-8")
-    final_audit_card = (ROOT / "pipeline/stages/S25_submission_audit.md").read_text(encoding="utf-8")
+    review_card = _card("S18_independent_review")
+    package_card = _card("S23_package")
+    package_human_card = _card("S24_package_human_review")
+    human_card = _card("S19_human_review")
+    journal_card = _card("S20_journal")
+    final_audit_card = _card("S25_submission_audit")
     record("independent reviewer is singular, read-only, and before author intake",
            independent.get("needs_user", False) is False and human.get("needs_user") is True and
            authors.get("needs_user") is True and "exactly one independent subagent" in review_card and
            "must not edit files" in review_card and "Do not ask for authors" in
-           (ROOT / "pipeline/stages/S19_human_review.md").read_text(encoding="utf-8"),
+           _card("S19_human_review"),
            "one frozen-package review, then user review, then authors")
     record("final package audit waits for explicit user OK and is independent",
            package_human.get("needs_user") is True and
@@ -2260,7 +2271,7 @@ def run_codex_integration() -> None:
                for g in reflib["gate"]) and
            required_live_stages.issubset(live_reference_stages) and
            "verified: true` by itself has no authority" in
-           (ROOT / "pipeline/stages/S13_reflib.md").read_text(encoding="utf-8") and
+           _card("S13_reflib") and
            "NON_OVERRIDABLE_GATES" in
            (ROOT / "tools/wfcore/cli.py").read_text(encoding="utf-8"),
            "fresh EFetch + raw XML/library hashes + repeated live checks through final audit")
@@ -2277,7 +2288,7 @@ def run_codex_integration() -> None:
            '"data_acquisition_complete"' in
            (ROOT / "tools/wfcore/cli.py").read_text(encoding="utf-8") and
            "full_protocol_defined_universe" in
-           (ROOT / "pipeline/stages/S04_data.md").read_text(encoding="utf-8"),
+           _card("S04_data"),
            "source total + received counts + pagination + raw/code hashes + anti-cap scan")
 
     legacy = [
@@ -2289,7 +2300,7 @@ def run_codex_integration() -> None:
 
     policy_text = "\n".join(p.read_text(encoding="utf-8") for p in required)
     cards_text = "\n".join(
-        (ROOT / "pipeline" / s["card"]).read_text(encoding="utf-8") for s in pipe["stage"])
+        _card(s["card"]) for s in pipe["stage"])
     record("AI disclosure remains user-controlled",
            "Do not draft or insert an AI-use disclosure" in
            "\n".join(pipe["policy"]["invariants"]) and
@@ -2302,7 +2313,7 @@ def run_codex_integration() -> None:
 
     methods_stage = next(s for s in pipe["stage"] if s["id"] == "S08_methods")
     outputs_gate = next(g for g in methods_stage["gate"] if g["check"] == "outputs_exist")
-    methods_card = (ROOT / "pipeline/stages/S08_methods.md").read_text(encoding="utf-8")
+    methods_card = _card("S08_methods")
     methods_guide = (ROOT / "reference/methods-structure.md").read_text(encoding="utf-8")
     record("supplementary Methods is declared but optional",
            "07_manuscript/supplementary_methods.md" in methods_stage["outputs"] and
@@ -2352,7 +2363,7 @@ def run_codex_integration() -> None:
     counted = {5: "five", 6: "six", 7: "seven", 8: "eight"}.get(len(conflicts), "")
     record("prose citing the conflict count matches the table",
            bool(counted) and counted in figskill["reason"]
-           and counted in (ROOT / "pipeline/stages/S11_figures.md").read_text(encoding="utf-8"),
+           and counted in _card("S11_figures"),
            f"{len(conflicts)} conflicts -> '{counted}'")
 
     # The table quotes pipeline numbers. If a target moves and the table does not, it lies.
@@ -2368,7 +2379,7 @@ def run_codex_integration() -> None:
            any("audit_medical_figure" in c.get("resolution", "") for c in conflicts),
            "it flags the pipeline's SubFigure panel titles as critical")
 
-    fig_card = (ROOT / "pipeline/stages/S11_figures.md").read_text(encoding="utf-8")
+    fig_card = _card("S11_figures")
     record("S11 tells the agent to activate the figure skill",
            "medical-sci-figure-skill" in fig_card and "figure_atlas.md" in fig_card,
            "card must name the skill and the atlas file to read")
@@ -3865,7 +3876,7 @@ def run_language_policy() -> None:
     cards = [ROOT / f"pipeline/stages/{c}.md" for c in ("S04_data", "S05_analysis", "S10_tables",
                                                         "S11_figures")]
     cards.append(ROOT / ".kiro/skills/medpaper-pipeline/SKILL.md")
-    missing = [c.name for c in cards if "reference/language_policy.toml" not in c.read_text(encoding="utf-8")]
+    missing = [c.name for c in cards if "reference/language_policy.toml" not in (_card(c.name) if c.parent.name == "stages" else c.read_text(encoding="utf-8"))]
     record("S04/S05/S10/S11 and SKILL.md point at the language policy", not missing, str(missing))
     record("figures default to R", str(registry.load().targets.get("figure_engine")) == "R")
 
@@ -5154,7 +5165,7 @@ def run_v160(tmp: Path) -> None:
            any(g["check"] == "reader_review_coverage" for g in s18["gate"])
            and "review_round.py start --scope manuscript" in (ROOT / "pipeline/stages/S18_independent_review.md")
            .read_text(encoding="utf-8"))
-    record("pipeline version is 1.11.0", pipe.meta.get("version") == "1.11.0")
+    record("pipeline version is 1.12.0", pipe.meta.get("version") == "1.12.0")
 
 
 def run_v170(tmp: Path) -> None:
@@ -5666,7 +5677,7 @@ def run_reporting_checklist(tmp: Path) -> None:
     import re
     import tomllib
     from wfcore.state import State
-    cards = {p.stem: p.read_text(encoding="utf-8") for p in (ROOT / "pipeline/stages").glob("S*.md")}
+    cards = {p.stem: _card(p.name) for p in (ROOT / "pipeline/stages").glob("S*.md")}
     named = sorted(k for k, t in cards.items()
                    if re.search(r"STROBE|TRIPOD|CONSORT|STARD|RECORD \d|Guideline:", t)
                    and k not in ("S20_journal", "S23_package"))
@@ -5780,6 +5791,9 @@ def main() -> int:
     os.environ["MEDPAPER_HOME"] = str(tmp / "home")
     os.environ["MEDPAPER_PAPERS_ROOT"] = str(tmp / "papers")
     os.environ["PYTHONDONTWRITEBYTECODE"] = "1"  # child tools must not leave __pycache__ in the engine
+    # 1.12.0 (F3): review bundles from S17 build a Word draft; page rendering through Word or
+    # LibreOffice is slow and machine-dependent, so fixtures skip it unless a test asks.
+    os.environ.setdefault("MEDPAPER_NO_PREVIEW", "1")
     engine_top_before = sorted(x.name for x in ROOT.iterdir())
     os.environ["MEDPAPER_PROJECT"] = str(proj)
     os.environ["MEDPAPER_ROOT"] = str(ROOT)

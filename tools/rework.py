@@ -1016,6 +1016,9 @@ def _main() -> int:
                                             "resume", "progress", "layout", "preview",
                                             "confirm-rewind"])
     parser.add_argument("--words", default="", help="confirm-rewind: the user's exact words")
+    for opt in ("--words", "--why", "--rewind-words"):  # 1.12.0 (C1): expanded by fix_argv
+        parser.add_argument(f"{opt}-file", help=f"UTF-8 file holding {opt}")
+        parser.add_argument(f"{opt}-b64", help=f"base64 of the UTF-8 {opt} text")
     parser.add_argument("--rewind-words", default="",
                         help="seal/batch --sealed: the user's words authorising an S19 return")
     parser.add_argument("--wait", action="store_true",

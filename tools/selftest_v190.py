@@ -14,6 +14,12 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+
+def _card(name) -> str:
+    """1.12.0 (D1): a stage card plus its reference/stage_details/ long form."""
+    from wfcore.registry import card_full_text
+    return card_full_text(name)
+
 sys.path.insert(0, str(ROOT / "tools"))
 
 
@@ -379,7 +385,7 @@ def run_checks(tmp: Path, record, section) -> None:
     bad, bad_p = finalcopy.check(f)
     record("author final copy: a heading edit passes; a changed number fails and stale checks are caught",
            ok and changed and not bad and any("numbers" in x for x in bad_p), str(problems + bad_p))
-    cards = {n: (ROOT / f"pipeline/stages/{n}.md").read_text(encoding="utf-8")
+    cards = {n: _card(n)
              for n in ("S08_methods", "S09_results", "S14_introduction", "S16_discussion",
                        "S22_polish", "S23_package", "S25_submission_audit")}
     record("cards: prose rule in S08/S09/S14/S16/S22, portal to-do and preview in S23, final copy in S25",

@@ -59,7 +59,8 @@ Judge, from the first round on, as:
   3. a methods and journal reviewer (publication readiness, numbers, claims).
 Number EVERY finding in EVERY section (incl. Reader comprehension and Medical presentation)
 at the start of its line as F1, F2, ... with a category: numbers | grouping |
-conclusion_strength | other, and say whether it is presentation or scientific."""
+conclusion_strength | other, and say whether it is presentation or scientific.
+Write the complete report to {bundle}/report.md - the only file you may write."""
 
 
 def is_confirmation(words: str) -> bool:
@@ -262,23 +263,41 @@ def write_bundle(project: Path, rnd: dict) -> Path:
     stage = str(rnd.get("stage", ""))
     docx += [p.relative_to(project).as_posix() for p in project.glob("08_submission/bundle/*.docx")
              if p.relative_to(project).as_posix() not in docx]
-    pages = []
-    if stage >= "S17" and docx and os.environ.get("MEDPAPER_NO_PREVIEW") != "1":
+    paths = [project / rel for rel in docx]
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "manuscript"))
+    if stage >= "S17" and not any("manuscript" in p.name for p in paths):
+        # 1.12.0 (F3): from S17 the reviewer reads the paper as Word renders it.
         try:
-            import sys
-            sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "manuscript"))
+            import build_docx  # tools/manuscript/build_docx.py
+            from .packagecontent import visible_text
+            draft = build_docx.draft_docx(project, out / "draft" / "manuscript_draft.docx")
+            paths.append(draft)
+            text_copy = out / "files" / "manuscript_draft.docx.txt"
+            text_copy.write_text(visible_text(draft), encoding="utf-8")
+            lines += [f"- {draft} (Word build of the current draft)",
+                      f"- {text_copy} (its text copy)"]
+        except Exception as exc:  # noqa: BLE001 - the Markdown copy above remains
+            lines += ["", f"(DOCX draft build unavailable: {type(exc).__name__}: {exc}; read "
+                      "the Markdown copy of full_manuscript.md)"]
+    pages = []
+    if stage >= "S17" and paths and os.environ.get("MEDPAPER_NO_PREVIEW") != "1":
+        try:
             import preview  # tools/manuscript/preview.py
             import tempfile
-            for rel in docx[:3]:
+            for src in paths[:3]:
                 with tempfile.TemporaryDirectory(prefix="mp_bundle_") as tmp:
-                    pdf = preview.to_pdf(project / rel, Path(tmp))
+                    pdf = preview.to_pdf(src, Path(tmp))
                     for i, img in enumerate(preview.rasterise(pdf, Path(tmp), None, 80), 1):
-                        dst = out / "preview" / f"{Path(rel).stem}-p{i:02d}.png"
+                        dst = out / "preview" / f"{src.stem}-p{i:02d}.png"
                         dst.parent.mkdir(exist_ok=True)
                         shutil.copyfile(img, dst)
                         pages.append(dst)
         except Exception as exc:  # noqa: BLE001 - preview is best effort; the text copies remain
-            lines += ["", f"(DOCX page preview unavailable: {type(exc).__name__}: {exc})"]
+            lines += ["", f"(DOCX page preview unavailable - no Word/LibreOffice converter: "
+                      f"{type(exc).__name__}: {exc}; read the DOCX text copy)"]
+    elif stage >= "S17" and paths:
+        lines += ["", "(DOCX page preview skipped: MEDPAPER_NO_PREVIEW=1; read the DOCX text copy)"]
     if pages:
         lines += ["", "## Rendered Word pages (read them as the reader will see the paper)", ""]
         lines += [f"- {p}" for p in pages]

@@ -611,10 +611,91 @@ def cmd_status(args) -> int:
         print(f"STAGE CARD  ({paths.rel(card)})")
         print(DASH)
         if card.exists():
-            print(_loc(card.read_text(encoding="utf-8").rstrip(), proj))
+            print(_card_text(card, proj))
         else:
             print(f"!! card file missing: {card}")
         print(DASH)
+    return 0
+
+
+def handoff_lines(pipe, st, proj: Path) -> list[str]:
+    """1.12.0 (E1): a compact context pack (<= ~60 lines) for a new session or a delegated step."""
+    from . import reviewrounds as rr
+    from .checks.statecheck import parked_visual
+    stage = pipe.stage(st.current)
+    details = paths.repo_root() / "reference" / "stage_details" / Path(stage.card_path()).name
+    out = [f"paper: {proj}",
+           f"engine {pipe.meta.get('version')} | state recorded by {st.data.get('pipeline_version')}"
+           f" | paper pinned to {st.engine_pin}",
+           f"stage: {stage.id} ({stage.index + 1}/{len(pipe.stages)}) - {stage.title}"
+           + ("  [NEEDS USER INPUT]" if stage.needs_user else ""),
+           f"card: {stage.card_path()}" + (f"  (details: {details})" if details.is_file() else "")]
+    try:
+        import copy
+        local = copy.copy(stage)  # live (network) checks are skipped: the pack must be cheap
+        local.gate = [g for g in stage.gate if not g.get("live")]
+        results = gates.run_stage(pipe, st, proj, local, reuse=True)
+        ok, blocking, warned = gates.summarize(results)
+        fails = [r.check for r in results if r.blocking]
+        warns = [r.check for r in results if not r.ok and not r.blocking]
+        out.append(f"gate: {'GREEN' if ok else 'RED'}"
+                   + (f"; failing: {', '.join(fails)}" if fails else "")
+                   + (f"; warnings: {', '.join(warns)}" if warns else ""))
+    except Exception as exc:  # noqa: BLE001 - the pack must print even if a check breaks
+        ok = False
+        out.append(f"gate: not evaluated ({type(exc).__name__})")
+    rid = st.data.get("active_revision_round")
+    if rid:
+        try:
+            rev = json.loads((st.dir / "revisions" / f"{rid}.json").read_text(encoding="utf-8"))
+            items = rev.get("items", [])
+            done = sum(1 for i in items if i.get("status") == "done")
+            out.append(f"rework round {rid} ({rev.get('status')}): {done}/{len(items)} item(s) done")
+            out += [f"  - pending {i.get('id')}: {str(i.get('request', ''))[:90]}"
+                    for i in items if i.get("status") != "done"][:5]
+        except (OSError, ValueError):
+            out.append(f"rework round {rid}: unreadable")
+    questions = []
+    for scope in rr.SCOPES:
+        last = rr.latest(proj, scope)
+        if not last:
+            continue
+        if not last.get("closed_at"):
+            out.append(f"review round {last['id']} ({scope}) open: close it with --report")
+            continue
+        pend = rr.pending_author(last)
+        if pend:
+            questions += [f"{last['id']} {f['id']} [{f.get('category')}] {f.get('summary', '')[:80]}"
+                          for f in pend]
+        if last.get("user_decision") is None:
+            questions.append(f"{last['id']}: another review round, or '{rr.CONFIRM_PHRASES[0]}'?")
+    mode = str(pipe.targets.get("visual_review_mode", "inline")).strip().lower()
+    debts = [n for n, _, _ in parked_visual(pipe, st, mode)]
+    if debts:
+        out.append(f"visual looks owed at S23: {', '.join(debts)}")
+    out.append("pending user questions: " + ("none" if not questions else ""))
+    out += [f"  - {q}" for q in questions[:8]]
+    out.append("last events:")
+    out += [f"  - {e.get('at', '')} {e.get('kind')}: {str(e.get('detail', ''))[:100]}"
+            for e in st.data.get("events", [])[-5:]]
+    if questions:
+        nxt = "ask the user the pending question(s) above; record with tools/review_round.py"
+    elif ok:
+        nxt = f'{wf()} advance --note "..."'
+    else:
+        nxt = f"fix the failing gate(s), then {wf()} check"
+    out.append(f"next: {nxt}")
+    return out
+
+
+def cmd_handoff(args) -> int:
+    pipe, st, proj = _load(warn_stderr=False)
+    lines = handoff_lines(pipe, st, proj)
+    if args.md:
+        print("# medpaper handoff\n")
+        print("\n".join(ln if ln.startswith("  ") else f"- {ln}" for ln in lines))
+    else:
+        print("\n".join(lines))
     return 0
 
 
@@ -648,8 +729,18 @@ def cmd_card(args) -> int:
     if not card.exists():
         print(f"card missing: {card}")
         return 1
-    print(_loc(card.read_text(encoding="utf-8").rstrip(), proj))
+    print(_card_text(card, proj))
     return 0
+
+
+def _card_text(card: Path, proj: Path | None) -> str:
+    """The card with its details pointer made absolute (readable from a paper workspace)."""
+    text = card.read_text(encoding="utf-8").rstrip()
+    if proj is None:  # engine workspace: the master card, unchanged
+        return text
+    text = text.replace("reference/stage_details/",
+                        (paths.repo_root() / "reference" / "stage_details").as_posix() + "/")
+    return _loc(text, proj)
 
 
 def cmd_check(args) -> int:
@@ -1086,17 +1177,18 @@ def cmd_doctor(args) -> int:
 
     # Read-only reviewer/reader agents. S15, S18 and S25 delegate to these; without them the
     # agent would have to review its own work and pull full texts into the main context.
-    agents = {"medpaper-reviewer": ("S18, S25"), "medpaper-deepreader": ("S15")}
+    # 1.12.0: the reviewer may write only its report, the clinical writer only manuscript prose.
+    agents = {"medpaper-reviewer": ("S18, S25"), "medpaper-deepreader": ("S15"),
+              "medpaper-clinical-writer": ("S08, S09, S14, S16, S19")}
     agent_state = []
     for name, used_at in agents.items():
         p = root / f".kiro/agents/{name}.md"
         if not p.is_file():
             agent_state.append(f"{name} MISSING")
             continue
-        head = p.read_text(encoding="utf-8")[:1200]
-        readonly = 'tools: ["read"]' in head
-        agent_state.append(f"{name} ({used_at})" + ("" if readonly else " NOT READ-ONLY"))
-    bad_agents = [s for s in agent_state if "MISSING" in s or "NOT READ-ONLY" in s]
+        scope = adapters.agent_scope_problems(name, p.read_text(encoding="utf-8"))
+        agent_state.append(f"{name} ({used_at})" + (f" TOO BROAD: {'; '.join(scope)}" if scope else ""))
+    bad_agents = [s for s in agent_state if "MISSING" in s or "TOO BROAD" in s]
     rows.append(("review subagents", "ok" if not bad_agents else "BROKEN",
                  "; ".join(agent_state)))
 
@@ -1656,6 +1748,11 @@ def build_parser() -> argparse.ArgumentParser:
                         "summary line; full output in --log (default .wf/logs/wf_check.log)")
     p.set_defaults(fn=cmd_check)
 
+    p = sub.add_parser("handoff", help="compact context pack for a new session or delegated "
+                                       "step (pass this instead of a hand-written brief)")
+    p.add_argument("--md", action="store_true", help="Markdown list output")
+    p.set_defaults(fn=cmd_handoff)
+
     p = sub.add_parser("migrate", help="adopt this engine's full gate set for completed stages "
                                        "(the paper is pinned to the engine it ran under)")
     p.add_argument("--yes", action="store_true", help="apply; without it only the notes print")
@@ -1802,7 +1899,8 @@ def main(argv: list[str] | None = None) -> int:
 
 def _progress(args, rc) -> None:
     """1.11.0 (#3g): keep <paper>/.wf/progress.md current after every paper command."""
-    if args.cmd in ("doctor", "checks", "papers", "invariants", "archetype", "new", "init"):
+    if args.cmd in ("doctor", "checks", "papers", "invariants", "archetype", "new", "init",
+                    "handoff"):
         return
     try:
         from . import progress
