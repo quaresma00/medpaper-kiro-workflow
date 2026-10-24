@@ -40,9 +40,13 @@ PKG_REL = "http://schemas.openxmlformats.org/package/2006/relationships"
 NS = {"w": W, "r": R, "rel": PKG_REL}
 TEXT_ROLES = {"manuscript", "title_page", "cover_letter", "supplementary",
               "statements", "figure_legends"}
+# 1.11.0 (#1e): outline level and page-break-before are removed everywhere. keepNext/keepLines
+# are removed only from styles and headings (Word's collapse markers); the builder then sets
+# them where they bind caption -> table -> footnote and legend <-> figure (_keep_together).
 FORBIDDEN_PARAGRAPH_CONTROLS = (
-    "outlineLvl", "keepNext", "keepLines", "pageBreakBefore",
+    "outlineLvl", "pageBreakBefore",
 )
+HEADING_ONLY_CONTROLS = ("keepNext", "keepLines")
 THEMATIC_BREAK_RE = re.compile(
     r"(?m)^\s{0,3}(?:(?:\*\s*){3,}|(?:-\s*){3,}|(?:_\s*){3,})\s*$"
 )
@@ -172,7 +176,8 @@ def _ensure_style(doc, name: str, base: str, font: str, size: float,
     for attr in ("asciiTheme", "hAnsiTheme", "eastAsiaTheme", "cstheme"):
         rfonts.attrib.pop(qn(f"w:{attr}"), None)
     ppr = style.element.get_or_add_pPr()
-    for tag in (*[f"w:{name}" for name in FORBIDDEN_PARAGRAPH_CONTROLS], "w:numPr"):
+    for tag in (*[f"w:{name}" for name in FORBIDDEN_PARAGRAPH_CONTROLS + HEADING_ONLY_CONTROLS],
+                "w:numPr"):
         node = ppr.find(qn(tag))
         if node is not None:
             ppr.remove(node)
@@ -247,13 +252,87 @@ def _replace_manual_line_breaks(doc) -> None:
 
 def _remove_heading_metadata(paragraph, *, strip_numbering: bool = True) -> None:
     ppr = paragraph._p.get_or_add_pPr()
-    tags = [f"w:{name}" for name in FORBIDDEN_PARAGRAPH_CONTROLS]
+    tags = [f"w:{name}" for name in FORBIDDEN_PARAGRAPH_CONTROLS + HEADING_ONLY_CONTROLS]
     if strip_numbering:
         tags.append("w:numPr")
     for tag in tags:
         node = ppr.find(qn(tag))
         if node is not None:
             ppr.remove(node)
+
+
+def _set_keep(p_el, next_: bool = True, lines: bool = True) -> None:
+    ppr = p_el.get_or_add_pPr()
+    for tag, on in (("w:keepNext", next_), ("w:keepLines", lines)):
+        if on and ppr.find(qn(tag)) is None:
+            node = OxmlElement(tag)
+            # keepNext/keepLines precede numbering/spacing in CT_PPr order
+            anchor = ppr.find(qn("w:pStyle"))
+            if anchor is not None:
+                anchor.addnext(node)
+            else:
+                ppr.insert(0, node)
+
+
+def _keep_together(doc) -> None:
+    """1.11.0 (#1e): caption -> table -> footnote and legend <-> figure on one page."""
+    body = doc.element.body
+    kids = list(body)
+    w_p, w_tbl = qn("w:p"), qn("w:tbl")
+
+    def text(el) -> str:
+        return "".join(t.text or "" for t in el.iter(qn("w:t"))).strip()
+
+    for i, el in enumerate(kids):
+        if el.tag == w_tbl:
+            prev = kids[i - 1] if i else None
+            if prev is not None and prev.tag == w_p and docxaudit.TABLE_CAPTION_RE.match(text(prev)):
+                _set_keep(prev)
+            rows = el.findall(qn("w:tr"))
+            for r, row in enumerate(rows):
+                trpr = row.find(qn("w:trPr"))
+                if trpr is None:
+                    trpr = OxmlElement("w:trPr")
+                    row.insert(0, trpr)
+                if trpr.find(qn("w:cantSplit")) is None:
+                    trpr.insert(0, OxmlElement("w:cantSplit"))
+                for p in row.iter(w_p):
+                    _set_keep(p, next_=True, lines=True)
+            notes = []
+            for nxt in kids[i + 1:i + 9]:
+                if nxt.tag != w_p or not text(nxt) or nxt.find(".//" + qn("w:sectPr")) is not None:
+                    break
+                sid = nxt.find(qn("w:pPr") + "/" + qn("w:pStyle"))
+                if sid is not None and docxaudit.is_heading(sid.get(qn("w:val")) or ""):
+                    break
+                if docxaudit.TABLE_CAPTION_RE.match(text(nxt)):
+                    break
+                notes.append(nxt)
+            if not notes and rows:  # nothing follows: the last row need not keep with it
+                for p in rows[-1].iter(w_p):
+                    node = p.get_or_add_pPr().find(qn("w:keepNext"))
+                    if node is not None:
+                        node.getparent().remove(node)
+            for p in notes[:-1]:
+                _set_keep(p)
+        elif el.tag == w_p and el.find(".//" + qn("w:drawing")) is not None:
+            # legend before the image (embedded figures): legend heading + body keep with it
+            run = []
+            for j in range(i - 1, max(i - 9, -1), -1):
+                if kids[j].tag != w_p or not text(kids[j]):
+                    break
+                run.append(kids[j])
+                if docxaudit.LEGEND_HEAD_RE.match(text(kids[j])):
+                    for p in run:
+                        _set_keep(p)
+                    break
+            nxt = kids[i + 1] if i + 1 < len(kids) else None
+            if nxt is not None and nxt.tag == w_p and docxaudit.LEGEND_HEAD_RE.match(text(nxt)):
+                _set_keep(el)
+    # grouped legends (figures at the end): a legend never splits across pages
+    for el in kids:
+        if el.tag == w_p and docxaudit.LEGEND_HEAD_RE.match(text(el)):
+            _set_keep(el, next_=True, lines=True)
 
 
 def _source_problems(kind: str, inputs: list[Path]) -> list[str]:
@@ -459,6 +538,7 @@ def normalize_docx(path: Path, style: dict, kind: str, *, legend_bold: bool = Tr
         for run in p.runs:
             _set_run(run, font, size)
     _format_references(doc, font, body_pt, reference_separator)
+    _keep_together(doc)
     _add_page_numbers(doc, font, body_pt)
 
     margin = Inches(float(style["margins_in"]))
@@ -496,7 +576,10 @@ def _sanitize_package_xml(path: Path, font: str) -> None:
                 # report a corrupt file. Byte replacement preserves the package exactly.
                 blob = re.sub(br"Aptos(?: Display)?", font.encode("utf-8"), blob,
                               flags=re.I)
-                for tag in (*FORBIDDEN_PARAGRAPH_CONTROLS, "pBdr"):
+                strip = (*FORBIDDEN_PARAGRAPH_CONTROLS, "pBdr")
+                if item.filename != "word/document.xml":
+                    strip += HEADING_ONLY_CONTROLS  # styles: no collapse markers on headings
+                for tag in strip:
                     name = tag.encode("ascii")
                     blob = re.sub(rb"<w:" + name + rb"\b[^>]*/>", b"", blob)
                     blob = re.sub(rb"<w:" + name + rb"\b[^>]*>.*?</w:" + name + rb">",
@@ -565,11 +648,13 @@ def audit_docx(path: Path, style: dict, kind: str = "",
             problems.append(f"{path.name}: manual line-break control remains in {name}")
         if any("\u2193" in (node.text or "") for node in part.findall(".//w:t", NS)):
             problems.append(f"{path.name}: forbidden down-arrow character remains in {name}")
-        for tag in FORBIDDEN_PARAGRAPH_CONTROLS:
+        for tag in FORBIDDEN_PARAGRAPH_CONTROLS + (
+                () if name == "word/document.xml" else HEADING_ONLY_CONTROLS):
             if part.findall(f".//w:{tag}", NS):
                 problems.append(f"{path.name}: forbidden {tag} paragraph control remains in {name}")
         if part.findall(".//w:pBdr", NS):
             problems.append(f"{path.name}: paragraph border/horizontal-rule residue remains in {name}")
+    problems += [f"{path.name}: {p}" for p in docxaudit.heading_keep_problems(root)]
     expected_font = str(style["font_family"])
     if expected_font.casefold() == "times new roman" and any(b"Aptos" in b for b in xmls.values()):
         problems.append(f"{path.name}: Aptos remains in Word XML")

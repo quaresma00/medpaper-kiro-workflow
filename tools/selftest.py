@@ -1909,7 +1909,7 @@ def run_archetypes(proj: Path) -> None:
     record("registry parses", bool(arches), f"{len(arches)} archetype(s)")
     unknown = sorted({k for a in arches.values()
                       for k in list(a.get("requires", [])) + list(a.get("forbids", []))}
-                     - set(el.DETECTORS))
+                     - set(el.DETECTORS) - set(el.OPTIONAL_DETECTORS))
     record("every requires/forbids element has a detector", not unknown,
            f"undetectable: {unknown}" if unknown else
            f"{len(el.DETECTORS)} detectors cover all mandatory elements")
@@ -2132,8 +2132,8 @@ def run_codex_integration() -> None:
                f"card must name `{agent}` so the work is not done in the main context")
 
     record("pipeline and skill versions agree",
-           pipe["meta"]["version"] == "1.10.0" and 'version: "2.3.0"' in skill,
-           f'pipeline={pipe["meta"]["version"]}, skill=2.3.0 (Kiro adapter revision)')
+           pipe["meta"]["version"] == "1.11.0" and 'version: "2.4.0"' in skill,
+           f'pipeline={pipe["meta"]["version"]}, skill=2.4.0 (Kiro adapter revision)')
     record("all 25 stage cards exist",
            len(pipe["stage"]) == 25 and
            all((ROOT / "pipeline" / s["card"]).is_file() for s in pipe["stage"]),
@@ -3046,16 +3046,23 @@ def run_manuscript_docx(proj: Path) -> None:
            and all(json.loads(p.read_text(encoding="utf-8")).get("output_sha256")
                    for p in receipts),
            f"{len(receipts)} receipt(s)")
-    word_xmls = []
+    word_xmls, heading_keep = [], []
+    from xml.etree import ElementTree as ET
+    from wfcore import docxaudit as _dxa
     for name in ("manuscript.docx", "title_page.docx", "cover_letter.docx",
                  "supplementary_methods.docx"):
         with zipfile.ZipFile(bundle / name) as zf:
-            word_xmls.extend(zf.read(item) for item in zf.namelist()
+            word_xmls.extend((item, zf.read(item)) for item in zf.namelist()
                              if item.startswith("word/") and item.endswith(".xml"))
-    forbidden_controls = (b"<w:outlineLvl", b"<w:keepNext", b"<w:keepLines",
-                          b"<w:pageBreakBefore", b"<w:pBdr")
+            heading_keep += _dxa.heading_keep_problems(ET.fromstring(zf.read("word/document.xml")))
+    forbidden_controls = (b"<w:outlineLvl", b"<w:pageBreakBefore", b"<w:pBdr")
+    # 1.11.0: keepNext/keepLines survive only in the document body (caption/table/footnote,
+    # legend/figure), never in styles or on headings (the folding markers).
     record("all Word XML parts remove black-square and folding controls",
-           builds_ok and not any(tag in blob for tag in forbidden_controls for blob in word_xmls))
+           builds_ok and not any(tag in blob for tag in forbidden_controls for _, blob in word_xmls)
+           and not any(t in blob for n, blob in word_xmls if n != "word/document.xml"
+                       for t in (b"<w:keepNext", b"<w:keepLines")) and not heading_keep,
+           str(heading_keep[:2]))
     with zipfile.ZipFile(bundle / "manuscript.docx") as zf:
         manuscript_xml = zf.read("word/document.xml")
     record("visible section headings are flattened to SectionHeading",
@@ -5140,7 +5147,7 @@ def run_v160(tmp: Path) -> None:
            any(g["check"] == "reader_review_coverage" for g in s18["gate"])
            and "review_round.py start --scope manuscript" in (ROOT / "pipeline/stages/S18_independent_review.md")
            .read_text(encoding="utf-8"))
-    record("pipeline version is 1.10.0", pipe.meta.get("version") == "1.10.0")
+    record("pipeline version is 1.11.0", pipe.meta.get("version") == "1.11.0")
 
 
 def run_v170(tmp: Path) -> None:
@@ -5803,6 +5810,8 @@ def main() -> int:
         selftest_v190.run(tmp / "v190_root", record, section)
         import selftest_v1100
         selftest_v1100.run(tmp / "v1100_root", record, section)
+        import selftest_v1110
+        selftest_v1110.run(tmp / "v1110_root", record, section)
         run_new_wiring()
         section("isolation")
         record("selftest did not touch the real papers root or user home",

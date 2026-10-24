@@ -19,16 +19,13 @@ source for review, user editing, polishing and packaging.
    (or the journal's keywords.min/max once known). Commas separate terms in the source; the
    DOCX build applies the journal's separator. No slash, ampersand or conjunction padding.
 4. Assemble the exact order with the deterministic tool:
-   First, review the display-item abbreviation lists. When they exceed eight unique terms,
-   any local list exceeds 50 words, or the lists visibly dominate captions, define the terms
-   once in optional `07_manuscript/statements.md` under `# Declarations and Statements`
-   and `## Abbreviations`. These thresholds are workflow defaults, not journal standards.
-   Use one `term, full expansion` entry per line or semicolon-separated entries, preserving
-   mixed-case names such as eGFR. Remove the corresponding `Abbreviations:` blocks from
-   legends/captions and the table-building source. Add a short pointer to the central list
-   where needed; keep units, symbol meanings and error-bar definitions local. Regenerate
-   and visually recheck affected tables. No author/admin details or blank declaration
-   sections are needed here. Then run:
+   First, write the central abbreviation list in optional `07_manuscript/statements.md`
+   under `# Declarations and Statements` > `## Abbreviations` (one `term, expansion` per line
+   or semicolon-separated; keep mixed case such as eGFR). 1.11.0: this list is in ADDITION to
+   the local ones - every table footnote and figure legend keeps defining the abbreviations
+   it uses, so each display reads on its own (`display_abbreviations_defined`). Remove local
+   blocks only when the chosen journal explicitly requires a single central list. No
+   author/admin details or blank declaration sections are needed here. Then run:
 ```
 .\.venv\Scripts\python.exe tools/manuscript/assemble.py
 ```

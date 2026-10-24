@@ -349,9 +349,22 @@ DETECTORS = {
 }
 
 
+def arrows(fig) -> tuple[bool, str]:
+    """1.11.0: flow-diagram arrows (annotate arrows or FancyArrowPatch)."""
+    from matplotlib.patches import FancyArrow, FancyArrowPatch
+    n = sum(1 for ax in _axes(fig) for p in ax.patches if isinstance(p, (FancyArrowPatch, FancyArrow)))
+    n += sum(1 for a in fig.findobj(match=Annotation) if getattr(a, "arrow_patch", None) is not None)
+    return n > 0, f"{n} arrow(s)"
+
+
+# Detectors added after the sidecar schema was fixed: written when available, never required
+# in an older sidecar (a missing key is reported as 'no detector', a warning).
+OPTIONAL_DETECTORS = {"arrows": arrows}
+
+
 def detect_all(fig) -> dict[str, dict]:
     out: dict[str, dict] = {}
-    for name, fn in DETECTORS.items():
+    for name, fn in {**DETECTORS, **OPTIONAL_DETECTORS}.items():
         try:
             found, evidence = fn(fig)
         except Exception as exc:  # noqa: BLE001 - a broken detector must not kill the render

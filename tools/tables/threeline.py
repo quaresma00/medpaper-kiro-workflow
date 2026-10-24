@@ -66,12 +66,25 @@ def _check(spec: dict) -> None:
                     f"'{spec['sheet']}' row {i}: cell of {len(cell)} chars. A table is not a "
                     "place for prose - move it to the footnote or the manuscript."
                 )
+            raw = RAW_STATUS_RE.search(str(cell)) if cell is not None else None
+            if raw:
+                raise ValueError(
+                    f"'{spec['sheet']}' row {i}: raw status '{raw.group(0)}' - use "
+                    "not_estimable(lower) or MISSING (defined once in the footnote)")
+    # 1.11.0 (#2d): footnotes are limited by total words, never per row; a footnote row is a
+    # whole note (do not split sentences over rows to fit a cell limit).
     total = sum(len(str(f)) for f in spec["footnotes"])
     if total > MAX_FOOTNOTE_CHARS:
         raise ValueError(
             f"'{spec['sheet']}': footnotes total {total} chars (limit {MAX_FOOTNOTE_CHARS}). "
             "That is an analysis report, not a table footnote."
         )
+    words = sum(len(str(f).split()) for f in spec["footnotes"])
+    if words > FOOTNOTE_WORDS_MAX:
+        raise ValueError(
+            f"'{spec['sheet']}': footnotes total {words} words (limit {FOOTNOTE_WORDS_MAX}): keep "
+            "units, abbreviations and the estimation method in one sentence; move the rest to "
+            "Methods and diagnostics to a supplementary table.")
     if not re.match(r"^\s*(table|supplementary table)\s+S?\d+[.:]", spec["title"], re.I):
         raise ValueError(
             f"'{spec['sheet']}': title must start with e.g. 'Table 1.' or 'Table S1.' - got "
@@ -195,10 +208,29 @@ def write_table(path: str | Path, sheet: str, title: str, header: list,
     }])
 
 
+# 1.11.0 (#2c): one missing symbol, one non-estimable wording, no raw statistical statuses.
+MISSING = "\u2013"
+RAW_STATUS_RE = re.compile(r"\bUndefined\b|\bNot\s+fitted\b|\bnot\s+converged\b|\bNA\b|\bN/A\b|"
+                           r"\bNaN\b|(?<![\w.])-?Inf\b|\binfinity\b|\u221e|\bNULL\b")
+FOOTNOTE_WORDS_MAX = 120
+
+
+def not_estimable(lower=None, decimals: int = 2, bound: str = "lower 95% CI bound") -> str:
+    """A zero-cell / unbounded estimate: 'Not estimable (lower 95% CI bound 19.60)'."""
+    if lower is None:
+        return "Not estimable"
+    return f"Not estimable ({bound} {fmt(lower, decimals)})"
+
+
 def fmt(value, decimals: int = 2, pct: bool = False) -> str:
     """Consistent numeric rendering. Keeps trailing zeros, which reviewers expect."""
     if value is None or value == "":
-        return "-"
+        return MISSING
+    try:
+        if value != value or abs(float(value)) == float("inf"):  # NaN / Inf never print
+            return MISSING
+    except (TypeError, ValueError):
+        pass
     try:
         f = float(value)
     except (TypeError, ValueError):

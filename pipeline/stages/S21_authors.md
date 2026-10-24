@@ -20,8 +20,8 @@ Write the response faithfully to `project/00_input/author_info.json`, then creat
 - `project/07_manuscript/title_page.md` using the already selected title without offering
   new title options;
 - `project/07_manuscript/statements.md` headed `Declarations and Statements`, containing
-  user-supplied facts, the exact sections required by the selected journal, and the verified
-  master abbreviation list when consolidation is triggered.
+  user-supplied facts, the exact sections required by the selected journal, and the central
+  abbreviation list.
 
 If the chosen journal requires administrative declarations in the manuscript file, merge them
 into the existing Declarations and Statements section between Discussion and References;
@@ -40,15 +40,12 @@ Normal `sync` updates an existing field but does not invent an optional field. U
 only when the official guide requires a title-page reference count. The 45--60-paper literature
 library is a research resource, not the number to report on the title page.
 
-Preserve the verified abbreviation list prepared at S17. Reconcile any later additions
-across figure legends, table captions and finished workbooks. When there are more than eight
-unique defined terms or a local list exceeds 50 words, keep `## Abbreviations` under
-`# Declarations and Statements`, define every term once, remove all repeated
-`Abbreviations:` blocks from legends/captions and the table-building script, regenerate and
-visually check affected workbooks, and insert the Declarations and Statements section
-between Discussion and References in `full_manuscript.md`. If the journal explicitly
-requires local definitions, retain them only when `target_journal.json` records
-`abbreviation_placement=local_required` and the official rule URL.
+Preserve the central abbreviation list prepared at S17 and reconcile later additions across
+legends, captions and workbooks. 1.11.0: each table footnote and figure legend keeps its own
+definitions (self-contained displays) and the manuscript keeps the central list; remove local
+blocks only when `target_journal.json` records `abbreviation_placement=central_required` with
+the official rule in `abbreviation_rule_source`. A paper pinned before 1.11.0 keeps its
+recorded legacy placement until `wf migrate`.
 
 ## Outputs
 - `00_input/author_info.json`

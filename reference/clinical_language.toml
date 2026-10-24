@@ -1,0 +1,168 @@
+# ==============================================================================
+# Clinical presentation layer (1.11.0): words that belong to code, not to a medical paper.
+# ==============================================================================
+# Read by tools/wfcore/clinical.py. Each [[engineering]] entry is a case-insensitive regex.
+# Severity: block in Abstract/Introduction/Results/Discussion/Conclusions, figure legends,
+# table text and in-figure text; warn in Methods (move the implementation detail to
+# Supplementary Methods); never checked in Supplementary Methods, which is where it belongs.
+# Statistical method names, software names/versions and clinical words (deduplication of
+# reports, frozen section, medical records, Python 3.x, R 4.x) are deliberately NOT listed.
+# A paper that genuinely needs one of these words writes it to .wf/language_allowlist.json
+#   {"terms": [{"term": "<the entry's term>", "reason": ">= 15 chars", "scope": "methods|all"}]}
+# - never by editing this file.
+# ==============================================================================
+
+[meta]
+version = "1.11.0"
+
+[[engineering]]
+term = "normalization"
+pattern = '\b(?:unicode|string|case|text|character|whitespace|name)\s+normali[sz](?:ation|ed|ing)\b|\bnormali[sz]ed\s+(?:strings?|names?|fields?|text)\b'
+suggest = "say what was standardised in clinical terms ('reported terms were standardised'); put character rules in Supplementary Methods"
+
+[[engineering]]
+term = "unicode"
+pattern = '\bunicode\b|\bASCII\b|\bUTF-?8\b|\bcharacter\s+encoding\b'
+suggest = "character handling is an implementation detail: Supplementary Methods"
+
+[[engineering]]
+term = "string"
+pattern = '\bstrings?\b(?!ent)'
+suggest = "name the clinical content ('drug names', 'reported terms') instead of 'strings'"
+
+[[engineering]]
+term = "field"
+pattern = '\b(?:data|database|text|free-text|input|source|indication|drug)\s+fields?\b|\bfields?\s+(?:values?|names?)\b'
+suggest = "name the variable ('the reported indication') rather than the database field"
+
+[[engineering]]
+term = "record"
+pattern = '\bsame-record\b|\brecord-level\b|\b(?:legacy|raw|source|concatenated|input)\s+records?\b|\brecords?\s+(?:were|was)\s+(?:read|parsed|loaded|concatenated|joined)\b'
+suggest = "use the analysis unit ('report', 'case', 'patient')"
+
+[[engineering]]
+term = "snapshot"
+pattern = '\bsnapshots?\b'
+suggest = "use 'release', 'data version of <date>' or 'data extracted on <date>'"
+
+[[engineering]]
+term = "collapsed"
+pattern = '\b(?:duplicates?|reports?|records?|publications?|categories|levels|strata|rows)\s+(?:were\s+|was\s+)?collapsed\b|\bcollapse\s+steps?\b|\bcollapsing\s+rule\b'
+suggest = "'duplicate reports were removed', 'categories were combined'; model-merge steps go to a supplementary table"
+
+[[engineering]]
+term = "pipeline"
+pattern = '\bpipelines?\b'
+suggest = "describe the analysis, not the software that ran it"
+
+[[engineering]]
+term = "script"
+pattern = '\bscripts?\b|\bsource\s+code\b|\bcode\s+(?:was|were)\s+(?:run|executed)\b'
+suggest = "say which analysis was done; code availability belongs in the Code availability statement"
+
+[[engineering]]
+term = "heuristic"
+pattern = '\bheuristics?\b|\bheuristically\b'
+suggest = "'approximate matching', 'a predefined rule'"
+
+[[engineering]]
+term = "cluster rule"
+pattern = '\bcluster(?:ing)?\s+rules?\b|\bclusters?\s+(?:were\s+)?removed\b'
+suggest = "say what the reports have in common ('reports from the same publication')"
+
+[[engineering]]
+term = "re-executed"
+pattern = '\bre-?executed\b|\bre-?execution\b'
+suggest = "'all results were verified by repeating the analyses on the original data'"
+
+[[engineering]]
+term = "reproduced identically"
+pattern = '\breproduced\s+(?:identically|bit-for-bit|byte-for-byte|exactly)\b|\bidentical\s+(?:outputs?|hashes)\b'
+suggest = "'repeating the analyses gave the same results'"
+
+[[engineering]]
+term = "lines read"
+pattern = '\b(?:lines?|rows?)\s+(?:were\s+)?read\b|\b\d[\d,\u2009]*\s+(?:\w+\s+)?(?:lines|rows)\b(?!\s+of\s+(?:therapy|treatment))'
+suggest = "count analysis units (reports, cases, patients); raw data volume goes to a supplementary data-scale table"
+
+[[engineering]]
+term = "frozen"
+pattern = '\b(?:vocabulary|word\s*list|dictionary|lexicon|code\s*list|list)\s+(?:was\s+|were\s+)?frozen\b|\bfrozen\s+(?:vocabulary|word\s*list|dictionary|lexicon|code\s*list)\b'
+suggest = "'a predefined list' (state when it was defined)"
+
+[[engineering]]
+term = "parsed"
+pattern = '\bpars(?:ed|ing|er)\b'
+suggest = "'extracted', 'read from the report'; parsing rules go to Supplementary Methods"
+
+[[engineering]]
+term = "regex"
+pattern = '\bregex(?:es)?\b|\bregular\s+expressions?\b|\bwildcards?\b'
+suggest = "'predefined search terms'; the exact patterns go to Supplementary Methods"
+
+[[engineering]]
+term = "alphanumeric"
+pattern = '\balphanumeric\b|\bfirst\s+\d+\s+(?:\w+\s+)?characters\b|\bcharacters?\s+(?:matched|compared)\b'
+suggest = "'a standardised citation-matching procedure'; the character rule goes to Supplementary Methods"
+
+[[engineering]]
+term = "token"
+pattern = '\btokens?\b|\btokeni[sz](?:ed|ation)\b'
+suggest = "describe the clinical term, not its text representation"
+
+[[engineering]]
+term = "deduplicated by key"
+pattern = '\b(?:deduplicated|matched|joined|merged|linked)\s+(?:by|on)\s+(?:the\s+)?(?:keys?|ids?|identifiers?|fields?|columns?)\b|\bprimary\s+keys?\b|\bjoin\s+keys?\b'
+suggest = "'duplicate reports were identified by case identifier and version'"
+
+[[engineering]]
+term = "concatenated"
+pattern = '\bconcatenat(?:ed|ion|ing)\b'
+suggest = "data-format repair is an implementation detail: Supplementary Methods"
+
+[[engineering]]
+term = "data frame"
+pattern = '\bdata\s?frames?\b|\bdataframes?\b|\bboolean\b|\bnull\s+values?\b|\bNaN\b|\bflag(?:ged)?\s+variables?\b'
+suggest = "describe the variable and how missing values were handled"
+
+[[engineering]]
+term = "file format"
+pattern = '\b[\w-]+-format\s+(?:files?|quarters?|releases?)\b|\bquarterly\s+files?\b|\bfiles?\s+(?:were\s+)?(?:loaded|read|parsed|ingested)\b|\bquarters?\s+loaded\b|\bingest(?:ed|ion)\b'
+suggest = "name the reporting period ('reports received from <date> to <date>')"
+
+[[engineering]]
+term = "anywhere in report"
+pattern = '\banywhere\s+in\s+(?:the\s+)?(?:report|record)\b|\bin\s+any\s+version\b'
+suggest = "'recorded elsewhere in the report'; explain version handling in the legend or Methods"
+
+[[engineering]]
+term = "lookup"
+pattern = '\blook-?up\s+tables?\b|\bmapping\s+tables?\b|\bexact\s+(?:string\s+)?match(?:es|ing)?\s+of\b'
+suggest = "'a predefined classification list'"
+
+# ------------------------------------------------------------------------------
+# Letter-code category labels: "Composite A", "Group B", "Model 3" used as the name of a
+# clinical category. Allowed only when the display dictionary (01_protocol/display_dictionary.json)
+# defines that exact label as the clinical label, or when it is a clinical name listed here.
+# ------------------------------------------------------------------------------
+[letter_codes]
+pattern = '\b(?:Composite|Group|Model|Arm|Cohort|Cluster|Scenario|Definition|Outcome|Endpoint|Contrast|Phenotype|Strategy|Subset|Set|Analysis|Exposure|Population|Category)\s+(?:[A-H]|[1-9])\b(?![\w.-])'
+clinical_exceptions = ['Group A streptococc', 'Group B streptococc', 'Group A Streptococc', 'Group B Streptococc', 'Category 1 hurricane']
+
+# ------------------------------------------------------------------------------
+# Flow diagrams (archetype kind = "schematic"): every count box names its analysis unit.
+# ------------------------------------------------------------------------------
+[flow]
+analysis_units = ["report", "reports", "case", "cases", "patient", "patients", "participant", "participants", "individual", "individuals", "subject", "subjects", "person", "persons", "people", "adult", "adults", "child", "children", "infant", "infants", "admission", "admissions", "hospitalization", "hospitalizations", "hospitalisation", "hospitalisations", "encounter", "encounters", "visit", "visits", "episode", "episodes", "event", "events", "pregnancy", "pregnancies", "birth", "births", "study", "studies", "article", "articles", "record", "records", "trial", "trials", "eye", "eyes", "lesion", "lesions", "tumor", "tumors", "tumour", "tumours", "sample", "samples", "specimen", "specimens", "image", "images", "hospital", "hospitals", "centre", "centres", "center", "centers", "pair", "pairs", "women", "men", "mother", "mothers", "newborn", "newborns", "donor", "donors", "recipient", "recipients", "user", "users", "prescription", "prescriptions"]
+processing_units = ["lines", "line", "rows", "row", "files", "file", "versions", "version", "quarters", "quarter", "bytes", "entries", "batches", "chunks", "tables", "sheets"]
+
+# ------------------------------------------------------------------------------
+# Raw statistical statuses that must never reach a table or figure (1.11.0 #2c). Use
+# tools/tables/threeline.py not_estimable() / MISSING instead.
+# ------------------------------------------------------------------------------
+[raw_status]
+pattern = '\bUndefined\b|\bNot\s+fitted\b|\bnot\s+converged\b|\bNA\b|\bN/A\b|\bNaN\b|(?<![\w.])-?Inf\b|\binfinity\b|\u221e|\bNULL\b'
+
+# Abbreviations a display item may use without defining (roman numerals, countries).
+[display_abbreviations]
+exempt = ["II", "III", "IV", "VI", "VII", "VIII", "IX", "XI", "XII", "USA", "UK", "US", "EU", "DNA", "RNA", "mRNA", "COVID", "SARS", "CoV"]

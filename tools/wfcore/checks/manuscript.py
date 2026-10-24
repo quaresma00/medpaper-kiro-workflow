@@ -19,9 +19,11 @@ PKG_REL = "http://schemas.openxmlformats.org/package/2006/relationships"
 NS = {"w": W, "rel": PKG_REL}
 TEXT_ROLES = {"manuscript", "title_page", "cover_letter", "supplementary",
               "statements", "figure_legends"}
+# 1.11.0 (#1e): keepNext/keepLines are forbidden on headings and in styles only.
 FORBIDDEN_PARAGRAPH_CONTROLS = (
-    "outlineLvl", "keepNext", "keepLines", "pageBreakBefore",
+    "outlineLvl", "pageBreakBefore",
 )
+HEADING_ONLY_CONTROLS = ("keepNext", "keepLines")
 THEMATIC_BREAK_RE = re.compile(
     r"(?m)^\s{0,3}(?:(?:\*\s*){3,}|(?:-\s*){3,}|(?:_\s*){3,})\s*$"
 )
@@ -356,11 +358,14 @@ def _audit_docx(path: Path, style: dict, role: str,
             problems.append(f"{path.name}: manual line-break control remains in {name}")
         if any("\u2193" in (node.text or "") for node in part.findall(".//w:t", NS)):
             problems.append(f"{path.name}: forbidden down-arrow character remains in {name}")
-        for tag in FORBIDDEN_PARAGRAPH_CONTROLS:
+        for tag in FORBIDDEN_PARAGRAPH_CONTROLS + (
+                () if name == "word/document.xml" else HEADING_ONLY_CONTROLS):
             if part.findall(f".//w:{tag}", NS):
                 problems.append(f"{path.name}: forbidden {tag} paragraph control remains in {name}")
         if part.findall(".//w:pBdr", NS):
             problems.append(f"{path.name}: paragraph border/horizontal-rule residue remains in {name}")
+    from .. import docxaudit as _dxa
+    problems += [f"{path.name}: {p}" for p in _dxa.heading_keep_problems(root)]
     for name, blob in xmls.items():
         if not name.endswith(".rels"):
             continue

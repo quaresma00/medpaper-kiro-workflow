@@ -14,7 +14,7 @@
 
 [meta]
 name = "medpaper"
-version = "1.10.0"
+version = "1.11.0"
 schema = 1
 description = "Medical/clinical research pipeline: idea -> feasibility -> data -> analysis -> artifacts -> manuscript -> submission package."
 
@@ -120,6 +120,9 @@ figure_legend_words_max = 180
 # non-overridable S23 gate. Deterministic QC (tools/figures/qc.py) is unaffected and still
 # blocks at S11 in both modes - it is code, not eyes, so it is free to run every round.
 visual_review_mode = "deferred"
+# 1.11.0 (#2d): table footnotes are limited by total words (units, abbreviations, method in
+# one sentence); method detail goes to Methods, diagnostics to a supplementary table.
+table_footnote_words_max = 120
 abbreviation_centralize_threshold = 8
 abbreviation_local_words_max = 50
 journal_source_age_days_max = 90
@@ -350,6 +353,21 @@ check = "legends_cover_plan"
 [[stage.gate]]
 check = "figure_text_planned"
 since = "1.10.0"
+# 1.11.0: internal name -> clinical label, abbreviation, definition; legends/captions use it.
+[[stage.gate]]
+check = "display_dictionary_ready"
+since = "1.11.0"
+[[stage.gate]]
+check = "clinical_labels_used"
+paths = ["05_figures/legends.md", "04_tables/table_captions.md"]
+since = "1.11.0"
+[[stage.gate]]
+check = "engineering_language_clean"
+paths = ["05_figures/legends.md", "04_tables/table_captions.md"]
+since = "1.11.0"
+[[stage.gate]]
+check = "provisional_journal_params"
+since = "1.11.0"
 [[stage.gate]]
 check = "legend_no_results_restatement"
 [[stage.gate]]
@@ -391,6 +409,15 @@ path = "07_manuscript/methods.md"
 check = "prose_not_lists"
 path = "07_manuscript/methods.md"
 since = "1.9.0"
+# 1.11.0: Methods state principles; implementation detail -> Supplementary Methods (warning).
+[[stage.gate]]
+check = "engineering_language_clean"
+paths = ["07_manuscript/methods.md"]
+since = "1.11.0"
+[[stage.gate]]
+check = "clinical_labels_used"
+paths = ["07_manuscript/methods.md"]
+since = "1.11.0"
 [[stage.gate]]
 check = "no_ai_boilerplate"
 path = "07_manuscript/supplementary_methods.md"
@@ -410,6 +437,22 @@ check = "tables_threeline"
 [[stage.gate]]
 check = "numbers_have_provenance"
 source = "tables"
+# 1.11.0: clinical labels, no engineering language, presentation standard, concise footnotes.
+[[stage.gate]]
+check = "clinical_labels_used"
+displays = "tables"
+since = "1.11.0"
+[[stage.gate]]
+check = "engineering_language_clean"
+displays = "tables"
+since = "1.11.0"
+[[stage.gate]]
+check = "display_values_presented"
+displays = "tables"
+since = "1.11.0"
+[[stage.gate]]
+check = "table_footnotes_concise"
+since = "1.11.0"
 [[stage.gate]]
 check = "paper_scripts_scoped"
 patterns = ["04_tables/code/**/*.py", "04_tables/code/**/*.R", "04_tables/code/**/*.r"]
@@ -433,6 +476,29 @@ check = "figures_match_plan"
 check = "figures_qc_pass"
 [[stage.gate]]
 check = "legend_no_results_restatement"
+# 1.11.0: in-figure text (render sidecar) and legends read clinically; flow-diagram units;
+# self-contained abbreviations; final-size font >= the journal minimum.
+[[stage.gate]]
+check = "clinical_labels_used"
+displays = "figures"
+since = "1.11.0"
+[[stage.gate]]
+check = "engineering_language_clean"
+displays = "figures"
+since = "1.11.0"
+[[stage.gate]]
+check = "display_values_presented"
+displays = "figures"
+since = "1.11.0"
+[[stage.gate]]
+check = "flow_diagram_units"
+since = "1.11.0"
+[[stage.gate]]
+check = "display_abbreviations_defined"
+since = "1.11.0"
+[[stage.gate]]
+check = "figure_print_font"
+since = "1.11.0"
 [[stage.gate]]
 check = "visual_confirmation"
 name = "figures_visually_confirmed"
@@ -463,6 +529,18 @@ path = "07_manuscript/results.md"
 check = "effects_with_intervals"
 path = "07_manuscript/results.md"
 since = "1.10.0"
+[[stage.gate]]
+check = "engineering_language_clean"
+paths = ["07_manuscript/results.md"]
+since = "1.11.0"
+[[stage.gate]]
+check = "clinical_labels_used"
+paths = ["07_manuscript/results.md"]
+since = "1.11.0"
+[[stage.gate]]
+check = "proportion_denominators"
+path = "07_manuscript/results.md"
+since = "1.11.0"
 [[stage.gate]]
 check = "artifact_refs_consistent"
 paths = ["07_manuscript/results.md"]
@@ -557,6 +635,10 @@ path = "07_manuscript/introduction.md"
 check = "prose_not_lists"
 path = "07_manuscript/introduction.md"
 since = "1.9.0"
+[[stage.gate]]
+check = "engineering_language_clean"
+paths = ["07_manuscript/introduction.md"]
+since = "1.11.0"
 
 [[stage]]
 id = "S15_deepread"
@@ -610,6 +692,14 @@ path = "07_manuscript/discussion.md"
 check = "prose_not_lists"
 path = "07_manuscript/discussion.md"
 since = "1.9.0"
+[[stage.gate]]
+check = "engineering_language_clean"
+paths = ["07_manuscript/discussion.md"]
+since = "1.11.0"
+[[stage.gate]]
+check = "clinical_labels_used"
+paths = ["07_manuscript/discussion.md"]
+since = "1.11.0"
 
 [[stage]]
 id = "S17_assemble"
@@ -643,8 +733,26 @@ check = "assembly_matches_sources"
 [[stage.gate]]
 check = "reference_provenance"
 live = true
+# 1.11.0: each table footnote / figure legend defines its own abbreviations, plus one central
+# list (replaces abbreviations_centralized; central-only when the journal requires it).
 [[stage.gate]]
-check = "abbreviations_centralized"
+check = "display_abbreviations_defined"
+central_list = true
+since = "1.11.0"
+[[stage.gate]]
+check = "engineering_language_clean"
+paths = ["07_manuscript/full_manuscript.md"]
+displays = true
+since = "1.11.0"
+[[stage.gate]]
+check = "clinical_labels_used"
+paths = ["07_manuscript/full_manuscript.md"]
+displays = true
+since = "1.11.0"
+[[stage.gate]]
+check = "proportion_denominators"
+path = "07_manuscript/full_manuscript.md"
+since = "1.11.0"
 [[stage.gate]]
 check = "legend_no_results_restatement"
 path = "07_manuscript/full_manuscript.md"
@@ -734,6 +842,16 @@ scope = "manuscript"
 check = "explicit_confirmation"
 since = "1.10.0"
 scope = "manuscript"
+# 1.11.0: every numbered finding of every round closed (changed / kept + reason / author).
+[[stage.gate]]
+check = "review_findings_closed"
+since = "1.11.0"
+scope = "manuscript"
+[[stage.gate]]
+check = "engineering_language_clean"
+paths = ["07_manuscript/full_manuscript.md"]
+displays = true
+since = "1.11.0"
 # The user has said the science needs no further change, so hash it here. From S20 on, a journal
 # requirement is satisfied by adapting a copy in 08_submission/manuscript/, never by editing
 # these files - which is what stopped a second journal choice from churning settled text.
@@ -767,6 +885,10 @@ check = "docx_style_config"
 [[stage.gate]]
 check = "display_plan_fits_journal"
 since = "1.10.0"
+# 1.11.0: confirm or replace the provisional presentation parameters (a re-render, not science).
+[[stage.gate]]
+check = "presentation_params_confirmed"
+since = "1.11.0"
 [[stage.gate]]
 check = "scientific_freeze_intact"
 [[stage.gate]]
@@ -802,7 +924,9 @@ live = true
 [[stage.gate]]
 check = "title_page_reference_count"
 [[stage.gate]]
-check = "abbreviations_centralized"
+check = "display_abbreviations_defined"
+central_list = true
+since = "1.11.0"
 [[stage.gate]]
 check = "forbidden_symbols_absent"
 paths = ["07_manuscript/full_manuscript.md", "07_manuscript/statements.md", "05_figures/legends.md", "04_tables/table_captions.md"]
@@ -825,6 +949,11 @@ since = "1.9.0"
 [[stage.gate]]
 check = "polish_preserves_facts"
 [[stage.gate]]
+check = "engineering_language_clean"
+paths = ["07_manuscript/full_manuscript.md"]
+displays = true
+since = "1.11.0"
+[[stage.gate]]
 check = "ai_tells_clean"
 [[stage.gate]]
 check = "style_consistent"
@@ -843,7 +972,9 @@ check = "title_page_reference_count"
 check = "legend_no_results_restatement"
 path = "07_manuscript/full_manuscript.md"
 [[stage.gate]]
-check = "abbreviations_centralized"
+check = "display_abbreviations_defined"
+central_list = true
+since = "1.11.0"
 [[stage.gate]]
 check = "forbidden_symbols_absent"
 paths = ["07_manuscript/full_manuscript.md", "07_manuscript/supplementary_methods.md", "07_manuscript/statements.md"]
@@ -888,6 +1019,13 @@ check = "reporting_checklist_complete"
 check = "bundle_complete"
 [[stage.gate]]
 check = "docx_bundle_ready"
+# 1.11.0: caption/table/footnote and legend/figure keep together in Word; final-size fonts.
+[[stage.gate]]
+check = "docx_keep_with_next"
+since = "1.11.0"
+[[stage.gate]]
+check = "figure_print_font"
+since = "1.11.0"
 # S23 pre-audit: the same measured checks S25 confirms (final-DOCX word counts, references,
 # display items), so the independent audit is a confirmation rather than a first discovery.
 [[stage.gate]]
@@ -907,7 +1045,9 @@ check = "package_content_matches_baseline"
 check = "legend_no_results_restatement"
 path = "07_manuscript/full_manuscript.md"
 [[stage.gate]]
-check = "abbreviations_centralized"
+check = "display_abbreviations_defined"
+central_list = true
+since = "1.11.0"
 [[stage.gate]]
 check = "forbidden_symbols_absent"
 paths = ["07_manuscript/full_manuscript.md", "07_manuscript/supplementary_methods.md", "07_manuscript/statements.md", "08_submission/cover_letter.md"]
@@ -983,6 +1123,10 @@ scope = "package"
 [[stage.gate]]
 check = "explicit_confirmation"
 since = "1.10.0"
+scope = "package"
+[[stage.gate]]
+check = "review_findings_closed"
+since = "1.11.0"
 scope = "package"
 [[stage.gate]]
 check = "decision_recorded"
@@ -1067,6 +1211,9 @@ globs = [
   "06_refs/uncited_reasons.json",
   "08_submission/display_reallocation.json",
   "08_submission/declarations_assessment.json",
+  # 1.11.0: display dictionary and provisional journal presentation parameters (S07).
+  "01_protocol/display_dictionary.json",
+  "01_protocol/journal_profile.json",
   "03_analysis/reproducibility.toml",
   "04_tables/main/*.xlsx",
   "04_tables/supplementary/*.xlsx",

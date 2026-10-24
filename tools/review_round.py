@@ -5,7 +5,9 @@
     close  --findings critical=0,major=2,minor=3
            --finding ID CATEGORY STATUS "one line"   (one per finding; CATEGORY
                numbers|grouping|conclusion_strength|other, STATUS changed|kept|author)
-           --change FILE "one line" ... --kept ITEM "why"
+           --change FILE "one line" ... --kept ID "why"
+           --report FILE   (1.11.0: the reviewer's saved report; every F-numbered finding in
+                            every section must be listed; each kept one needs --kept ID "why")
     author ID change|keep --words "<the author's words>"   (a finding handed to the author)
     decide another_round --words "<the user's answer>"
     decide no_further_review --words "我确认这一版"        (exact sentence, or "I confirm this version")
@@ -52,6 +54,8 @@ def main() -> int:
     ap.add_argument("--change", nargs=2, action="append", default=[], metavar=("FILE", "SUMMARY"))
     ap.add_argument("--kept", nargs=2, action="append", default=[], metavar=("ITEM", "REASON"))
     ap.add_argument("--words", default="")
+    ap.add_argument("--report", type=Path, default=None,
+                    help="the reviewer's saved full report; every numbered finding must be closed")
     args = ap.parse_args()
     project = wfpaths.paper_from_cli(args.project)
     state = State(project, ".wf").load()
@@ -59,12 +63,18 @@ def main() -> int:
     try:
         if args.command == "start":
             rnd = rr.start(project, scope, state.current, delta=args.delta)
-            print(f"review round {rnd['id']} ({rnd['mode']}) opened. Invoke the medpaper-reviewer "
-                  "subagent with exactly these current files:")
+            bundle = rr.write_bundle(project, rnd)
+            print(f"review round {rnd['id']} ({rnd['mode']}) opened, {len(rnd['reviewed'])} file(s).")
+            print(f"Pass the medpaper-reviewer subagent this ONE path (it reads everything itself):\n"
+                  f"  {bundle / 'MANIFEST.md'}")
+            print("Brief to send unchanged - add nothing about known deviations, earlier "
+                  "conclusions or what you expect:")
+            print("  " + rr.BRIEF.format(rid=rnd["id"], scope=scope, mode=rnd["mode"],
+                                          bundle=bundle).replace("\n", "\n  "))
+            print("Save its full report to a file and close with --report <file>.")
+            print("Bundle contents (current files):")
             for rel in rnd["reviewed"]:
-                print(f"  {project / rel}")
-            for rel in readerreview.write_text_copies(project, rnd["reviewed"]):
-                print(f"  {project / rel}   (hash-bound text copy, regenerated now)")
+                print(f"  {rel}")
             if state.current.startswith("S18"):
                 print("\nPaste this block unchanged into the S18 review report:")
                 print(readerreview.evidence_block(project, delta=args.delta))
@@ -74,7 +84,7 @@ def main() -> int:
                            [{"file": f, "summary": s} for f, s in args.change],
                            [{"item": i, "reason": r} for i, r in args.kept],
                            [{"id": i, "category": c, "status": s, "summary": t}
-                            for i, c, s, t in args.finding])
+                            for i, c, s, t in args.finding], report=args.report)
             print(f"closed {rnd['id']}: findings {rnd['findings']}; {len(rnd['changes'])} change(s).")
             pend = rr.pending_author(rnd)
             if pend:

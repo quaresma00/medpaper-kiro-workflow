@@ -27,9 +27,14 @@ then freeze its actual author instructions and Word-format rules.
    references, figures and legends, tables, supplements, statements, cover letter, required
    upload items and formatting.
    Record the journal's abbreviation-placement rule. Set `abbreviation_placement` in
-   `target_journal.json` to `central` by default. Use `local_required` only when the official
-   guide explicitly requires definitions within every table/figure, and put the exact guide
+   `target_journal.json` to `self_contained` by default (each table/figure defines its own
+   abbreviations, plus a central list). Use `central_required` only when the official guide
+   explicitly requires one central list without local definitions, and put the exact guide
    URL and rule in `abbreviation_rule_source`.
+   1.11.0: add `"presentation": {...}` confirming or replacing the provisional
+   `01_protocol/journal_profile.json` values (font_min_pt, figure_width_mm, panel_label_case,
+   line_art_dpi, number_format, spelling, heading_names). A replacement re-renders tables and
+   figures as a presentation change (facts unchanged), never an S19 return.
    Record the journal's rules as **typed fields** in `target_journal.json`; checks and the Word
    builder read these, never the prose of `guidelines_extract.md` (null = the guide is silent):
 ```

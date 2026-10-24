@@ -13,6 +13,22 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
 
+def with_report(args: list[str], paper: Path) -> list[str]:
+    """1.11.0 adapter: a round closes against the reviewer's saved report, and each kept
+    finding carries its own --kept ID reason. Older tests pass their --finding rows; this writes
+    the matching numbered report so their original assertions still apply."""
+    if not args or args[0] != "close" or "--report" in args:
+        return args
+    rows = [args[i + 1:i + 5] for i, a in enumerate(args) if a == "--finding"]
+    extra = []
+    for fid, _cat, status, summary in rows:
+        if status == "kept":
+            extra += ["--kept", fid, f"kept: {summary} (reason recorded)"]
+    report = paper.parent / f"{paper.name}_report_{len(list(paper.parent.glob('*_report_*.md')))}.md"
+    report.write_text("# Review\n\n" + "".join(f"- {r[0]} {r[3]}\n" for r in rows), encoding="utf-8")
+    return args + extra + ["--report", str(report)]
+
+
 def _narrow_sheet(ws) -> None:
     from tables import threeline
     threeline._write_sheet(ws, {
@@ -209,6 +225,7 @@ def run_review(tmp: Path, record, section) -> None:
     p, env = _review_paper(tmp / "review")
 
     def cli(*args):
+        args = with_report(list(args), p)
         return subprocess.run([sys.executable, str(ROOT / "tools/review_round.py"), *args,
                                "--project", str(p)], capture_output=True, text=True,
                               encoding="utf-8", errors="replace", env=env)

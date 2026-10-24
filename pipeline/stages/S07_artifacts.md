@@ -78,10 +78,23 @@ first keep panels from filling up with explanatory text later.
    planned figure. After a `Figure N.` heading, do not begin the body with `Figure N.` again.
 5. **Table captions.** Write `project/04_tables/table_captions.md`, one block per table,
    headed `Table N.` Each needs a title line plus the footnote content: abbreviation
-   expansions, units, the test used, what a dagger/asterisk marks. Short abbreviation lists
-   may remain local at this stage. If more than eight different abbreviations accumulate
-   across figures and tables, or a local list exceeds 50 words, S17 will move the complete list into `Declarations and
-   Statements` and regenerate the affected tables without repeated abbreviation blocks.
+   expansions, units, the estimation method in one sentence, what a dagger/asterisk marks.
+   Every table footnote and figure legend defines the abbreviations it uses, so each display
+   reads on its own; the manuscript keeps a central list as well. Only a journal that
+   explicitly requires a single central list changes this (`abbreviation_placement =
+   "central_required"` at S20).
+6. **Display dictionary (1.11.0).** Write `project/01_protocol/display_dictionary.json`
+   (next to the artifact plan): one entry per internal group, outcome, contrast or model
+   name used by the analysis code - `{"internal": "comp_a", "aliases": ["Composite A"],
+   "label": "<clinical name>", "abbreviation": "<or empty>", "definition": "<one line>"}`.
+   Table builders, figure scripts (R `clinical_label()`), legends and prose use only the
+   label; letter codes ("Composite A", "Group B", "Model 3") stay out of displays unless the
+   dictionary makes that exact string the clinical label.
+7. **Provisional journal parameters (1.11.0).** Write `project/01_protocol/journal_profile.json`
+   for the likely target journal or journal type (`font_min_pt`, `figure_width_mm`
+   single/1.5/double, `panel_label_case`, `line_art_dpi`, `number_format`, `spelling`,
+   `heading_names`, `source`). Tables and figures render with it from the first build; S20
+   confirms or replaces it, which is a presentation re-render, never science.
 
 ## Outputs
 - `01_protocol/artifact_benchmark.md`

@@ -72,8 +72,19 @@ LIGHT_GREY = "#BFBFBF"
 FONT_STACK = ["Arial", "Helvetica", "Liberation Sans", "DejaVu Sans"]
 
 
-def apply_style(base_pt: float = 7.0, palette: str = "okabe_ito") -> list[str]:
+def _font_floor() -> float:
+    """1.11.0 (#2b): the journal's minimum text size at final print size (default 8 pt)."""
+    try:
+        from wfcore import presentparams
+        return float(presentparams.params()["font_min_pt"])
+    except Exception:  # noqa: BLE001
+        return 8.0
+
+
+def apply_style(base_pt: float = 8.0, palette: str = "okabe_ito") -> list[str]:
     """Call once at the top of every plotting script.
+
+    Text is drawn at final print size, never below the journal minimum (default 8 pt).
 
     `palette`: okabe_ito (default, colour-blind safe) | nejm | lancet | jama | jco | nature.
     Returns the colour list so a script can index it directly.
@@ -81,6 +92,7 @@ def apply_style(base_pt: float = 7.0, palette: str = "okabe_ito") -> list[str]:
     if palette not in PALETTES:
         raise ValueError(f"palette must be one of {sorted(PALETTES)}, got {palette!r}")
     colors = PALETTES[palette]
+    base_pt = max(float(base_pt), _font_floor())
     if palette in RISKY_PAIRS:
         print(f"  note: the {palette} palette contains a red/green pair. Dual-encode with "
               f"marker or line style so the figure survives colour-blind readers and "
@@ -155,6 +167,9 @@ def size_mm(width: str = "single", height_mm: float | None = None) -> tuple[floa
         key = {"single": "column_width_mm_single", "double": "column_width_mm_double",
                "1.5": "column_width_mm_1_5"}[width]
         w = float(registry.effective_targets(proj).get(key, w))
+        if proj is not None:  # 1.11.0: provisional/confirmed journal widths win
+            from wfcore import presentparams
+            w = float(presentparams.params(proj)["figure_width_mm"].get(width, w))
     except (OSError, ValueError, ImportError):
         pass
     return w, height_mm if height_mm else w * 0.72
@@ -162,7 +177,7 @@ def size_mm(width: str = "single", height_mm: float | None = None) -> tuple[floa
 
 def figure(width: str = "single", height_mm: float | None = None,
            panels: tuple[int, int] = (1, 1), width_ratios=None, height_ratios=None,
-           letters: bool = True, letter_pt: float = 9.0):
+           letters: bool = True, letter_pt: float = 10.0):
     """Panel-first figure.
 
     Returns (fig, panels) where `panels` is a list of (subfigure, axes) in row-major
@@ -188,7 +203,7 @@ def figure(width: str = "single", height_mm: float | None = None,
             sf = fig.add_subfigure(gs[r, c])
             ax = sf.subplots()
             if letters and nrows * ncols > 1:
-                label_panel(sf, chr(ord("A") + idx), letter_pt)
+                label_panel(sf, panel_letter(idx), letter_pt)
             out.append((sf, ax))
             idx += 1
     return fig, out
@@ -199,7 +214,19 @@ def subpanels(sf, panels: tuple[int, int] = (1, 1), **kw):
     return sf.subplots(*panels, **kw)
 
 
-def label_panel(sf, letter: str, pt: float = 9.0, pad_in: float = PANEL_PAD_IN) -> None:
+def panel_letter(idx: int) -> str:
+    """1.11.0 (#2b): panel label in the journal's case (journal_profile / target_journal)."""
+    letter = chr(ord("A") + idx)
+    try:
+        from wfcore import presentparams
+        if presentparams.params().get("panel_label_case") == "lower":
+            return letter.lower()
+    except Exception:  # noqa: BLE001
+        pass
+    return letter
+
+
+def label_panel(sf, letter: str, pt: float = 10.0, pad_in: float = PANEL_PAD_IN) -> None:
     """Panel letter at the top-left of the panel's own rectangle.
 
     Drawn on the SubFigure rather than inside the axes, so it cannot collide with the

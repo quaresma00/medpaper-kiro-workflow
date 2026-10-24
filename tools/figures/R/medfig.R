@@ -89,6 +89,14 @@ medpaper_targets <- function() {
   t
 }
 
+# 1.11.0 (#2a): provisional (S06/S07) or confirmed (S20) journal presentation parameters,
+# exported by `wf run-script` as MEDPAPER_PRESENTATION (widths, font floor, panel label case).
+medpaper_presentation <- function() {
+  raw <- Sys.getenv("MEDPAPER_PRESENTATION", "")
+  if (!nzchar(raw)) return(list())
+  tryCatch(jsonlite::fromJSON(raw, simplifyVector = TRUE), error = function(e) list())
+}
+
 medpaper_size_mm <- function(width = "single", height_mm = NULL) {
   key <- switch(as.character(width), single = "column_width_mm_single",
                 double = "column_width_mm_double", "1.5" = "column_width_mm_1_5",
@@ -96,22 +104,46 @@ medpaper_size_mm <- function(width = "single", height_mm = NULL) {
   t <- medpaper_targets()
   if (is.null(t[[key]])) stop("target ", key, " is missing from pipeline.toml [targets]", call. = FALSE)
   w <- as.numeric(t[[key]])
+  pw <- medpaper_presentation()$figure_width_mm[[as.character(width)]]
+  if (!is.null(pw) && is.finite(as.numeric(pw))) w <- as.numeric(pw)
   h <- if (is.null(height_mm)) w * 0.72 else height_mm
   c(w, h)
 }
 
 pt_to_linewidth <- function(pt) pt / (72 / 96) / ggplot2::.pt
 
-theme_medpaper <- function(base_size = 7, base_family = "Arial") {
+# Smallest text at final print size: the journal minimum, never below 8 pt by default.
+medpaper_font_floor <- function() {
+  f <- suppressWarnings(as.numeric(medpaper_presentation()$font_min_pt))
+  if (length(f) == 1 && is.finite(f)) f else 8
+}
+
+# Panel tags in the journal's case: patchwork::plot_annotation(tag_levels = mf_tag_levels()).
+mf_tag_levels <- function() if (identical(medpaper_presentation()$panel_label_case, "lower")) "a" else "A"
+
+# Clinical label for an internal name, from 01_protocol/display_dictionary.json (1.11.0 #1a).
+clinical_label <- function(internal) {
+  path <- medpaper_path("01_protocol", "display_dictionary.json")
+  if (!file.exists(path)) return(internal)
+  d <- tryCatch(jsonlite::fromJSON(path, simplifyVector = FALSE), error = function(e) NULL)
+  map <- list()
+  for (t in d$terms) for (n in c(t$internal, unlist(t$aliases))) map[[n]] <- t$label
+  vapply(internal, function(x) if (!is.null(map[[x]])) map[[x]] else x, "", USE.NAMES = FALSE)
+}
+
+theme_medpaper <- function(base_size = NULL, base_family = "Arial") {
+  fl <- medpaper_font_floor()
+  if (is.null(base_size)) base_size <- fl
+  base_size <- max(base_size, fl)
   theme_classic(base_size = base_size, base_family = base_family) +
-    theme(axis.title = element_text(size = 8),
-          axis.text = element_text(size = 7, colour = "black"),
-          plot.tag = element_text(size = 9, face = "bold"),
-          plot.title = element_text(size = 8),
-          legend.text = element_text(size = 7), legend.title = element_text(size = 7),
+    theme(axis.title = element_text(size = base_size + 1),
+          axis.text = element_text(size = base_size, colour = "black"),
+          plot.tag = element_text(size = base_size + 2, face = "bold"),
+          plot.title = element_text(size = base_size + 1),
+          legend.text = element_text(size = base_size), legend.title = element_text(size = base_size),
           legend.background = element_blank(), legend.key = element_blank(),
           legend.box.background = element_blank(), strip.background = element_blank(),
-          strip.text = element_text(size = 7, colour = "black"),
+          strip.text = element_text(size = base_size, colour = "black"),
           plot.background = element_rect(fill = "white", colour = NA),
           axis.line = element_line(linewidth = pt_to_linewidth(0.6), colour = "black"),
           axis.ticks = element_line(linewidth = pt_to_linewidth(0.6), colour = "black"),
@@ -617,6 +649,10 @@ scale_fill_medpaper <- function(name = "okabe_ito", ...) scale_fill_manual(value
 
   nodes <- sum(vapply(leaves, function(l) sum(vapply(.mf_layer_rows(l, c("GeomRect", "GeomTile", "GeomLabel")), nrow, 0)), 0))
   out$box_nodes <- E(nodes >= 3 && length(labels) >= 3, sprintf("%d box(es), %d text label(s)", nodes, length(labels)))
+  # 1.11.0: flow-diagram arrows (a segment/path/curve layer drawn with arrow = arrow()).
+  n_arrow <- sum(vapply(leaves, function(l) tryCatch(sum(vapply(l$layers, function(ly)
+    !is.null(ly$geom_params$arrow) || !is.null(ly$aes_params$arrow), logical(1))), error = function(e) 0), 0))
+  out$arrows <- E(n_arrow > 0, sprintf("%d arrow layer(s)", n_arrow))
   vl <- as.numeric(unlist(lapply(leaves, function(l) unlist(lapply(.mf_layer_rows(l, "GeomVline"), function(x) x$xintercept)))))
   out$null_line <- E(length(vl) > 0, sprintf("%d vertical reference line(s), %d at 0 or 1", length(vl), sum(abs(vl) < 1e-9 | abs(vl - 1) < 1e-9)))
   diag <- FALSE

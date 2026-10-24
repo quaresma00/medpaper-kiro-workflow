@@ -1409,6 +1409,10 @@ def cmd_run_script(args) -> int:
     # 1.9.0: the journal number style/spelling reaches R and Python builders (#16/#17), and
     # container outputs are made byte-stable afterwards (#4).
     os.environ["MEDPAPER_NUMFMT"] = numfmt.env_json(proj)
+    # 1.11.0 (#2a): provisional/confirmed journal presentation parameters (widths, font floor,
+    # panel label case, line-art dpi) reach the builders from the first render.
+    from . import presentparams
+    os.environ["MEDPAPER_PRESENTATION"] = presentparams.env_json(proj)
     watch = ("04_tables", "05_figures/out")
 
     def _derived() -> dict[Path, int]:

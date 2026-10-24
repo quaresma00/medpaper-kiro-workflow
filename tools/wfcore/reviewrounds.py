@@ -18,6 +18,7 @@ changed after it closed.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -42,6 +43,23 @@ PROTECTED = frozenset({"numbers", "grouping", "conclusion_strength"})
 STATUSES = ("changed", "kept", "author")
 # 1.10.0 (#13): approval is this exact sentence, never a recognised phrase ("OK", "可以", ...).
 CONFIRM_PHRASES = ("我确认这一版", "I confirm this version")
+PROTOCOL = "1.11.0"
+REPORTS_DIR = ".wf/review_reports"
+FINDING_ID_RE = re.compile(
+    r"(?m)^[ \t>]*(?:[-*+]|\d+[.)])?[ \t]*(?:\*\*|__)?\[?(F\d{1,3})\]?(?:\*\*|__)?(?=[\s:.)\]-])")
+# The orchestrator's brief to the reviewer: neutral, identical every round. It never carries
+# "known deviations", "previous conclusions" or what the agent hopes to hear.
+BRIEF = """Review brief (round {rid}, {scope}, {mode}). Read every file listed in {bundle}/MANIFEST.md.
+Judge, from the first round on, as:
+  1. a first-time clinical reader who never saw this project: what is unclear, which labels,
+     abbreviations or terms you had to look up, can each table and figure be read on its own;
+  2. an editor checking engineering language and self-contained displays: code names, letter
+     codes, processing counts (lines/rows/files), data-handling jargon in the body, tables,
+     legends and in-figure text; every abbreviation defined in each footnote/legend;
+  3. a methods and journal reviewer (publication readiness, numbers, claims).
+Number EVERY finding in EVERY section (incl. Reader comprehension and Medical presentation)
+at the start of its line as F1, F2, ... with a category: numbers | grouping |
+conclusion_strength | other, and say whether it is presentation or scientific."""
 
 
 def is_confirmation(words: str) -> bool:
@@ -156,18 +174,125 @@ def start(project: Path, scope: str, stage: str, delta: bool = False) -> dict:
     rnd = {"id": rid, "scope": scope, "stage": stage, "mode": mode, "started_at": _now(),
            "inputs": current, "reviewed": sorted(reviewed), "closed_at": None,
            "findings": {}, "changes": [], "not_changed": [], "after": {},
-           "user_decision": None}
+           "user_decision": None,
+           # 1.11.0 (#1f): the round closes against the reviewer's saved, numbered report.
+           "protocol": PROTOCOL}
     rounds.append(rnd)
     _save(project, data)
     return rnd
 
 
+def report_ids(text: str) -> list[str]:
+    """Every finding id the reviewer numbered, in every section (F1, F2, ...)."""
+    seen = []
+    for m in FINDING_ID_RE.finditer(text):
+        if m.group(1) not in seen:
+            seen.append(m.group(1))
+    return seen
+
+
+def _closure(rnd: dict) -> list[str]:
+    """Numbered report findings without a closing entry (1.11.0 rounds only)."""
+    if not rnd.get("protocol") or not rnd.get("closed_at"):
+        return []
+    if not rnd.get("report"):
+        return [f"{rnd['id']}: no saved reviewer report (close --report <file>)"]
+    listed = {f.get("id"): f for f in rnd.get("finding_list", [])}
+    reasons = {str(n.get("item", "")).strip(): str(n.get("reason", "")).strip()
+               for n in rnd.get("not_changed", [])}
+    out = []
+    missing = [i for i in rnd.get("report_ids", []) if i not in listed]
+    if missing:
+        out.append(f"{rnd['id']}: finding(s) never closed: " + ", ".join(missing[:10]))
+    for fid, f in listed.items():
+        if f.get("status") == "kept" and len(reasons.get(fid, "")) < 10:
+            out.append(f"{rnd['id']} {fid}: kept without a reason (--kept {fid} \"why\")")
+    return out
+
+
+def closure_problems(project: Path, scope: str) -> list[str]:
+    return [p for r in load(project)[scope] for p in _closure(r)]
+
+
+BUNDLE_DIR = ".wf/review_bundle"
+
+
+def write_bundle(project: Path, rnd: dict) -> Path:
+    """1.11.0 (#3f): one self-contained folder a reviewer subagent reads on its own: copies of
+    every reviewed text/figure file, hash-bound text copies of DOCX/XLSX, rendered DOCX pages
+    (when a converter is available) and MANIFEST.md with the neutral brief."""
+    import hashlib
+    import os
+    import shutil
+    from .readerreview import write_text_copies
+    project = Path(project)
+    out = project / BUNDLE_DIR / rnd["id"]
+    if out.exists():
+        shutil.rmtree(out)
+    (out / "files").mkdir(parents=True)
+    lines = [f"# Review bundle {rnd['id']} ({rnd['scope']}, {rnd['mode']})", "",
+             BRIEF.format(rid=rnd["id"], scope=rnd["scope"], mode=rnd["mode"], bundle=out), "",
+             "## Files (copy -> source, sha256)", ""]
+    docx = []
+    for rel in rnd["reviewed"]:
+        src = project / rel
+        if not src.is_file():
+            continue
+        digest = hashlib.sha256(src.read_bytes()).hexdigest()
+        if src.suffix.lower() in (".docx", ".xlsx"):
+            docx += [rel] if src.suffix.lower() == ".docx" else []
+            continue
+        dst = out / "files" / rel.replace("/", "__")
+        shutil.copyfile(src, dst)
+        lines.append(f"- {dst} <- {rel} ({digest[:16]})")
+    for rel in write_text_copies(project, [r for r in rnd["reviewed"]
+                                           if r.endswith((".docx", ".xlsx"))]):
+        dst = out / "files" / Path(rel).name
+        shutil.copyfile(project / rel, dst)
+        lines.append(f"- {dst} (hash-bound text copy)")
+    stage = str(rnd.get("stage", ""))
+    docx += [p.relative_to(project).as_posix() for p in project.glob("08_submission/bundle/*.docx")
+             if p.relative_to(project).as_posix() not in docx]
+    pages = []
+    if stage >= "S17" and docx and os.environ.get("MEDPAPER_NO_PREVIEW") != "1":
+        try:
+            import sys
+            sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "manuscript"))
+            import preview  # tools/manuscript/preview.py
+            import tempfile
+            for rel in docx[:3]:
+                with tempfile.TemporaryDirectory(prefix="mp_bundle_") as tmp:
+                    pdf = preview.to_pdf(project / rel, Path(tmp))
+                    for i, img in enumerate(preview.rasterise(pdf, Path(tmp), None, 80), 1):
+                        dst = out / "preview" / f"{Path(rel).stem}-p{i:02d}.png"
+                        dst.parent.mkdir(exist_ok=True)
+                        shutil.copyfile(img, dst)
+                        pages.append(dst)
+        except Exception as exc:  # noqa: BLE001 - preview is best effort; the text copies remain
+            lines += ["", f"(DOCX page preview unavailable: {type(exc).__name__}: {exc})"]
+    if pages:
+        lines += ["", "## Rendered Word pages (read them as the reader will see the paper)", ""]
+        lines += [f"- {p}" for p in pages]
+    (out / "MANIFEST.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return out
+
+
 def close(project: Path, scope: str, findings: dict[str, int], changes: list[dict],
-          not_changed: list[dict], finding_list: list[dict] | None = None) -> dict:
+          not_changed: list[dict], finding_list: list[dict] | None = None,
+          report: Path | None = None) -> dict:
     data = load(project)
     if not data[scope] or data[scope][-1].get("closed_at"):
         raise ValueError("no open review round; start one first")
     rnd = data[scope][-1]
+    if rnd.get("protocol"):
+        if report is None or not Path(report).is_file():
+            raise ValueError("save the reviewer's full report (all sections, numbered F1, F2, ...) "
+                             "and pass it: close --report <file>")
+        text = Path(report).read_text(encoding="utf-8", errors="replace")
+        rel = f"{REPORTS_DIR}/{rnd['id']}.md"
+        (Path(project) / rel).parent.mkdir(parents=True, exist_ok=True)
+        (Path(project) / rel).write_text(text, encoding="utf-8")
+        rnd["report"], rnd["report_ids"] = rel, report_ids(text)
     counts = {k: int(findings.get(k, 0)) for k in SEVERITIES}
     if any(v < 0 for v in counts.values()):
         raise ValueError("finding counts must be >= 0")
@@ -185,6 +310,12 @@ def close(project: Path, scope: str, findings: dict[str, int], changes: list[dic
         if f["category"] in PROTECTED and f["status"] == "kept":
             raise ValueError(f"finding {f['id']} ({f['category']}) cannot be kept on your own "
                              "judgement: change it, or mark it 'author' so the user decides")
+    probe = dict(rnd, finding_list=finding_list, not_changed=not_changed, closed_at="probe")
+    open_items = _closure(probe)
+    if open_items:
+        raise ValueError("; ".join(open_items[:6]) + " - every numbered finding, including Reader "
+                         "comprehension and Medical presentation, is changed, kept with a reason, "
+                         "or handed to the author")
     rnd.update(findings=counts, changes=changes, not_changed=not_changed,
                finding_list=finding_list, after=inputs(project, scope), closed_at=_now())
     _save(project, data)

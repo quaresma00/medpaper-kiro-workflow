@@ -137,6 +137,7 @@ save(fig, PROJECT / "05_figures/out/Figure1", width="double", archetype="box_jit
 - (plus scripts in `05_figures/code/` and PNG+TIFF in `05_figures/out/`)
 
 ## Hard rules
+- 1.11.0: in-figure text comes from the display dictionary (R `clinical_label()`, `mf_label()`); the render sidecar's text is linted for internal names, letter codes, engineering words and raw statuses. Text is >= the journal minimum at final print size (`journal_profile.json` font_min_pt, default 8 pt; `theme_medpaper()`/`apply_style()` default to it); widths and panel-label case (`mf_tag_levels()`) come from the profile. A flow diagram is a schematic: boxes, counts and arrows, no axis titles; every count box names its analysis unit (reports, cases, patients, participants); lines/rows read, files, versions or quarters loaded belong in a supplementary data-scale table (`flow_diagram_units`). Each legend defines the abbreviations its figure uses.
 - Never claim visual verification without having loaded the image.
 - `DEFER` is a scheduling decision, never a verdict.
 - Deferring never lowers a deterministic bar.

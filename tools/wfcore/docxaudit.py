@@ -38,6 +38,69 @@ def paragraphs(root) -> list[tuple[str, str, object]]:
     return [(_ptext(p), _style_id(p), p) for p in root.findall(".//w:body/w:p", NS)]
 
 
+# 1.11.0 (#1e): outline level and page-break-before are never wanted; keepNext/keepLines are
+# removed only from headings (where Word shows them as collapse markers) and kept where they
+# bind a caption to its table, a table to its footnote and a legend to its figure.
+HEADING_STYLES = {"SectionHeading", "ManuscriptTitle"}
+TABLE_CAPTION_RE = re.compile(r"^(?:Supplementary\s+)?Table\s+S?\d+[.:]", re.I)
+
+
+def is_heading(style_id: str) -> bool:
+    return style_id in HEADING_STYLES or style_id.casefold().startswith(("heading", "title"))
+
+
+def _has(p, tag: str) -> bool:
+    return p.find(f"w:pPr/w:{tag}", NS) is not None
+
+
+def heading_keep_problems(root) -> list[str]:
+    bad = [_ptext(p)[:30] for p in root.iter(f"{{{W}}}p")
+           if is_heading(_style_id(p)) and (_has(p, "keepNext") or _has(p, "keepLines"))
+           and not TABLE_CAPTION_RE.match(_ptext(p)) and not LEGEND_HEAD_RE.match(_ptext(p))]
+    return [f"heading(s) carry keepNext/keepLines (collapse marker): {bad[:3]}"] if bad else []
+
+
+def keep_problems(root) -> list[str]:
+    """Structural: caption -> table -> footnote and legend -> figure stay on one page."""
+    body = root.find("w:body", NS)
+    if body is None:
+        return ["no document body"]
+    kids = list(body)
+    out = []
+    for i, el in enumerate(kids):
+        if el.tag == f"{{{W}}}tbl":
+            prev = kids[i - 1] if i else None
+            if prev is not None and prev.tag == f"{{{W}}}p" and TABLE_CAPTION_RE.match(_ptext(prev)) \
+                    and not _has(prev, "keepNext"):
+                out.append(f"table caption '{_ptext(prev)[:30]}' does not keep with its table")
+            rows = el.findall("w:tr", NS)
+            if rows:
+                last = rows[-1].findall(".//w:p", NS)
+                nxt = kids[i + 1] if i + 1 < len(kids) else None
+                if nxt is not None and nxt.tag == f"{{{W}}}p" and _ptext(nxt) \
+                        and not TABLE_CAPTION_RE.match(_ptext(nxt)) \
+                        and not is_heading(_style_id(nxt)) \
+                        and last and not all(_has(p, "keepNext") for p in last):
+                    out.append("a table's last row does not keep with its footnote")
+                if any(r.find("w:trPr/w:cantSplit", NS) is None for r in rows):
+                    out.append("a table row can split across pages (no cantSplit)")
+        elif el.tag == f"{{{W}}}p" and el.find(".//w:drawing", NS) is not None:
+            nxt = kids[i + 1] if i + 1 < len(kids) else None
+            run = []
+            for j in range(i - 1, max(i - 9, -1), -1):
+                if kids[j].tag != f"{{{W}}}p" or not _ptext(kids[j]):
+                    break
+                run.append(kids[j])
+                if LEGEND_HEAD_RE.match(_ptext(kids[j])):
+                    if not all(_has(p, "keepNext") for p in run):
+                        out.append(f"legend '{_ptext(kids[j])[:30]}' does not keep with its figure")
+                    break
+            if nxt is not None and nxt.tag == f"{{{W}}}p" and LEGEND_HEAD_RE.match(_ptext(nxt)) \
+                    and not _has(el, "keepNext"):
+                out.append("a figure does not keep with the legend that follows it")
+    return sorted(set(out)) + heading_keep_problems(root)
+
+
 def plan_counts(project: Path) -> dict:
     """Main figure ids, main table ids and their files, from the artifact plan."""
     path = Path(project) / "01_protocol/artifact_plan.json"

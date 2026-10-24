@@ -52,6 +52,22 @@ estimate or interval), `grouping` (cohort, subgroup, exposure/outcome grouping o
 `conclusion_strength` (a claim stronger or weaker than the evidence), or `other`. The caller may
 not dismiss the first three on preference; tag them honestly.
 
+1.11.0: number every finding in every section - Reader comprehension and Medical presentation
+included, not only the must-fix list - and start its line with the id (`F7 [other] ...`). The
+caller must close each one (changed, kept with a reason, or handed to the author), so an
+unnumbered remark is a remark nobody acts on. From the first round, read also as:
+
+- **a first-time clinical reader** who never saw the project: which labels, abbreviations or
+  terms you had to look up; whether each table and figure can be read without the text;
+- **an editor checking engineering language and self-contained displays**: code names, letter
+  codes ("Composite A", "Model 3"), processing counts (lines/rows read, files, versions),
+  data-handling jargon (normalization, strings, fields, snapshot, collapsed, parsed,
+  re-executed) in the body, tables, legends and in-figure text, raw statuses (Undefined, NA,
+  Not fitted), and abbreviations not defined in each footnote/legend.
+
+When given a bundle path (`.../MANIFEST.md`), read the manifest and every file it lists,
+including rendered Word pages when present - judge the paper as the reader will see it.
+
 Separate three things, and never let them blur:
 
 - **Verified** - you read it and can quote the location.

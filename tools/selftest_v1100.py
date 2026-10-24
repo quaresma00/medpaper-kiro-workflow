@@ -323,6 +323,7 @@ def run_review(tmp: Path, record, section) -> None:
     p, env = v181._review_paper(tmp / "rev")
 
     def cli(*args, tool="tools/review_round.py"):
+        args = v181.with_report(list(args), p)
         return subprocess.run([sys.executable, "-B", str(ROOT / tool), *args, "--project", str(p)],
                               capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
     cli("start")

@@ -35,14 +35,14 @@ if (!exists("save_medpaper", mode = "function")) source(file.path(dirname(.rc_se
 .rc_risk_leaf <- function(rt, times, levels_, palette) {
   rt$strata <- factor(rt$strata, levels = rev(levels_))
   ggplot(rt, aes(x = time, y = strata, label = n.risk)) +
-    geom_text(size = 7 / ggplot2::.pt) +
+    geom_text(size = medpaper_font_floor() / ggplot2::.pt) +
     scale_y_discrete(expand = expansion(add = 0.25)) +
     scale_x_continuous(breaks = times) +
     coord_cartesian(xlim = range(times)) +
     labs(title = "Number at risk", x = NULL, y = NULL) +
     theme_medpaper() +
     theme(axis.line = element_blank(), axis.ticks = element_blank(), axis.text.x = element_blank(),
-          axis.title.y = element_blank(), plot.title = element_text(size = 8))
+          axis.title.y = element_blank(), plot.title = element_text(size = medpaper_font_floor() + 1))
 }
 
 # ---------------------------------------------------------------------------
@@ -132,7 +132,7 @@ recipe_km <- function(data = NULL, time = NULL, status = NULL, group = NULL, tim
   if (!is.null(curve)) {
     cp <- .rc_curve_plot(curve, "recipe_km", times, c(0, 1), xlab, ylab, palette, c(0.02, 0.02), c(0, 0))
     pl <- cp$curve
-    if (!is.null(hr_txt)) pl <- pl + annotate("text", x = max(times), y = 0.98, label = hr_txt, hjust = 1, vjust = 1, size = 7 / ggplot2::.pt)
+    if (!is.null(hr_txt)) pl <- pl + annotate("text", x = max(times), y = 0.98, label = hr_txt, hjust = 1, vjust = 1, size = medpaper_font_floor() / ggplot2::.pt)
     out <- patchwork::wrap_plots(pl, cp$risk, ncol = 1, heights = c(3, 1))
     return(.rc_population(.rc_tag(out, "km_survival"), cp$pop))
   }
@@ -149,7 +149,7 @@ recipe_km <- function(data = NULL, time = NULL, status = NULL, group = NULL, tim
     labs(x = xlab, y = ylab, colour = NULL) + theme_medpaper() +
     theme(legend.position = "inside", legend.position.inside = c(0.02, 0.02), legend.justification = c(0, 0))
   if (!is.null(hr_txt))
-    curve <- curve + annotate("text", x = max(times), y = 0.98, label = hr_txt, hjust = 1, vjust = 1, size = 7 / ggplot2::.pt)
+    curve <- curve + annotate("text", x = max(times), y = 0.98, label = hr_txt, hjust = 1, vjust = 1, size = medpaper_font_floor() / ggplot2::.pt)
   s <- summary(fit, times = times, extend = TRUE)
   rt <- data.frame(time = s$time, strata = sub("^.*=", "", as.character(s$strata)), n.risk = s$n.risk)
   risk <- .rc_risk_leaf(rt, times, lv, palette)
@@ -164,7 +164,7 @@ recipe_cif <- function(data = NULL, time = NULL, status = NULL, group = NULL, ti
   if (!is.null(curve)) {
     cp <- .rc_curve_plot(curve, "recipe_cif", times, NULL, xlab, ylab, palette, c(0.02, 0.98), c(0, 1))
     pl <- cp$curve
-    if (!is.null(gray_txt)) pl <- pl + annotate("text", x = max(times), y = Inf, label = gray_txt, hjust = 1, vjust = 1.5, size = 7 / ggplot2::.pt)
+    if (!is.null(gray_txt)) pl <- pl + annotate("text", x = max(times), y = Inf, label = gray_txt, hjust = 1, vjust = 1.5, size = medpaper_font_floor() / ggplot2::.pt)
     out <- patchwork::wrap_plots(pl, cp$risk, ncol = 1, heights = c(3, 1))
     return(.rc_population(.rc_tag(out, "cumulative_incidence"), cp$pop))
   }
@@ -188,7 +188,7 @@ recipe_cif <- function(data = NULL, time = NULL, status = NULL, group = NULL, ti
     labs(x = xlab, y = ylab, colour = NULL) + theme_medpaper() +
     theme(legend.position = "inside", legend.position.inside = c(0.02, 0.98), legend.justification = c(0, 1))
   if (!is.null(gray_txt))
-    curve <- curve + annotate("text", x = max(times), y = Inf, label = gray_txt, hjust = 1, vjust = 1.5, size = 7 / ggplot2::.pt)
+    curve <- curve + annotate("text", x = max(times), y = Inf, label = gray_txt, hjust = 1, vjust = 1.5, size = medpaper_font_floor() / ggplot2::.pt)
   td <- tidycmprsk::tidy(ci, times = times)
   td <- td[td$outcome == outcome, , drop = FALSE]
   rt <- data.frame(time = td$time, strata = as.character(td$strata), n.risk = td$n.risk)
@@ -211,11 +211,12 @@ recipe_forest <- function(rows, null_value = 1, log_x = TRUE, xlab = "Hazard rat
     labs(x = xlab, y = ylab) + theme_medpaper()
   if (isTRUE(log_x)) plot <- plot + scale_x_log10()
   text <- ggplot(rows, aes(x = 0, y = label, label = txt)) +
-    geom_text(hjust = 0, size = 7 / ggplot2::.pt) +
+    geom_text(hjust = 0, size = medpaper_font_floor() / ggplot2::.pt) +
     scale_x_continuous(limits = c(0, 1), expand = c(0, 0)) +
     labs(title = stat_title, x = NULL, y = NULL) + theme_medpaper() +
     theme(axis.line = element_blank(), axis.ticks = element_blank(), axis.text = element_blank())
-  text_mm <- max(nchar(c(rows$txt, stat_title))) * 1.1 + 0.5
+  fl <- medpaper_font_floor()  # ~1.1 mm per character at 7 pt; scale with the font floor
+  text_mm <- max(max(nchar(rows$txt)) * 1.1 * fl / 7, nchar(stat_title) * 1.1 * (fl + 1) / 7) + 1
   .rc_tag(patchwork::wrap_plots(plot, text, nrow = 1, widths = unit(c(1, text_mm), c("null", "mm"))),
           "forest_plot")
 }
@@ -258,7 +259,7 @@ recipe_calibration <- function(curve, brier = NULL, slope = NULL, intercept = NU
   bits <- c(if (!is.null(brier)) paste("Brier", .fmt_num(brier, 3)),
             if (!is.null(slope)) paste("slope", .fmt_num(slope, 2)),
             if (!is.null(intercept)) paste("intercept", .fmt_num(intercept, 2)))
-  if (length(bits)) p <- p + annotate("text", x = 0.02, y = 0.98, hjust = 0, vjust = 1, label = paste(bits, collapse = "; "), size = 7 / ggplot2::.pt)
+  if (length(bits)) p <- p + annotate("text", x = 0.02, y = 0.98, hjust = 0, vjust = 1, label = paste(bits, collapse = "; "), size = medpaper_font_floor() / ggplot2::.pt)
   .rc_tag(p, "nomogram_calibration")
 }
 
@@ -284,6 +285,6 @@ recipe_volcano <- function(data, log2fc, neg_log10_p, label = NULL, fc_cut = 1, 
     geom_hline(yintercept = p_cut, linetype = "dashed") + geom_vline(xintercept = c(-fc_cut, fc_cut), linetype = "dashed") +
     scale_colour_manual(values = c(`FALSE` = "#BFBFBF", `TRUE` = "#D55E00"), guide = "none") +
     labs(x = xlab, y = ylab) + theme_medpaper()
-  if (!is.null(label)) p <- p + ggrepel::geom_text_repel(data = data[data$.sig, , drop = FALSE], aes(label = .data[[label]]), size = 6 / ggplot2::.pt, max.overlaps = 20)
+  if (!is.null(label)) p <- p + ggrepel::geom_text_repel(data = data[data$.sig, , drop = FALSE], aes(label = .data[[label]]), size = medpaper_font_floor() / ggplot2::.pt, max.overlaps = 20)
   .rc_tag(p, "volcano_plot")
 }

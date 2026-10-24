@@ -38,8 +38,9 @@ edits them. This is an independent scientific/editorial audit, not another writi
    design barriers from presentation defects.
    Check legend meaning in context: panel mapping and decoding information must suffice
    without repeating Results, including paraphrased findings that a phrase check cannot catch.
-   Verify that centralized abbreviation definitions cover the terms used in the figures and
-   tables, including mixed-case medical terms; do not treat every uppercase label as an acronym.
+   Verify that each table footnote and figure legend defines the abbreviations that display
+   uses (mixed-case terms included) and that the central list covers them too; do not treat
+   every uppercase label as an acronym.
 4. Preserve the review in `project/07_manuscript/independent_publishability_review.md`
    under these exact headings: `Verdict`, `Critical barriers`, `Scientific validity`,
    `Reporting completeness`, `Tables and supplementary material`, `Journal suitability`,
@@ -62,6 +63,7 @@ edits them. This is an independent scientific/editorial audit, not another writi
 - `07_manuscript/independent_publishability_review.md`
 
 ## Hard rules
+- 1.11.0: pass the reviewer only the bundle path printed by `review_round.py start` (`.wf/review_bundle/<round>/MANIFEST.md`, self-contained: text copies, figure PNGs, rendered Word pages when available) and the neutral brief it prints. Never add known deviations, previous conclusions or what you expect to hear. From round 1 the reviewer reads as a first-time clinical reader and checks engineering language and self-contained tables/figures, numbering EVERY finding F1, F2 ... in every section (Reader comprehension and Medical presentation included). Save its full report to a file; `close --report <file>` fails until each numbered finding is changed, kept with `--kept ID "reason"`, or handed to the author.
 - One independent reviewer only; no review committee and no repeated audit of unchanged
   material.
 - The reviewer receives the full manuscript, optional supplementary Methods, tables and the

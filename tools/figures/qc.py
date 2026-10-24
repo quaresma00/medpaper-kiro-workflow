@@ -452,7 +452,10 @@ def _archetype_checks(archetype: str, found: dict, reg: dict) -> list[dict]:
     out = [{"name": "archetype_known", "ok": True, "severity": "fail",
             "detail": f"{archetype}: {spec.get('label', '')}"}]
 
-    universal = (reg.get("meta") or {}).get("universal_requires", [])
+    # 1.11.0: statistical plots need axis titles; schematics (flow diagrams) need boxes, counts
+    # and arrows instead.
+    universal = ([] if spec.get("kind") == "schematic"
+                 else (reg.get("meta") or {}).get("universal_requires", []))
     for key in list(dict.fromkeys(list(universal) + list(spec.get("requires", [])))):
         rec = found.get(key)
         if rec is None:

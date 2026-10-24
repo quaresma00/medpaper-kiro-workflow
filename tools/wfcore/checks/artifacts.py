@@ -530,8 +530,12 @@ def _audit_sheet(wb: xlsxlite.Workbook, sh: xlsxlite.Sheet) -> list[str]:
         if total > 1500:
             out.append(f"footnotes are {total} chars - that is an analysis report, not a table footnote")
 
+    # 1.11.0 (#2d): the 300-character limit applies to title/header/body cells only. Footnotes
+    # are limited by their total length (above; words in table_footnotes_concise) - a per-cell
+    # limit made builders split sentences over footnote rows.
     for c in sh.cells:
-        if c.value and len(c.value) > 300:
+        row = int(re.sub(r"\D", "", c.ref) or 0)
+        if c.value and len(c.value) > 300 and row <= last_ruled:
             out.append(f"cell {c.ref} holds {len(c.value)} chars of prose")
             break
     return out

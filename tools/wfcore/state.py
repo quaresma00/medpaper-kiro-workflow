@@ -116,8 +116,28 @@ class State:
             self._note_v181(old_version)
             self._note_v190(old_version, pipeline_version)
             self._note_v1100(old_version, pipeline_version)
+            self._note_v1110(old_version, pipeline_version)
             self.save()
         return changed
+
+    def _note_v1110(self, old_version: str, new_version: str) -> None:
+        """1.11.0: the clinical presentation layer. Event only; no file or stage is touched."""
+        if (version_tuple(old_version) >= (1, 11, 0) or version_tuple(new_version) < (1, 11, 0)
+                or self.data.get("v1110_migration_noted")):
+            return
+        self.data["v1110_migration_noted"] = True
+        self.event("requirements_changed",
+                   "1.11.0: display dictionary (S07) and clinical labels in displays/prose; "
+                   "engineering-language lint (warn in Methods, block elsewhere; paper allowlist "
+                   ".wf/language_allowlist.json); each table/figure defines its abbreviations plus "
+                   "a central list (a pinned paper keeps its legacy placement); flow diagrams are "
+                   "schematics with analysis units; Word keeps caption/table/footnote and "
+                   "legend/figure together; every numbered review finding closed (close --report); "
+                   "provisional journal parameters (01_protocol/journal_profile.json) from S07; "
+                   "print-size fonts >= 8 pt; no raw statuses in displays; concise footnotes; "
+                   "`rework.py preview` and an explicit confirmation before any S19 rewind. New "
+                   "gates are since=1.11.0: completed stages keep the pinned gate set. Paper files "
+                   "were not modified.")
 
     def _note_v1100(self, old_version: str, new_version: str) -> None:
         """1.10.0: S09 Results now follows S10/S11. A paper whose active stage is S09 while the

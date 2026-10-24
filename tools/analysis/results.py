@@ -31,6 +31,22 @@ WRITER = "tools/analysis/results.py"
 _SEED: int | None = None
 
 
+def proportion(numerator: int, denominator: int, population: str, decimals: int = 1) -> dict:
+    """1.11.0 (#3c): a percentage with its numerator, denominator and population key.
+
+    Store it inside write_results(); the proportion_denominators gate traces every body
+    percentage to such a record and flags two proportions compared in one sentence whose
+    population keys differ ("women 64% of cases" vs "36% of all reports").
+    """
+    if not isinstance(population, str) or not population.strip():
+        raise ValueError("population must name the denominator definition, e.g. 'all_cases'")
+    if int(denominator) <= 0 or not 0 <= int(numerator) <= int(denominator):
+        raise ValueError("need 0 <= numerator <= denominator, denominator > 0")
+    return {"numerator": int(numerator), "denominator": int(denominator),
+            "percent": round(100.0 * int(numerator) / int(denominator), decimals),
+            "population": population.strip()}
+
+
 def set_seed(seed: int) -> int:
     """Seed `random` and numpy's legacy global RNG; remembered for the receipt."""
     global _SEED

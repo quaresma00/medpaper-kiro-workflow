@@ -696,8 +696,12 @@ def guidelines_sourced(ctx: Ctx) -> Result:
         problems.append("integrity_sources must contain at least two source URLs")
     abbreviation_placement = str(meta.get("abbreviation_placement", "")).strip().lower()
     abbreviation_source = str(meta.get("abbreviation_rule_source", "")).strip()
-    if abbreviation_placement not in {"central", "local_required"}:
-        problems.append("abbreviation_placement must be central or local_required")
+    # 1.11.0: self_contained (each display defines its abbreviations + a central list) is the
+    # default; central_required only when the guide says so. Legacy values stay valid.
+    if abbreviation_placement not in {"self_contained", "central_required", "central",
+                                      "local_required"}:
+        problems.append("abbreviation_placement must be self_contained (default) or "
+                        "central_required (journal rule); legacy central/local_required accepted")
     if not abbreviation_source or (url and url not in abbreviation_source):
         problems.append("abbreviation_rule_source must cite the exact guidelines_url")
     snapshots = ctx.glob("08_submission/cache/*")

@@ -3,7 +3,7 @@ name: medpaper-pipeline
 description: Drives a gated, resumable medical/clinical research paper pipeline from a research idea through feasibility, data acquisition, exploratory analysis, figure and table production, IMRAD writing, independent review, journal selection, de-AI polish and a Word submission package. Use whenever the task involves a medical research idea, a clinical manuscript, a research protocol, literature retrieval via PubMed, publication-grade figures or three-line tables, journal selection, a submission package, or a revision round on any of these. Do not follow the workflow from memory - run `python tools/wf.py status` and obey the stage card it prints.
 compatibility: Requires Python 3.11+ for the driver. Tables and Word output additionally need numpy, pandas, openpyxl and python-docx (matplotlib for the Python figure path). R 4.3+ with the packages in reference/language_policy.toml (figures default to R). Network access is required for PubMed, Crossref and Unpaywall. Set NCBI_API_KEY to raise the E-utilities rate limit.
 metadata:
-  version: "2.3.0"
+  version: "2.4.0"
   stages: "25"
   entrypoint: "python tools/wf.py status"
 ---
@@ -37,7 +37,15 @@ remember doing. Ask the CLI.
 
 Long gates (S17+, often over two minutes on Windows): run them in the background with
 `python tools/wf.py check --log temp/check.log` (same for `advance`) and poll the log until it
-ends with `[wf] finished rc=N`; do not restart a check that is still running.
+ends with `[wf] finished rc=N`; do not restart a check that is still running. 1.11.0: prefer
+`--wait` (blocks with a heartbeat line, then prints failures + one summary line; details in the
+log) for `wf check`, `rework.py check`, `reproduce.py run` and `build_docx.py`.
+
+Keep working state inside the paper (`temp/` scratch, `.wf/progress.md` written by every `wf`
+command: stage, open round, last command result) - never in external temp folders - so an
+interrupted session resumes from the paper alone. Medical presentation (1.11.0): internal
+names become clinical labels via `01_protocol/display_dictionary.json`; no engineering
+language (strings, fields, parsed, snapshot, lines read ...) outside Supplementary Methods.
 
 ## One engine, many papers
 

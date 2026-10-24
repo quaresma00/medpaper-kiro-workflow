@@ -18,7 +18,9 @@
 # ==============================================================================
 
 [meta]
-version = "1.0.0"
+version = "1.1.0"
+# Applies to statistical plots (kind = "plot", the default); schematics (kind = "schematic")
+# are judged on their own `requires`.
 universal_requires = ["axis_labels"]
 
 # ---------------------------------------------------------------------------
@@ -98,11 +100,16 @@ notes = "Mark treatment start with an arrow. Give n at each timepoint if it chan
 label = "CONSORT / PRISMA / STROBE flow diagram"
 domain = "Trials and evidence"
 use_for = "RCTs, meta-analyses, cohort assembly"
-requires = ["box_nodes", "figure_statistics"]
+# 1.11.0: a schematic, not a statistical plot - boxes, counts and arrows, never axis titles
+# (universal_requires applies to kind = "plot" only).
+kind = "schematic"
+requires = ["box_nodes", "figure_statistics", "arrows"]
 advisory = ["exclusion_reasons", "itt_pp_split"]
 notes = """One of the few figures where text inside the panel is mandatory. Account for every
-patient: screened, excluded with reasons, enrolled, lost to follow-up, analysed.
-Numbers must reconcile with dataset_summary.json, and the gate checks their provenance."""
+unit of analysis: screened, excluded with reasons, enrolled, lost to follow-up, analysed. Every
+count box names its unit (reports, cases, patients, participants); processing counts (lines or
+rows read, files, versions, quarters loaded) belong in a supplementary data-scale table
+(flow_diagram_units). Numbers must reconcile with dataset_summary.json."""
 
 [archetype.forest_plot]
 label = "Forest plot (subgroup or meta-analysis)"

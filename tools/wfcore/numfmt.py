@@ -74,6 +74,22 @@ def style(project: Path | None = None) -> dict:
         target = json.loads((project / "08_submission/target_journal.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         target = {}
+    # 1.11.0 (#2a): the provisional journal profile (S06/S07) applies from the first build;
+    # the chosen journal (S20) overrides it.
+    from . import presentparams
+    layers = [presentparams.provisional(project)]
+    if isinstance(target, dict):
+        pres = target.get("presentation")
+        layers.append(pres if isinstance(pres, dict) else {})
+    for layer in layers:
+        sp = _spelling_word(layer.get("spelling"))
+        if sp:
+            out["spelling"] = sp
+        nf = layer.get("number_format")
+        if isinstance(nf, dict):
+            for key in ("p_space", "minus", "thousands", "interval"):
+                if key in nf:
+                    out[key] = nf[key]
     if isinstance(target, dict):
         sp = _spelling_word(target.get("spelling"))
         if sp:

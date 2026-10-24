@@ -87,15 +87,23 @@ write_table(
 
 ## Hard rules
 - A table is a reader-facing object, not an analysis dump. No model diagnostics, no
-  console output, no paragraph-length cells. The gate rejects cells over 300 characters
-  and footnote blocks over 1500 characters.
+  console output, no paragraph-length cells. The gate rejects body cells over 300 characters
+  and footnotes over `table_footnote_words_max` words (default 120) in total; write each
+  footnote as whole sentences, never split one sentence over rows.
 - Every numeric cell must trace to `03_analysis/results/*.json` (gate:
   `numbers_have_provenance source=tables`). Do not retype from the Results prose.
-- Titles are self-contained and short. Footnotes carry abbreviations, units and tests.
-- Keep a short abbreviation list in the table footnote initially. At S17, if the manuscript
-  has more than eight display-item abbreviations or a local list exceeds 50 words, move all definitions to the single
-  `Declarations and Statements > Abbreviations` list, remove repeated local blocks from the
-  table-building source, regenerate the affected workbooks, and visually recheck them.
+- Titles are self-contained and short. Footnotes carry abbreviations, units and the
+  estimation method in one sentence; longer method explanations go to Methods.
+- 1.11.0 presentation standard at build: row/column labels from the display dictionary
+  (`clinical_labels_used`), `threeline.not_estimable(lower)` for zero-cell/unbounded estimates,
+  one missing symbol (`threeline.MISSING`, defined in the footnote), digits via `fmt()/ci()`,
+  separators via the journal profile. Never print Undefined, Not fitted, NA, NaN or Inf
+  (`display_values_presented`). Model diagnostics, merge/collapse steps and convergence go to
+  a supplementary table; content a review asks to add is placed main vs supplementary by you
+  on what the reader needs (`table_footnotes_concise`).
+- Each footnote defines every abbreviation its table uses; the manuscript keeps a central
+  list too (`display_abbreviations_defined`). No engineering language in cells
+  (`engineering_language_clean`).
 - Do not add a table that is not in the plan. If one is needed, loop to S07.
 - Structural checks alone are insufficient; the visual-review decision is mandatory.
 
