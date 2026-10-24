@@ -2,7 +2,17 @@
 
 一套面向医学与临床研究的 Kiro 工作流。它把“研究想法”推进为经过数据、文献、统计结果、图表、人工复核和期刊规则共同校验的投稿包，而不是只让 AI 一次性写出一篇看似完整的论文。
 
-当前版本：`1.10.0`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE + R 4.3+
+当前版本：`1.11.0`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE + R 4.3+
+
+## 1.11.0 变化（临床表述层）
+
+- **展示词典与工程用语**：S07 必填 `01_protocol/display_dictionary.json`（内部名→临床标签/缩写/定义），表、图内文字、图注与正文只用临床标签，字母代号默认禁止；`reference/clinical_language.toml` 工程词表在 Methods 警告、其余正文/表/图/图注阻断，实现细节进补充方法，论文级例外写 `.wf/language_allowlist.json`（须理由）。
+- **表图自明**：表注、图注各自定义所用缩写，正文另留集中列表（仅期刊明确要求时 `central_required`）；流程图为示意图（框+计数+箭头，不要坐标轴），计数须带分析单位，拒绝“行/文件/版本”等处理日志；Word 仅对标题去折叠，保留题注→表→表注、图注↔图的同页设置。
+- **呈现规范前移**：S07 写暂定期刊参数 `01_protocol/journal_profile.json`（字号下限、图宽、面板标签大小写、线条图 dpi、数字格式），表图从首次渲染即按其执行，S20 确认或替换（属展示层重渲染）；图内文字终稿尺寸 ≥8 pt；表格不得出现 Undefined/Not fitted/NA/Inf，缺失符号统一；表注按总字数控制，诊断信息进补充表。
+- **审阅闭环**：每轮所有编号意见（含 Reader comprehension、Medical presentation）须逐条关闭，`close --report` 校验；首轮即加入“初读临床读者”“工程用语与表图自明”视角；审阅者只拿 `review_round.py start` 生成的自包含材料包与中性说明。
+- **修订与冻结**：标签内编号（Online Resource 2、Table S3、面板/条目号）不算事实；`rework.py preview` 先试分类；回退 S19 需用户原话“我确认回退”；轮次范围外的写入在写入时拒绝；冻结分科学层/展示层（图注、表注措辞可在期刊阶段改，事实不变）；最终版新增数字须能追溯到结果 JSON 且 n/N(%) 自洽；正文比例登记分子分母（`analysis.results.proportion`），同句比较须同口径。
+- **运行**：复现只受分析输入影响，期间改正文不作废；`--wait` 阻塞等待+心跳，输出只留失败项与一行摘要；进度写入论文 `.wf/progress.md`；门禁按语义角色识别标题（含期刊名称与同义词），meta 分析识别否定句并优先用 `study_design`；控制台中文按读取端代码页输出，不再乱码。
+- **迁移**：只记事件；新门禁均 `since = "1.11.0"`，已完成阶段沿用锁定引擎；已按旧规则集中缩写的论文保留其设置直至 `wf migrate`。
 
 ## 1.10.0 变化（13 条流程顺序与规则）
 
@@ -289,7 +299,7 @@ python tools/wf.py override show
 
 根据研究问题和实际结果自动选择最准确、最具可读性的题目，不要求用户先从多个题目中选择。随后生成摘要和 3–6 个关键词，并按医学论文顺序组装 `full_manuscript.md`。
 
-关键词位于摘要之后，只使用逗号分隔，不使用 `/`、`;`、`&` 等混杂符号。完整稿包含明确的 References 标题，并在末尾保留简洁 Figure legends。若表图缩写很多，则统一放在 Declarations and Statements 的 Abbreviations 部分，避免在每个图注和表格中重复。
+关键词位于摘要之后，只使用逗号分隔，不使用 `/`、`;`、`&` 等混杂符号。完整稿包含明确的 References 标题，并在末尾保留简洁 Figure legends。每个表注、图注各自定义所用缩写（表图自明），正文另保留一份集中的 Abbreviations 列表；仅当期刊明确要求时才只保留集中列表。
 
 输出：题目、摘要、关键词、声明/缩写区和完整论文 Markdown。
 
@@ -343,7 +353,7 @@ python tools/wf.py override show
 
 仅根据目标期刊明确要求生成需要上传的文件。正文、title page、cover letter、补充方法和其他叙述性材料均生成 Word 文件，不会只把正文转成 DOCX 而把其余内容留成 Markdown。
 
-Word 样式优先采用官方投稿指南；若指南没有规定，默认使用 Times New Roman、12 pt、双倍行距、黑色文字。净化器会从所有 WordprocessingML 部件移除 `keepNext`、`keepLines`、`pageBreakBefore`、`outlineLvl` 和段落边框，标题统一映射为基于正文样式的 `SectionHeading`，因而没有标题前小黑点、折叠三角形或可折叠大纲。文件同时移除超链接，统一同级标题字号，并拒绝字符 `↓` 和 Word 手动换行符。
+Word 样式优先采用官方投稿指南；若指南没有规定，默认使用 Times New Roman、12 pt、双倍行距、黑色文字。净化器会从所有 WordprocessingML 部件移除 `pageBreakBefore`、`outlineLvl` 和段落边框，`keepNext`/`keepLines` 只从样式和标题上移除，题注→表→表注、图注↔图保留同页设置，标题统一映射为基于正文样式的 `SectionHeading`，因而没有标题前小黑点、折叠三角形或可折叠大纲。文件同时移除超链接，统一同级标题字号，并拒绝字符 `↓` 和 Word 手动换行符。
 
 正文必须有 References 标题，并且只能有一个 Figure legends 区标题；每幅图也只能出现一个对应图注标题，图注正文不得再次以 `Figure N` 开头。补充方法 DOCX 不允许包含表格或 Markdown 长横线残留，补充表只存在于单独的三线表工作簿中。如期刊要求，也可另交单独图注文件，但同一文件内仍不得重复标题。
 
