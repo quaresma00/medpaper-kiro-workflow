@@ -855,6 +855,11 @@ def cmd_note(args) -> int:
 
 def cmd_decide(args) -> int:
     _, st, _ = _load()
+    # 1.10.0 (#13): user approval is never inferred from wording through `wf decide`.
+    if args.name in ("manuscript_human_reviewed", "submission_package_user_confirmed"):
+        print(f"{args.name} is recorded only by tools/review_round.py decide no_further_review "
+              "--words \"我确认这一版\" (the user's exact sentence; 'OK'/'可以' do not count)")
+        return 1
     if len(args.why.strip()) < 40:
         print("rationale too short (need >= 40 chars). A decision without a reason is a guess.")
         return 1

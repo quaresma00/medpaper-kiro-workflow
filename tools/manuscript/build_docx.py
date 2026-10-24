@@ -11,7 +11,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import tomllib
 import zipfile
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -129,11 +128,11 @@ def planned_figure_ids(project: Path | None = None) -> list[str] | None:
 
 
 def figure_legend_cap() -> int:
+    """1.10.0 (#10): blocking only when the journal states a legend cap; otherwise none."""
     try:
-        data = tomllib.loads((ROOT / "pipeline/pipeline.toml").read_text(encoding="utf-8"))
-        return int(data.get("targets", {}).get("figure_legend_words_max", 180))
-    except (OSError, ValueError, tomllib.TOMLDecodeError):
-        return 180
+        return journalspec.legend_cap(journalspec.load(project_root())) or journalspec.NO_CAP
+    except (OSError, ValueError, SystemExit):
+        return journalspec.NO_CAP
 
 
 def load_style(path: Path) -> dict:

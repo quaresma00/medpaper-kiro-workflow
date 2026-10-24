@@ -36,11 +36,14 @@ Interpret the finding against the literature you actually read. One file, this s
 - `07_manuscript/discussion.md`
 
 ## Hard rules
+- Word and reference targets are soft budgets (warnings) until S20.
 - Body text is continuous paragraphs (1.9.0). Lists only where a sentence truly cannot carry the content (rarely more than one short list per section); every result, count, criterion, covariate and sensitivity finding is written as a sentence. `prose_not_lists` fails above `body_list_items_max` items or `body_list_share_max` of the blocks.
 - ONE section file this stage.
 - Never mention the pipeline's own history (independent review, earlier draft, previous
   version, reviewer). A change of analysis is a "protocol deviation" or "post hoc analysis".
-- No new results. Any number here must already be in `results.md` and in a results JSON.
+- No new results. Own numbers must already be in `results.md` and a results JSON. A prior
+  study's number is allowed only in the same sentence as `[@key]` of that study (verified
+  library, ideally deep-read); `number_allowlist.tsv` never applies here (1.10.0).
 - No causal language for an observational design. "Associated with", not "leads to".
 - Limitations are not a list of generic caveats. "Single-centre design" alone is not a
   limitation section; say what it does to the estimate.

@@ -14,7 +14,7 @@
 
 [meta]
 name = "medpaper"
-version = "1.9.1"
+version = "1.10.0"
 schema = 1
 description = "Medical/clinical research pipeline: idea -> feasibility -> data -> analysis -> artifacts -> manuscript -> submission package."
 
@@ -57,7 +57,7 @@ invariants = [
   "A user-requested revision never leaves the workflow and never rewinds by default. At S19/S24: `rework.py batch --plan` per feedback message (collects, builds nothing), `rework.py seal --why` once the user is done, edit only the files `rework.py status` lists, then `rework.py check` (only the affected stages' content gates; any file changed outside the scope fails), `mark`, `close`. Completed stages stay completed; wf advance/loop are refused while a scoped round is open. Full rewind is the explicit fallback only (`batch --rewind`, e.g. a journal switch). Science changed after S19 returns to S19 for re-review and re-freeze before the journal copy is merged. Word-only layout edits are allowed at S24 only when the S23 visible-text baseline is unchanged.",
   "The scientific record is frozen when the user releases S19 review, and 07_manuscript/ is read-only from then on. Journal requirements - word caps, abstract shape, reference style, title page, required statements - are presentation, and are applied to the copy in 08_submission/manuscript/ that S20 opens for the chosen journal. Switching journals first loops to S20 and runs reset-journal, which moves the entire old submission tree to 08_submission/journal_archives/<journal>-<UTC>/ (archived, never deleted, never read by a gate), then takes a fresh copy from the same frozen text; no prior cache, title page, cover letter, trim, bundle or approval may survive in the live tree. Once S19 is done a missing freeze fails the gate, and the freeze also covers 03_analysis/results/*.json. scientific_freeze_intact, journal_variant_ready and variant_preserves_science are non-overridable. Prose may be tightened to fit a cap, but a number, citation or artifact reference that disappears is dropped content, which is a scientific decision needing the user's recorded authorisation.",
   "Repeated feedback is handled as a persisted revision round at S19 (scientific manuscript) or S24 (journal package). Interpret each message once into atomic items, collect them into one round, seal once and build once; read and rebuild only the sealed dependency closure, preserve unaffected approved evidence, and still run every applicable quality gate (`rework build --scope full` at most twice per round). Token or context pressure is never permission to omit an item, shorten the scientific work or skip validation; resume from tools/rework.py status after compaction.",
-  "Review points (S18/S19 manuscript, S24/S25 package) run as rounds: tools/review_round.py start, the read-only medpaper-reviewer subagent reads the printed current files, you apply on your own judgement the fixes that improve the paper (scoped rework where frozen science requires it), close the round, give the user ONE summary (findings by severity, changes file + one line, what was kept and why) and ask one question: another round or no further review. No export package, no per-change permission. Stay until the user explicitly says no further review; silence, thanks or a generic continue is not approval.",
+  "Review points (S18/S19 manuscript, S24/S25 package) run as rounds: tools/review_round.py start, the read-only medpaper-reviewer subagent reads the printed current files, you apply on your own judgement the fixes that improve the paper (scoped rework where frozen science requires it), close the round, give the user ONE summary (findings by severity, changes file + one line, what was kept and why, pending author decisions) and ask one question: another round, or confirm. Findings on numbers, grouping/subgroups or strength of conclusions are changed or decided by the author, never kept on your preference. Approval is only the exact sentence '我确认这一版' (or 'I confirm this version'), recorded with the version hash; 'OK', '可以', '无需审阅', thanks or silence are not approval - ask for the sentence. No export package unless the user explicitly asks (review_round.py export), no per-change permission.",
   "Figures render in R by default (figure_engine); analysis may stay in Python. A figure drawn with the other engine needs `renderer` and a `renderer_reason` (>= 20 characters) in the artifact plan. Approved Python figures are kept as they are: never refit confirmed models just to render them in R. R figures carry a render receipt (script, result and output hashes); a changed script or result makes qc.py fail until the figure is re-rendered.",
   "If you are unsure where you are, run `.\\.venv\\Scripts\\python.exe tools\\wf.py status`. Never guess the current stage.",
 ]
@@ -123,8 +123,9 @@ visual_review_mode = "deferred"
 abbreviation_centralize_threshold = 8
 abbreviation_local_words_max = 50
 journal_source_age_days_max = 90
-# Drafting caps for S08-S17, before a journal is chosen (Word-compatible counts, numbers
-# included). S20 replaces them with the chosen journal's typed limits in target_journal.json.
+# Drafting budgets for S08-S17, before a journal is chosen (Word-compatible counts, numbers
+# included). 1.10.0: soft while writing, a warning health check at S17; hard only from S20 on,
+# against the chosen journal's typed limits in target_journal.json.
 draft_main_words_max = 4000
 draft_abstract_words_max = 250
 # journal_limits_met (1.9.0): a count at or below the cap passes (margin 1.0 = 100%; a paper
@@ -158,6 +159,10 @@ check = "outputs_exist"
 check = "json_keys"
 path = "01_protocol/idea.json"
 keys = ["title_working", "design", "population", "exposure", "comparator", "outcomes", "claimed_novelty", "data_source_candidates", "open_questions"]
+# 1.10.0: structured study design + data source, from which declarations are judged later.
+[[stage.gate]]
+check = "study_basis_recorded"
+since = "1.10.0"
 [[stage.gate]]
 check = "no_future_artifacts"
 
@@ -201,6 +206,13 @@ headings = ["Objective", "Design", "Population and eligibility", "Variables", "S
 check = "design_precedent_recorded"
 path = "01_protocol/protocol_v1.md"
 [[stage.gate]]
+check = "statistical_reporting_plan"
+path = "01_protocol/protocol_v1.md"
+since = "1.10.0"
+[[stage.gate]]
+check = "study_basis_recorded"
+since = "1.10.0"
+[[stage.gate]]
 check = "md_sections"
 path = "02_data/acquisition_plan.md"
 headings = ["Source", "Access route", "Licence and ethics", "Protocol-defined data universe", "Exact retrieval steps", "Pagination and completeness proof", "Expected shape", "Known limitations"]
@@ -222,6 +234,10 @@ path = "03_analysis/results/dataset_summary.json"
 keys = ["n_rows", "n_cols", "variables", "missingness", "source_hash", "acquisition_scope", "acquisition_status"]
 [[stage.gate]]
 check = "data_acquisition_complete"
+# 1.10.0: full extraction guards quantity; the crosswalk guards definitions.
+[[stage.gate]]
+check = "variable_crosswalk_confirmed"
+since = "1.10.0"
 [[stage.gate]]
 check = "results_have_environment"
 [[stage.gate]]
@@ -291,6 +307,13 @@ headings = ["Objective", "Design", "Population and eligibility", "Variables", "S
 check = "design_precedent_recorded"
 path = "01_protocol/protocol_final.md"
 [[stage.gate]]
+check = "statistical_reporting_plan"
+path = "01_protocol/protocol_final.md"
+since = "1.10.0"
+[[stage.gate]]
+check = "raw_spot_check"
+since = "1.10.0"
+[[stage.gate]]
 check = "decision_recorded"
 name = "analysis_converged"
 allowed = ["YES"]
@@ -325,6 +348,9 @@ headings = ["Comparable papers surveyed", "Figure/table counts observed", "Chose
 [[stage.gate]]
 check = "legends_cover_plan"
 [[stage.gate]]
+check = "figure_text_planned"
+since = "1.10.0"
+[[stage.gate]]
 check = "legend_no_results_restatement"
 [[stage.gate]]
 check = "forbidden_symbols_absent"
@@ -343,6 +369,12 @@ check = "single_section_written"
 [[stage.gate]]
 check = "citekeys_resolve"
 paths = ["07_manuscript/methods.md", "07_manuscript/supplementary_methods.md"]
+# 1.10.0: every Methods citation is checked live against PubMed when it is written.
+[[stage.gate]]
+check = "reference_provenance"
+live = true
+cited_in = ["07_manuscript/methods.md", "07_manuscript/supplementary_methods.md"]
+since = "1.10.0"
 [[stage.gate]]
 check = "supplementary_methods_clean"
 [[stage.gate]]
@@ -363,30 +395,6 @@ since = "1.9.0"
 check = "no_ai_boilerplate"
 path = "07_manuscript/supplementary_methods.md"
 optional = true
-
-[[stage]]
-id = "S09_results"
-title = "Write Results (cites planned figures/tables)"
-card = "stages/S09_results.md"
-outputs = ["07_manuscript/results.md"]
-[[stage.gate]]
-check = "outputs_exist"
-[[stage.gate]]
-check = "single_section_written"
-[[stage.gate]]
-check = "numbers_have_provenance"
-path = "07_manuscript/results.md"
-[[stage.gate]]
-check = "artifact_refs_consistent"
-paths = ["07_manuscript/results.md"]
-require_all_cited = true
-[[stage.gate]]
-check = "no_ai_boilerplate"
-path = "07_manuscript/results.md"
-[[stage.gate]]
-check = "prose_not_lists"
-path = "07_manuscript/results.md"
-since = "1.9.0"
 
 [[stage]]
 id = "S10_tables"
@@ -436,8 +444,40 @@ patterns = ["05_figures/code/**/*.py", "05_figures/code/**/*.R", "05_figures/cod
 check = "temp_clean"
 
 [[stage]]
+id = "S09_results"
+title = "Write Results from the final tables and figures"
+card = "stages/S09_results.md"
+outputs = ["07_manuscript/results.md"]
+# 1.10.0: S09 runs after S10/S11 (id kept so existing papers resolve); S12 only cross-checks.
+[[stage.gate]]
+check = "outputs_exist"
+[[stage.gate]]
+check = "displays_final_for_results"
+since = "1.10.0"
+[[stage.gate]]
+check = "single_section_written"
+[[stage.gate]]
+check = "numbers_have_provenance"
+path = "07_manuscript/results.md"
+[[stage.gate]]
+check = "effects_with_intervals"
+path = "07_manuscript/results.md"
+since = "1.10.0"
+[[stage.gate]]
+check = "artifact_refs_consistent"
+paths = ["07_manuscript/results.md"]
+require_all_cited = true
+[[stage.gate]]
+check = "no_ai_boilerplate"
+path = "07_manuscript/results.md"
+[[stage.gate]]
+check = "prose_not_lists"
+path = "07_manuscript/results.md"
+since = "1.9.0"
+
+[[stage]]
 id = "S12_reconcile"
-title = "Reconcile rendered artifacts against Methods/Results text"
+title = "Cross-check Methods/Results text against the final tables and figures"
 card = "stages/S12_reconcile.md"
 outputs = ["07_manuscript/reconciliation.md"]
 [[stage.gate]]
@@ -459,7 +499,7 @@ check = "numbers_cross_match"
 
 [[stage]]
 id = "S13_reflib"
-title = "Build verified reference library (~50, abstracts mandatory)"
+title = "Build verified reference library by argumentative role (abstracts mandatory)"
 card = "stages/S13_reflib.md"
 outputs = ["06_refs/library.json", "06_refs/verified.json", "06_refs/refs.bib", "06_refs/refs.ris"]
 [[stage.gate]]
@@ -467,10 +507,15 @@ check = "outputs_exist"
 [[stage.gate]]
 check = "reference_provenance"
 live = true
+# 1.10.0: no count at search time (the 45-60 band is an S17 health check); roles must be covered.
 [[stage.gate]]
 check = "refs_library"
 require_abstract = true
 require_verified = true
+count_check = false
+[[stage.gate]]
+check = "argument_roles_covered"
+since = "1.10.0"
 [[stage.gate]]
 check = "bib_ris_match_library"
 [[stage.gate]]
@@ -493,6 +538,8 @@ check = "md_wordcount"
 path = "07_manuscript/introduction.md"
 min_key = "intro_words_min"
 max_key = "intro_words_max"
+# 1.10.0: soft budget while writing (warning); hard limits start at S20.
+severity = "warn"
 [[stage.gate]]
 check = "citekeys_resolve"
 paths = ["07_manuscript/introduction.md"]
@@ -501,6 +548,8 @@ check = "citation_count"
 path = "07_manuscript/introduction.md"
 min_key = "intro_refs_min"
 max_key = "intro_refs_max"
+# 1.10.0: soft budget while writing (warning); hard limits start at S20.
+severity = "warn"
 [[stage.gate]]
 check = "no_ai_boilerplate"
 path = "07_manuscript/introduction.md"
@@ -536,6 +585,8 @@ check = "md_wordcount"
 path = "07_manuscript/discussion.md"
 min_key = "discussion_words_min"
 max_key = "discussion_words_max"
+# 1.10.0: soft budget while writing (warning); hard limits start at S20.
+severity = "warn"
 [[stage.gate]]
 check = "citekeys_resolve"
 paths = ["07_manuscript/discussion.md"]
@@ -544,6 +595,8 @@ check = "citation_count"
 path = "07_manuscript/discussion.md"
 min_key = "discussion_refs_min"
 max_key = "discussion_refs_max"
+# 1.10.0: soft budget while writing (warning); hard limits start at S20.
+severity = "warn"
 [[stage.gate]]
 check = "deepread_cited"
 path = "07_manuscript/discussion.md"
@@ -578,6 +631,11 @@ check = "analysis_reproduces"
 check = "manuscript_structure"
 [[stage.gate]]
 check = "draft_length_targets"
+# 1.10.0: length health check at assembly (warning + report), never a block.
+severity = "warn"
+[[stage.gate]]
+check = "reference_library_health"
+since = "1.10.0"
 [[stage.gate]]
 check = "supplementary_methods_clean"
 [[stage.gate]]
@@ -672,6 +730,10 @@ check = "revision_rounds_closed"
 check = "review_round_approved"
 since = "1.8.1"
 scope = "manuscript"
+[[stage.gate]]
+check = "explicit_confirmation"
+since = "1.10.0"
+scope = "manuscript"
 # The user has said the science needs no further change, so hash it here. From S20 on, a journal
 # requirement is satisfied by adapting a copy in 08_submission/manuscript/, never by editing
 # these files - which is what stopped a second journal choice from churning settled text.
@@ -701,6 +763,10 @@ name = "journal_chosen"
 check = "guidelines_sourced"
 [[stage.gate]]
 check = "docx_style_config"
+# 1.10.0: re-check the display count against this journal before any further writing.
+[[stage.gate]]
+check = "display_plan_fits_journal"
+since = "1.10.0"
 [[stage.gate]]
 check = "scientific_freeze_intact"
 [[stage.gate]]
@@ -717,7 +783,15 @@ check = "outputs_exist"
 [[stage.gate]]
 check = "json_keys"
 path = "00_input/author_info.json"
-keys = ["authors", "affiliations", "corresponding", "funding", "conflicts", "ethics_approval", "data_availability"]
+keys = ["authors", "affiliations", "corresponding", "funding", "conflicts"]
+# 1.10.0: ethics/consent/data availability are judged by the workflow (tools/declarations.py);
+# the author answers only the specific points it cannot determine.
+[[stage.gate]]
+check = "declarations_assessed"
+since = "1.10.0"
+[[stage.gate]]
+check = "display_plan_fits_journal"
+since = "1.10.0"
 [[stage.gate]]
 check = "manuscript_structure"
 [[stage.gate]]
@@ -907,6 +981,10 @@ check = "review_round_approved"
 since = "1.8.1"
 scope = "package"
 [[stage.gate]]
+check = "explicit_confirmation"
+since = "1.10.0"
+scope = "package"
+[[stage.gate]]
 check = "decision_recorded"
 name = "submission_package_user_confirmed"
 allowed = ["OK"]
@@ -980,6 +1058,15 @@ globs = [
   "03_analysis/code/*",
   "03_analysis/results/*.json",
   "03_analysis/results/number_allowlist.tsv",
+  # 1.10.0: variable crosswalk, raw spot check (+ its script), reference coverage and
+  # uncited reasons, display reallocation, declarations assessment.
+  "02_data/variable_crosswalk.json",
+  "03_analysis/spot_check.json",
+  "03_analysis/spot_check/*",
+  "06_refs/coverage.json",
+  "06_refs/uncited_reasons.json",
+  "08_submission/display_reallocation.json",
+  "08_submission/declarations_assessment.json",
   "03_analysis/reproducibility.toml",
   "04_tables/main/*.xlsx",
   "04_tables/supplementary/*.xlsx",

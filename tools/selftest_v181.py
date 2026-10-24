@@ -229,7 +229,10 @@ def run_review(tmp: Path, record, section) -> None:
     md = p / "07_manuscript/full_manuscript.md"
     md.write_text(md.read_text(encoding="utf-8").replace("was associated", "was clearly associated"),
                   encoding="utf-8")
-    c1 = cli("close", "--findings", "critical=0,major=1,minor=2", "--change",
+    c1 = cli("close", "--findings", "critical=0,major=1,minor=2",
+             "--finding", "F1", "conclusion_strength", "changed", "Claim too strong",
+             "--finding", "F2", "other", "kept", "Second cohort",
+             "--finding", "F3", "other", "changed", "Typo", "--change",
              "07_manuscript/full_manuscript.md", "Tightened the Discussion claim",
              "--kept", "Add a second cohort", "needs data the study does not have")
     waiting = gate()
@@ -247,7 +250,7 @@ def run_review(tmp: Path, record, section) -> None:
     s2 = cli("start", "--delta")
     rnd2 = rr.latest(p, "manuscript")
     c2 = cli("close", "--findings", "minor=0")
-    d2 = cli("decide", "no_further_review", "--words", "无需继续审阅")
+    d2 = cli("decide", "no_further_review", "--words", "我确认这一版")
     ok_gate = gate()
     st = State(p, ".wf").load()
     dec = st.decision("manuscript_human_reviewed") or {}
@@ -285,11 +288,11 @@ def run_review(tmp: Path, record, section) -> None:
     (p / "05_figures/legends.md").write_text(
         (p / "05_figures/legends.md").read_text(encoding="utf-8") + "\nEdited.\n", encoding="utf-8")
     stale = gate()
-    early = cli("decide", "no_further_review", "--words", "无需继续审阅")
+    early = cli("decide", "no_further_review", "--words", "我确认这一版")
     cli("start", "--delta")
     rnd3 = rr.latest(p, "manuscript")
-    cli("close", "--findings", "minor=1")
-    cli("decide", "no_further_review", "--words", "无需继续审阅")
+    cli("close", "--findings", "minor=1", "--finding", "F1", "other", "changed", "Edited legend")
+    cli("decide", "no_further_review", "--words", "我确认这一版")
     fresh = gate()
     record("coverage fails when a covered file changes after the last round; a delta round fixes it",
            not stale.ok and "changed after review round M002" in stale.detail

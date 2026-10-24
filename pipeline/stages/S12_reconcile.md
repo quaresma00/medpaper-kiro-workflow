@@ -1,9 +1,9 @@
 # S12 - Reconcile the rendered artifacts against the text
 
 ## Purpose
-Results and Methods were written before the tables and figures existed. This stage closes
-that gap. It is the cheapest place to catch a number that drifted, a renumbered panel, or
-a table the prose describes differently from how it was built.
+Final cross-check only (1.10.0): Results were written from the final tables and figures.
+Catch a number that drifted, a renumbered panel, or prose that describes a display
+differently from how it was built.
 
 ## Procedure
 1. Run the gate first; it does the mechanical part:

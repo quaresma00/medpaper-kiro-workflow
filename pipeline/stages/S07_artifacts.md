@@ -90,6 +90,8 @@ first keep panels from filling up with explanatory text later.
 - `04_tables/table_captions.md`
 
 ## Hard rules
+- 1.10.0 `figure_text_planned`: every figure entry carries `"text_plan": {"in_figure": "axis titles, units, group labels, n at risk (or none)", "legend": "what the legend explains"}` - plan both together. Legend length (`figure_legend_words_max`) is advisory; it blocks only when the journal states `limits.figure_legend_words`.
+- The display inventory is re-checked against the chosen journal at S20 (`display_plan_fits_journal`).
 - Do not draw anything yet. No xlsx, no png.
 - Do not plan a display item you have no result JSON for.
 - Detailed methods, cohort provenance and general caveats belong in Methods or

@@ -117,6 +117,7 @@ for rebuilding the current S20 variant; it clears S21+ downstream files as well 
 - `08_submission/manuscript/` (the journal adaptation copy, opened from the frozen source)
 
 ## Hard rules
+- 1.10.0 `display_plan_fits_journal`: compare the main figures/tables with `limits` (display_items, main_figures, main_tables). Over the limit -> write `08_submission/display_reallocation.json` `{"moves": [{"id", "to": "supplementary", "new_id", "why"}]}` before any further writing, and apply it as a rework round (kind figure-layout/table-layout; facts unchanged = presentation). Record `limits.figure_legend_words` only if the guide states a legend cap.
 - Record typed structure fields in target_journal.json: `main_text_headings`, `keywords` {min, max, separator}, `running_title_position`, `blinded_main_manuscript`, `spelling`, `number_format` {p_space, minus (unicode|hyphen), thousands (","|"thin"|""), interval}. Builders and checks read them; a change to them later is a `journal-format` (presentation) revision.
 - CSL (1.9.0): compare the journal's official example reference with the rendered list before S23 and fix differences with a paper-local `08_submission/csl_patch.json` (never by editing refs.bib or the final Word file). `initialize-with-hyphen` only works on the `<style>` root - use `{"initialize_with_hyphen": false}` in the patch.
 - Never state indexing, quartile, fees, turnaround or format rules from memory.

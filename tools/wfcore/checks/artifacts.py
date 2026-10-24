@@ -189,6 +189,7 @@ def legends_cover_plan(ctx: Ctx) -> Result:
             return Result(False, "legends_cover_plan", f"{rel} missing")
     plan = _plan(ctx)
     problems: list[str] = []
+    long_legends: list[str] = []
 
     for rel, groups, minlen, what in (
         (LEGENDS, ("main_figures", "supp_figures"), 40, "figure legend"),
@@ -227,9 +228,14 @@ def legends_cover_plan(ctx: Ctx) -> Result:
                 problems.append(f"{rel}: {what} for {eid} is only {len(blocks[key].strip())} chars")
             elif rel == LEGENDS:
                 words = len(re.findall(r"\b[A-Za-z][A-Za-z0-9'-]*\b", blocks[key]))
-                cap = int(ctx.target("figure_legend_words_max", 180))
+                # 1.10.0 (#10): hard only when the chosen journal states a legend cap.
+                from .. import journalspec
+                hard = journalspec.legend_cap(journalspec.load(ctx.project))
+                cap = hard or int(ctx.target("figure_legend_words_max", 180))
                 if words > cap:
-                    problems.append(f"{rel}: {what} for {eid} is {words} words (maximum {cap})")
+                    (problems if hard else long_legends).append(
+                        f"{rel}: {what} for {eid} is {words} words "
+                        + (f"(journal maximum {cap})" if hard else f"(advisory {cap})"))
         if rel == CAPTIONS and "abbrevi" not in text.lower() and "footnote" not in text.lower():
             problems.append(f"{rel}: no footnote/abbreviation block anywhere - three-line tables need one")
 
@@ -240,6 +246,11 @@ def legends_cover_plan(ctx: Ctx) -> Result:
             "; ".join(problems[:8]),
             ["Every planned display item needs a concise, self-contained legend written before the figure is drawn."],
         )
+    if long_legends:
+        return Result(False, "legends_cover_plan", "legends present; long (advisory): "
+                      + "; ".join(long_legends[:6]),
+                      ["Keep information the reader needs; move in-figure labels per text_plan."],
+                      severity="warn")
     return Result(True, "legends_cover_plan", "every planned display item has a concise substantive legend/caption")
 
 

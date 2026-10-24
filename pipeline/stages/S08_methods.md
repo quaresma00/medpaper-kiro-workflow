@@ -49,6 +49,7 @@ only when reproducibility requires detail that would obscure the main narrative.
 - `07_manuscript/supplementary_methods.md` (optional; only when justified)
 
 ## Hard rules
+- 1.10.0: verify each methodological citation (statistics, software, definitions, guidelines) when you introduce it: `tools/pubmed/build_library.py --add-ids <PMID>` then `tools/pubmed/verify.py`. The S08 gate re-fetches every Methods citekey live from PubMed (`reference_provenance cited_in`); replace a failing one now, not at S13.
 - Body text is continuous paragraphs (1.9.0). Lists only where a sentence truly cannot carry the content (rarely more than one short list per section); every result, count, criterion, covariate and sensitivity finding is written as a sentence. `prose_not_lists` fails above `body_list_items_max` items or `body_list_share_max` of the blocks.
 - Write only Methods-stage files. Do not also write Results.
 - No default boilerplate subsections after the analysis subsection.

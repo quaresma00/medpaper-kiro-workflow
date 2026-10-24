@@ -364,7 +364,7 @@ def run_checks(tmp: Path, record, section) -> None:
     f = tmp / "final"
     _docx(f / "08_submission/bundle/manuscript.docx", ["Methods", "HR 1.87 [3]", "Table 1"])
     _docx(f / "08_submission/final_copy/manuscript.docx", ["Materials and Methods", "HR 1.87 [3]", "Table 1"])
-    finalcopy.record(f, ["Renamed Methods heading per the guide"], "作者同意")
+    finalcopy.record(f, ["Renamed Methods heading per the guide"], "我确认这一版")
     ok, problems = finalcopy.check(f)
     _docx(f / "08_submission/final_copy/manuscript.docx", ["Materials and Methods", "HR 1.88 [3]", "Table 1"])
     changed = finalcopy.verified(f)

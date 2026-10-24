@@ -31,6 +31,7 @@ this stage only.
 - `07_manuscript/introduction.md`
 
 ## Hard rules
+- 1.10.0: word and reference targets are soft budgets (warnings) while writing; hard limits start after S20 with the chosen journal.
 - Body text is continuous paragraphs (1.9.0). Lists only where a sentence truly cannot carry the content (rarely more than one short list per section); every result, count, criterion, covariate and sensitivity finding is written as a sentence. `prose_not_lists` fails above `body_list_items_max` items or `body_list_share_max` of the blocks.
 - ONE section file this stage. No Discussion, no Abstract.
 - Every citation verified. Every claim attributable to an abstract you read.

@@ -1,11 +1,11 @@
 # S09 - Results
 
 ## Purpose
-Write the Results section against the approved artifact plan, before the artifacts are
-rendered. The plan fixes what each display contains, so the prose can be written from the
-result JSONs and then reconciled at S12 once the files exist.
+Write the Results from the final tables and figures (1.10.0: S09 runs after S10/S11;
+`displays_final_for_results`). S12 then only cross-checks.
 
 ## Inputs
+- the rendered tables (`04_tables/`) and figures (`05_figures/out/`) - write from these
 - `01_protocol/artifact_plan.json` - the display items and what each one shows
 - `03_analysis/results/*.json` - every number
 - `05_figures/legends.md`, `04_tables/table_captions.md` - so the prose does not repeat them
@@ -28,6 +28,7 @@ result JSONs and then reconciled at S12 once the files exist.
 - `07_manuscript/results.md`
 
 ## Hard rules
+- Effects as the protocol's Statistical reporting plan says (estimate + interval, then P); `effects_with_intervals` warns on P-value-only sentences.
 - Body text is continuous paragraphs (1.9.0). Lists only where a sentence truly cannot carry the content (rarely more than one short list per section); every result, count, criterion, covariate and sensitivity finding is written as a sentence. `prose_not_lists` fails above `body_list_items_max` items or `body_list_share_max` of the blocks.
 - ONE section file this stage.
 - Every number traceable to results JSON.

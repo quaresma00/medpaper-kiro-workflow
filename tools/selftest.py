@@ -2132,8 +2132,8 @@ def run_codex_integration() -> None:
                f"card must name `{agent}` so the work is not done in the main context")
 
     record("pipeline and skill versions agree",
-           pipe["meta"]["version"] == "1.9.1" and 'version: "2.2.0"' in skill,
-           f'pipeline={pipe["meta"]["version"]}, skill=2.2.0 (Kiro adapter revision)')
+           pipe["meta"]["version"] == "1.10.0" and 'version: "2.3.0"' in skill,
+           f'pipeline={pipe["meta"]["version"]}, skill=2.3.0 (Kiro adapter revision)')
     record("all 25 stage cards exist",
            len(pipe["stage"]) == 25 and
            all((ROOT / "pipeline" / s["card"]).is_file() for s in pipe["stage"]),
@@ -2166,7 +2166,7 @@ def run_codex_integration() -> None:
     record("final package audit waits for explicit user OK and is independent",
            package_human.get("needs_user") is True and
            final_audit.get("needs_user", False) is False and
-           "无需继续审阅" in package_human_card and
+           "我确认这一版" in package_human_card and
            "review_round.py decide no_further_review --scope package" in package_human_card and
            "tools/package_review.py freeze" in package_human_card and
            "exactly one independent read-only subagent" in final_audit_card and
@@ -2204,7 +2204,7 @@ def run_codex_integration() -> None:
            "review_round_approved" in human_checks and
            "manuscript_review_package_current" not in human_checks and
            "tools/review_round.py start" in human_card and "medpaper-reviewer" in human_card and
-           "无需继续审阅" in human_card and "ZIP" not in human_card and
+           "我确认这一版" in human_card and "ZIP" not in human_card and
            '"review_round_approved"' in
            (ROOT / "tools/wfcore/cli.py").read_text(encoding="utf-8"),
            "round-bound non-overridable stop")
@@ -5140,7 +5140,7 @@ def run_v160(tmp: Path) -> None:
            any(g["check"] == "reader_review_coverage" for g in s18["gate"])
            and "review_round.py start --scope manuscript" in (ROOT / "pipeline/stages/S18_independent_review.md")
            .read_text(encoding="utf-8"))
-    record("pipeline version is 1.9.1", pipe.meta.get("version") == "1.9.1")
+    record("pipeline version is 1.10.0", pipe.meta.get("version") == "1.10.0")
 
 
 def run_v170(tmp: Path) -> None:
@@ -5801,6 +5801,8 @@ def main() -> int:
         selftest_v181.run(tmp / "v181_root", record, section)
         import selftest_v190
         selftest_v190.run(tmp / "v190_root", record, section)
+        import selftest_v1100
+        selftest_v1100.run(tmp / "v1100_root", record, section)
         run_new_wiring()
         section("isolation")
         record("selftest did not touch the real papers root or user home",

@@ -25,6 +25,8 @@ later stage argues against the same target instead of a remembered paraphrase.
   "covariates_proposed": [],
   "claimed_novelty": "one sentence: what is not yet known that this would establish",
   "data_source_candidates": [{"name": "", "access": "public | licensed | institutional | to-be-collected", "why": ""}],
+  "study_design": "cross_sectional | cohort_retrospective | cohort_prospective | case_control | rct | diagnostic_accuracy | prognostic_model | mendelian_randomization | meta_analysis | systematic_review | secondary_analysis | qualitative | case_report | other",
+  "data_source": {"type": "public_database | own_centre_retrospective | prospective_collection | biospecimens | third_party_registry | published_studies (or a list)", "name": "", "third_party": true, "redistributable": false, "deidentified": true, "vulnerable_populations": []},
   "open_questions": ["every ambiguity you had to leave unresolved"]
 }
 ```
@@ -46,6 +48,7 @@ later stage argues against the same target instead of a remembered paraphrase.
 - `03_analysis/notes.md`
 
 ## Hard rules
+- 1.10.0 `study_basis_recorded`: `study_design` and `data_source` are required structured fields (true/false/"unknown"). If the idea does not state them, ask the user now in one question; ethics, consent and data availability are later judged from them (S21).
 - Spelling system (1.9.0): new papers are American English (`.wf/config.toml` spelling = "american"). If the user wants British, record it now: `wf config set spelling british`. Table and R/Python figure builders read it (and the chosen journal's `target_journal.json` spelling later), so switching is a rebuild, never a scientific change.
 - If people will code, classify or adjudicate any variable, ask now in the same question who
   they are: role, specialty and years of experience for each coder and the adjudicator.

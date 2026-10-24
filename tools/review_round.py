@@ -1,12 +1,20 @@
 #!/usr/bin/env python3
-"""Review rounds at S19 (scope manuscript) and S24 (scope package), 1.8.1.
+"""Review rounds at S19 (scope manuscript) and S24 (scope package), 1.8.1 / 1.10.0.
 
     start  [--delta]   inventory + hash-bound text copies for the medpaper-reviewer subagent
-    close  --findings critical=0,major=2,minor=3 --change FILE "one line" ... --kept ITEM "why"
-    decide another_round|no_further_review --words "<the user's answer>"
+    close  --findings critical=0,major=2,minor=3
+           --finding ID CATEGORY STATUS "one line"   (one per finding; CATEGORY
+               numbers|grouping|conclusion_strength|other, STATUS changed|kept|author)
+           --change FILE "one line" ... --kept ITEM "why"
+    author ID change|keep --words "<the author's words>"   (a finding handed to the author)
+    decide another_round --words "<the user's answer>"
+    decide no_further_review --words "我确认这一版"        (exact sentence, or "I confirm this version")
+    export             ONLY when the user explicitly asks: read-only ZIP + one-page change summary
     status
 
-`decide no_further_review` also records the stage's approval decision naming the round id.
+numbers/grouping/conclusion_strength findings cannot be closed as "kept": change them or mark
+them "author". `decide no_further_review` records the approval bound to the round id and the
+version hash of the confirmed files.
 """
 from __future__ import annotations
 
@@ -33,12 +41,14 @@ def _counts(raw: str) -> dict[str, int]:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="subagent review rounds (no review package)")
-    ap.add_argument("command", choices=["start", "close", "decide", "status"])
-    ap.add_argument("answer", nargs="?", choices=[rr.ANOTHER, rr.DONE])
+    ap.add_argument("command", choices=["start", "close", "author", "decide", "export", "status"])
+    ap.add_argument("answer", nargs="*")
     ap.add_argument("--scope", choices=sorted(rr.SCOPES))
     ap.add_argument("--project", type=Path, default=None)
     ap.add_argument("--delta", action="store_true")
     ap.add_argument("--findings", default="")
+    ap.add_argument("--finding", nargs=4, action="append", default=[],
+                    metavar=("ID", "CATEGORY", "STATUS", "SUMMARY"))
     ap.add_argument("--change", nargs=2, action="append", default=[], metavar=("FILE", "SUMMARY"))
     ap.add_argument("--kept", nargs=2, action="append", default=[], metavar=("ITEM", "REASON"))
     ap.add_argument("--words", default="")
@@ -62,22 +72,41 @@ def main() -> int:
         if args.command == "close":
             rnd = rr.close(project, scope, _counts(args.findings),
                            [{"file": f, "summary": s} for f, s in args.change],
-                           [{"item": i, "reason": r} for i, r in args.kept])
-            print(f"closed {rnd['id']}: findings {rnd['findings']}; {len(rnd['changes'])} change(s). "
-                  "Now give the user ONE summary and ask: another review round, or none?")
+                           [{"item": i, "reason": r} for i, r in args.kept],
+                           [{"id": i, "category": c, "status": s, "summary": t}
+                            for i, c, s, t in args.finding])
+            print(f"closed {rnd['id']}: findings {rnd['findings']}; {len(rnd['changes'])} change(s).")
+            pend = rr.pending_author(rnd)
+            if pend:
+                print("List these as PENDING AUTHOR DECISIONS in the summary (the user decides each):")
+                for f in pend:
+                    print(f"  {f['id']} [{f['category']}] {f['summary']}")
+            print("Now give the user ONE summary and ask: another review round, or confirm with "
+                  f"the exact sentence '{rr.CONFIRM_PHRASES[0]}'?")
+            return 0
+        if args.command == "author":
+            if len(args.answer) != 2:
+                raise ValueError("author needs ID and change|keep")
+            hit = rr.author_decide(project, scope, args.answer[0], args.answer[1], args.words)
+            print(f"{hit['id']}: author decided {hit['author_decision']['choice']}")
             return 0
         if args.command == "decide":
-            if not args.answer:
+            answer = args.answer[0] if args.answer else ""
+            if answer not in (rr.ANOTHER, rr.DONE):
                 raise ValueError("decide needs another_round or no_further_review")
-            rnd = rr.decide(project, scope, args.answer, args.words)
-            if args.answer == rr.DONE:
+            rnd = rr.decide(project, scope, answer, args.words)
+            if answer == rr.DONE:
                 cfg = rr.SCOPES[scope]
                 state.record_decision(cfg["decision"], cfg["value"],
-                                      f"review round {rnd['id']}: user said no further review: "
-                                      f"\"{rnd['user_words']}\"")
-                print(f"{rnd['id']}: no further review; {cfg['decision']}={cfg['value']} recorded")
+                                      f"review round {rnd['id']}: user confirmed version "
+                                      f"{rnd['confirmed_version'][:12]}: \"{rnd['user_words']}\"")
+                print(f"{rnd['id']}: confirmed; {cfg['decision']}={cfg['value']} recorded")
             else:
                 print(f"{rnd['id']}: user wants another round; run start again (--delta is fine)")
+            return 0
+        if args.command == "export":
+            out = rr.export(project, scope)
+            print(f"read-only review copy (user request only): {out}")
             return 0
         print(json.dumps(rr.load(project)[scope][-3:], indent=2, ensure_ascii=False)[:4000])
         return 0

@@ -6,8 +6,11 @@ been assembled, independently reviewed, user-reviewed and matched to a journal.
 
 ## This stage needs the user
 Ask once for the exact author order and names, affiliations, ORCIDs, corresponding-author
-details, funding/grants, conflicts, ethics/consent, data/code availability,
-acknowledgements, CRediT roles, preprint and prior presentation. Never infer a missing item.
+details, funding/grants, conflicts, code availability, acknowledgements, CRediT roles,
+preprint and prior presentation. Never infer a missing item. Ethics, consent and data
+availability are judged by the workflow (1.10.0): run `tools/declarations.py assess`, write
+its conclusions into statements.md, and add only its printed open questions to the same
+message (record answers with `tools/declarations.py answer <id> "<value>"`).
 Do not ask for or write a study-registration statement unless the journal requires one; a
 meta-analysis states its PROSPERO ID (or that it was not registered).
 If people coded or adjudicated data and `idea.json` lacks `human_coders`, ask in the same

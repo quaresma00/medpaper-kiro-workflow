@@ -2,7 +2,7 @@
 
 ## Purpose
 Improve the assembled journal package in subagent review rounds, report each round once, and
-freeze the exact files when the user says no further review is needed.
+freeze the exact files when the user confirms with the exact sentence 我确认这一版.
 
 ## This stage needs the user
 Only for one answer per round (and for user-owned facts such as authorship or funding). Do not
@@ -32,18 +32,24 @@ ask permission per finding or per small change. Present clickable paths to
    bless drift. Never invent user-owned facts; list them as kept.
 3. **Close and report once.**
 ```
-.\.venv\Scripts\python.exe tools/review_round.py close --scope package --findings critical=<n>,major=<n>,minor=<n> --change <file> "<one line>" --kept "<finding>" "<why>"
+.\.venv\Scripts\python.exe tools/review_round.py close --scope package --findings critical=<n>,major=<n>,minor=<n> --finding <id> <category> <status> "<one line>" --change <file> "<one line>" --kept "<id>" "<why>"
 ```
-   Repeat `--change` / `--kept` as needed (both optional).
+   List every finding once: `--finding <id> <numbers|grouping|conclusion_strength|other> <changed|kept|author> "<one line>"`.
+   numbers/grouping/conclusion_strength findings are never `kept` on your preference: change
+   them, or mark `author` and list them as pending author decisions (record each answer with
+   `review_round.py author <id> change|keep --words "<user's words>"`).
    One concise message: issues by severity, changes (file + one line), what was kept and why,
-   the bundle paths. One question:
-   > 本轮投稿包审阅与修改已完成。是否再进行一轮子代理审阅？若无需继续审阅，请回复“无需继续审阅”。
+   the bundle paths, pending author decisions. One question:
+   > 本轮审阅与修改已完成。需要再审一轮请直接说明；确认当前版本请回复：我确认这一版
+   Only that exact sentence (or "I confirm this version") confirms; "无需继续审阅", "OK",
+   "可以" do not - ask again for the sentence.
 4. **Record the answer.**
 ```
 .\.venv\Scripts\python.exe tools/review_round.py decide another_round --scope package --words "<user's words>"
-.\.venv\Scripts\python.exe tools/review_round.py decide no_further_review --scope package --words "<user's words>"
+.\.venv\Scripts\python.exe tools/review_round.py decide no_further_review --scope package --words "我确认这一版"
 ```
    `no_further_review` records `submission_package_user_confirmed=OK` bound to the round and
+   version hash (optional on explicit user request only: `review_round.py export --scope package`), and
    writes `08_submission/package_human_review.md`.
 
 ## Freeze the package

@@ -115,8 +115,34 @@ class State:
             self._note_v180(old_version)
             self._note_v181(old_version)
             self._note_v190(old_version, pipeline_version)
+            self._note_v1100(old_version, pipeline_version)
             self.save()
         return changed
+
+    def _note_v1100(self, old_version: str, new_version: str) -> None:
+        """1.10.0: S09 Results now follows S10/S11. A paper whose active stage is S09 while the
+        tables/figures are still pending moves to S10 (S09 waits, its draft is kept)."""
+        if (version_tuple(old_version) >= (1, 10, 0) or version_tuple(new_version) < (1, 10, 0)
+                or self.data.get("v1100_migration_noted")):
+            return
+        self.data["v1100_migration_noted"] = True
+        moved = ""
+        if self.data.get("current") == "S09_results" and not self.is_done("S10_tables"):
+            self.stage_info("S09_results")["status"] = "pending"
+            info = self.stage_info("S10_tables")
+            info["status"] = "active"
+            info.setdefault("started_at", _now())
+            self.data["current"] = "S10_tables"
+            moved = " Active S09 moved to S10 (results.md kept; finished from final displays)."
+        self.event("requirements_changed",
+                   "1.10.0: order S10 tables -> S11 figures -> S09 Results -> S12 cross-check; "
+                   "Methods citations checked live at S08; variable crosswalk (S04) and 10-case "
+                   "raw spot check (S06); structured study_design/data_source (S01/S03) drive "
+                   "declarations; statistical reporting plan in the protocol; length/reference "
+                   "counts are warnings until S20; review findings on numbers/grouping/conclusion "
+                   "strength need a change or the author; approval is the sentence '我确认这一版'. "
+                   "New gates are since=1.10.0: completed stages keep the pinned gate set." + moved
+                   + " Paper files were not modified.")
 
     @property
     def engine_pin(self) -> str:

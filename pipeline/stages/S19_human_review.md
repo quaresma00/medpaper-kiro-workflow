@@ -2,7 +2,7 @@
 
 ## Purpose
 Improve the complete scientific paper in subagent review rounds, report each round to the user
-once, and stop when the user says no further review is needed. Then freeze the science.
+once, and stop when the user confirms with the exact sentence 我确认这一版. Then freeze.
 
 ## This stage needs the user
 Only for one answer per round. Do not ask permission per finding or per small change, and do
@@ -29,23 +29,29 @@ title-page administration here.
    mark, close) and re-freeze afterwards with `scientific_freeze.py capture --force`.
 3. **Close and report once.**
 ```
-.\.venv\Scripts\python.exe tools/review_round.py close --findings critical=<n>,major=<n>,minor=<n> --change <file> "<one line>" --kept "<finding>" "<why not changed>"
+.\.venv\Scripts\python.exe tools/review_round.py close --findings critical=<n>,major=<n>,minor=<n> --finding <id> <category> <status> "<one line>" --change <file> "<one line>" --kept "<id>" "<why not changed>"
 ```
-   Repeat `--change` per changed file and `--kept` per finding left unchanged (both optional).
+   List every finding once: `--finding <id> <numbers|grouping|conclusion_strength|other> <changed|kept|author> "<one line>"`.
+   numbers/grouping/conclusion_strength findings are never `kept` on your preference: change
+   them, or mark `author` and list them as pending author decisions (record each answer with
+   `review_round.py author <id> change|keep --words "<user's words>"`).
    Then send the user ONE concise message: issues found grouped by severity; what changed (file
    + one line each); what was deliberately not changed and why; the paths of the manuscript,
-   tables and figures. End with one question:
-   > 本轮审阅与修改已完成。是否再进行一轮子代理审阅？若无需继续审阅，请回复“无需继续审阅”。
+   tables and figures; pending author decisions. End with one question:
+   > 本轮审阅与修改已完成。需要再审一轮请直接说明；确认当前版本请回复：我确认这一版
+   Only that exact sentence (or "I confirm this version") confirms; "无需继续审阅", "OK",
+   "可以" do not - ask again for the sentence.
 4. **Record the answer.**
 ```
 .\.venv\Scripts\python.exe tools/review_round.py decide another_round --words "<user's words>"
-.\.venv\Scripts\python.exe tools/review_round.py decide no_further_review --words "<user's words>"
+.\.venv\Scripts\python.exe tools/review_round.py decide no_further_review --words "我确认这一版"
 ```
    `another_round` -> run the next round. `no_further_review` also records
-   `manuscript_human_reviewed=NO_FURTHER_REVIEW` bound to the round id and writes
+   `manuscript_human_reviewed=NO_FURTHER_REVIEW` bound to the round id and version hash, writes
    `07_manuscript/human_review.md` from the round record. Silence, thanks, "continue" or "looks
-   fine" are not no-further-review. User feedback given in between is handled in the next
-   round's fixes like a finding.
+   fine" are not confirmation. User feedback given in between is handled in the next
+   round's fixes like a finding. Optional, only if the user explicitly asks for an outside
+   reviewer copy: `tools/review_round.py export` (read-only copy + one-page change summary).
 
 ## Freeze the science
 After `no_further_review`:

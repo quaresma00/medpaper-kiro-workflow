@@ -284,10 +284,13 @@ def refs_library(ctx: Ctx) -> Result:
     hi = ctx.spec.get("max_entries", ctx.target("reflib_max", 60))
 
     problems = []
-    if len(entries) < lo:
-        problems.append(f"{len(entries)} entries, need >= {lo}")
-    if hi and len(entries) > hi:
-        problems.append(f"{len(entries)} entries, allowed <= {hi}")
+    # 1.10.0 (#8): the search stage judges argumentative-role coverage, not a count; the 45-60
+    # band is a health check at S17 (reference_library_health). count_check = false at S13.
+    if ctx.spec.get("count_check", True):
+        if len(entries) < lo:
+            problems.append(f"{len(entries)} entries, need >= {lo}")
+        if hi and len(entries) > hi:
+            problems.append(f"{len(entries)} entries, allowed <= {hi}")
 
     if ctx.spec.get("require_abstract", True):
         no_abs = [e.get("citekey", "?") for e in entries if not (e.get("abstract") or "").strip()]
@@ -344,12 +347,24 @@ def reference_provenance(ctx: Ctx) -> Result:
     if not ctx.spec.get("live", False):
         return Result(True, "reference_provenance",
                       f"{count} record(s) bound to reparsed hashed PubMed XML")
+    subset = None
     try:
         library = ctx.read_json(LIB)
         entries = library.get("entries", [])
+        if ctx.spec.get("cited_in"):
+            # 1.10.0 (#2): Methods citations are checked live when they are introduced (S08),
+            # not first at S13; a failing one is replaced then.
+            entries, missing, subset = cited_entries(ctx, entries, ctx.spec["cited_in"])
+            if missing:
+                return Result(False, "reference_provenance",
+                              "cited but not in the verified library: " + ", ".join(missing[:8]),
+                              ["Add with tools/pubmed/build_library.py --add-ids, run verify.py, "
+                               "or replace the citation now."])
+            if not entries:
+                return Result(True, "reference_provenance", "no citation in " + ", ".join(subset))
         from ..liverefs import FORCED_LIVE_STAGES, cached_sources, store_sources
         stage_id = getattr(ctx.stage, "id", "")
-        cached = (None if stage_id in FORCED_LIVE_STAGES else
+        cached = (None if stage_id in FORCED_LIVE_STAGES or subset else
                   cached_sources(ctx.project, entries,
                                  float(ctx.target("live_reference_age_hours_max", 24))))
         if cached is not None:
@@ -386,9 +401,24 @@ def reference_provenance(ctx: Ctx) -> Result:
     if live_problems:
         return Result(False, "reference_provenance", "; ".join(live_problems[:8]),
                       ["Rebuild the affected entry from the returned PubMed record; never edit the proof to match."])
+    if subset:
+        return Result(True, "reference_provenance",
+                      f"{len(entries)} cited record(s) in {', '.join(subset)} re-fetched and "
+                      "matched against live PubMed")
     store_sources(ctx.project, live_records)
     return Result(True, "reference_provenance",
                   f"{len(entries)} record(s) independently re-fetched and matched against live PubMed")
+
+
+def cited_entries(ctx: Ctx, entries: list[dict], rels: list[str]):
+    """-> (library entries cited in rels, cited keys absent from the library, present rels)."""
+    present = [r for r in rels if ctx.p(r).is_file()]
+    used: set[str] = set()
+    for rel in present:
+        used.update(citekeys(ctx.read(rel)))
+    by_key = {str(e.get("citekey")): e for e in entries}
+    return ([by_key[k] for k in sorted(used) if k in by_key],
+            sorted(k for k in used if k not in by_key), present)
 
 
 @check("bib_ris_match_library")

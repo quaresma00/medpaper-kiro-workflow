@@ -57,6 +57,7 @@ source for review, user editing, polishing and packaging.
 - `07_manuscript/statements.md` (optional abbreviation list only; administrative facts wait)
 
 ## Hard rules
+- 1.10.0 length health check: `draft_length_targets` and the 45-60 reference band (`reference_library_health`) only warn - report them in the advance note; trim to a journal's limits after S20. Every library entry is cited or has a reason in `06_refs/uncited_reasons.json` `{"<key>": "<why not cited>"}` (blocking).
 - Keywords: the source line is comma-joined. The count follows `target_journal.json` keywords.min/max when a journal is already known (default 3-6); the journal's separator and its heading names (e.g. `main_text_headings` "Materials and Methods") are applied by the DOCX build, not in Markdown.
 - Body text is continuous paragraphs (1.9.0). Lists only where a sentence truly cannot carry the content (rarely more than one short list per section); every result, count, criterion, covariate and sensitivity finding is written as a sentence. `prose_not_lists` fails above `body_list_items_max` items or `body_list_share_max` of the blocks.
 - Do not ask for or invent authors, affiliations, ORCIDs, grants or correspondence details.

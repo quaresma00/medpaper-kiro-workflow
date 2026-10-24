@@ -191,10 +191,60 @@ def _p_ok(op: str, token: str, floats, stated, explicit) -> bool:
     return _matches(token, set(candidates), {_norm(f) for f in candidates})
 
 
+_SENT_SPLIT = re.compile(r"(?<=[.!?])\s+(?!\[@)")
+
+
+def _discussion_lines(text: str, whole: bool) -> set[int]:
+    """1-based line numbers of Discussion prose (the whole file for discussion.md)."""
+    lines = text.splitlines()
+    if whole:
+        return set(range(1, len(lines) + 1))
+    out, inside = set(), False
+    for i, line in enumerate(lines, start=1):
+        m = re.match(r"^#\s+(.+?)\s*$", line)
+        if m:
+            inside = m.group(1).strip().casefold() == "discussion"
+            continue
+        if inside:
+            out.add(i)
+    return out
+
+
+def cite_external_numbers(text: str, lines: set[int], verified: set[str]) -> str:
+    """1.10.0 (#7): in the Discussion, a prior study's number is allowed only in the same
+    sentence as a citation of that study, every key of which is in the verified library.
+    Those numbers are blanked; any other number still needs results-JSON provenance."""
+    out = text.splitlines()
+    for i in lines:
+        if i - 1 >= len(out):
+            continue
+        parts = _SENT_SPLIT.split(out[i - 1])
+        for j, sent in enumerate(parts):
+            keys = [k for g in re.findall(r"\[([^\]]*@[^\]]*)\]", sent)
+                    for k in re.findall(r"@([A-Za-z][\w:.#$%&+?<>~/-]*)", g)]
+            if keys and all(k in verified for k in keys):
+                parts[j] = CITE_RE.sub(" ", sent)
+                parts[j] = NUM_RE.sub(" ", P_RE.sub(" ", parts[j]))
+        out[i - 1] = " ".join(parts)
+    return "\n".join(out)
+
+
+def _verified_keys(ctx: Ctx) -> set[str]:
+    from .refs import BIB, _verified_map, bib_keys
+    if not ctx.p(BIB).is_file():
+        return set()
+    ver = _verified_map(ctx)
+    return {k for k in bib_keys(ctx.read(BIB)) if (ver.get(k, {}) or {}).get("verified") is True}
+
+
 def _offenders(text: str, floats, strings, allowed, stated=frozenset(),
-               explicit=frozenset()) -> list[tuple[int, str]]:
+               explicit=frozenset(), strict_lines=frozenset()) -> list[tuple[int, str]]:
     bad: list[tuple[int, str]] = []
+    base_allowed, base_explicit = allowed, explicit
     for lineno, raw in enumerate(_scrub(text).splitlines(), start=1):
+        # 1.10.0 (#7): number_allowlist.tsv is no side path into the Discussion.
+        allowed, explicit = ((CONVENTIONS, frozenset()) if lineno in strict_lines
+                             else (base_allowed, base_explicit))
         def pvalue(match, _lineno=lineno):
             op, token = match.groups()
             if not _p_ok(op, token, floats, stated, explicit):
@@ -261,7 +311,11 @@ def numbers_have_provenance(ctx: Ctx) -> Result:
             )
         return Result(True, "numbers_have_provenance", f"all table values trace to {len(sources)} result file(s)")
 
-    bad = _offenders(ctx.read(rel), floats, strings, allowed, stated, explicit)
+    text = FENCE_RE.sub(" ", ctx.read(rel))
+    disc = _discussion_lines(text, whole=rel.replace("\\", "/").endswith("discussion.md"))
+    if disc:
+        text = cite_external_numbers(text, disc, _verified_keys(ctx))
+    bad = _offenders(text, floats, strings, allowed, stated, explicit, disc)
     if bad:
         shown = "; ".join(f"line {ln}: {tok}" for ln, tok in bad[:10])
         return Result(
@@ -270,7 +324,8 @@ def numbers_have_provenance(ctx: Ctx) -> Result:
             f"{rel}: {len(bad)} number(s) with no provenance -> {shown}",
             [
                 "Every statistic must already exist in 03_analysis/results/*.json, written by executed code.",
-                f"For genuine constants (thresholds, conventions), add them to {ALLOWLIST} as 'value<TAB>reason'.",
+                f"For genuine constants (thresholds, conventions), add them to {ALLOWLIST} as 'value<TAB>reason' (never applies in the Discussion).",
+                "Discussion: a prior study's number must sit in the same sentence as [@key] of that study (verified library).",
                 "A 'P<0.001' needs a reported P value below 0.001; a sign must match the result's sign.",
                 "Do not fix this by rounding differently. Re-run the analysis and dump the value.",
             ],

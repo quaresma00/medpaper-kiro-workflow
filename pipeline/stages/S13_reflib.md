@@ -61,8 +61,9 @@ Everything the Introduction and Discussion say about the literature comes from h
   them. A green Pandoc build is not evidence that a citation exists.
 - A plugin result becomes citable only after the bundled tools independently fetch and
   verify it into `library.json` and `verified.json`.
-- Do not pad to hit the count. If genuine coverage is 42 papers, lower the target:
-  `.\.venv\Scripts\python.exe tools/wf.py config set reflib_min 40`.
+- 1.10.0: no count at this stage. Write `06_refs/coverage.json` `{"roles": {"background": [keys],
+  "gap": [...], "methods": [...], "comparison": [...], "mechanism": [...]}, "not_applicable":
+  {"<role>": "<reason>"}}` (`argument_roles_covered`). The 45-60 band is an S17 health check.
 - Retracted or expression-of-concern records must be flagged in `library.json` and not
   cited as evidence.
 

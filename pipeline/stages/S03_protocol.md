@@ -62,6 +62,7 @@ pre-specified rather than fitted to whatever happened to be significant.
 - `02_data/acquisition_plan.md`
 
 ## Hard rules
+- 1.10.0: under `Statistical analysis plan` add `### Statistical reporting plan` with the lines `Primary comparisons: <n>`, `Multiplicity: <method, or none and why>`, `Effect measures: <OR/HR/RR/MD ...>`, `Intervals: <95% CI ...>` (`statistical_reporting_plan`). Re-check `study_design`/`data_source` in idea.json against the acquisition plan (`study_basis_recorded`).
 - Confirm the spelling system decided at S01 (`wf config get spelling`); table/figure label text is generated with it.
 - Do not look at the data before the analysis plan is written down. If data was already
   inspected, say so in the protocol under `Deviations` at S06 rather than hiding it.

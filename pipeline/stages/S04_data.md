@@ -103,6 +103,7 @@ write_results("dataset_summary", {
 - `03_analysis/results/dataset_summary.json`
 
 ## Hard rules
+- 1.10.0 `variable_crosswalk_confirmed`: before analysis write `02_data/variable_crosswalk.json` - `analysis_variables` plus one row per variable (`variable`, `source_field`, `definition`, `unit`, `coding`, `time_window`, `missing_rule`, `basis` = codebook/doc location) and `confirmed: true` only after checking that row against the source documentation. Full extraction guards quantity; this guards definitions.
 - If the data contains identifiers, de-identify before any of it reaches a prompt, and
   record what was removed in `provenance.md`.
 - Do not analyze a pilot, partial page set, convenience sample, preview export or silently

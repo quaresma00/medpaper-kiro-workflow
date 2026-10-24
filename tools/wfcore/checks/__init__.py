@@ -111,7 +111,7 @@ def get(name: str):
 def load_all() -> None:
     """Import every check module so the registry is populated."""
     from . import (artifacts, data, display, frozen, fsx, manuscript, numbers,  # noqa: F401
-                   polish, refs, reporting, repro, revisions, statecheck, text)
+                   polish, refs, reporting, repro, revisions, statecheck, text, v1100)
 
 
 def known() -> list[str]:

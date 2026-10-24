@@ -215,7 +215,7 @@ def manuscript_structure(ctx: Ctx) -> Result:
         problems.append("01_protocol/artifact_plan.json is missing or invalid")
     elif "figure legends" in positions:
         problems.extend(_markdown_legend_problems(
-            text, planned, int(ctx.target("figure_legend_words_max", 180))))
+            text, planned, journalspec.legend_cap(journalspec.load(ctx.project)) or journalspec.NO_CAP))
     problems.extend(declaration_and_discussion_problems(ctx, text))
     if problems:
         return Result(False, "manuscript_structure", "; ".join(problems[:8]),
@@ -491,7 +491,8 @@ def docx_bundle_ready(ctx: Ctx) -> Result:
             problems.append(f"supplementary_pdf: {path.name} is not an existing PDF")
         if path.suffix.casefold() == ".docx":
             problems.extend(_audit_docx(path, style, role, planned,
-                                        int(ctx.target("figure_legend_words_max", 180)), spec))
+                                        journalspec.legend_cap(journalspec.load(ctx.project))
+                                        or journalspec.NO_CAP, spec))
     for role in ("manuscript", "title_page", "cover_letter"):
         if not any(p.suffix.casefold() == ".docx" for p in roles.get(role, [])):
             problems.append(f"no DOCX for required role '{role}'")

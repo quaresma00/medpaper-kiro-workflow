@@ -65,8 +65,11 @@ def record(project: Path, edits: list[str], words: str) -> dict:
         raise ValueError(f"no edited copies under {DIR}/ (copy the bundle files there first)")
     if not edits or any(len(e.strip()) < 8 for e in edits):
         raise ValueError("list every manual edit (--edit, >= 8 characters each)")
-    if len(words.strip()) < 4:
-        raise ValueError("record the author's authorisation in their words (--words)")
+    from .reviewrounds import CONFIRM_PHRASES, is_confirmation
+    if not is_confirmation(words):
+        # 1.10.0 (#13): the author's exact confirmation sentence, never a recognised phrase.
+        raise ValueError(f"--words must be the author's exact sentence '{CONFIRM_PHRASES[0]}' "
+                         f"(or '{CONFIRM_PHRASES[1]}')")
     data = load(project)
     data.update(edits=[e.strip() for e in edits], authorised=words.strip(), recorded_at=_now(),
                 check=None)

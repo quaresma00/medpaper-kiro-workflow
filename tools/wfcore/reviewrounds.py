@@ -35,6 +35,34 @@ SCOPES = {
 }
 SEVERITIES = ("critical", "major", "minor")
 ANOTHER, DONE = "another_round", "no_further_review"
+# 1.10.0 (#12): findings in these categories may not be closed as "kept" on the agent's own
+# preference; they are changed, or handed to the author ("author") and decided by them.
+CATEGORIES = ("numbers", "grouping", "conclusion_strength", "other")
+PROTECTED = frozenset({"numbers", "grouping", "conclusion_strength"})
+STATUSES = ("changed", "kept", "author")
+# 1.10.0 (#13): approval is this exact sentence, never a recognised phrase ("OK", "可以", ...).
+CONFIRM_PHRASES = ("我确认这一版", "I confirm this version")
+
+
+def is_confirmation(words: str) -> bool:
+    text = str(words or "").strip().strip("\"'“”‘’「」『』").strip()
+    text = text.rstrip("。.!！ ").strip()
+    return text == CONFIRM_PHRASES[0] or text.casefold() == CONFIRM_PHRASES[1].casefold()
+
+
+def version_id(hashes: dict[str, str]) -> str:
+    """One id for the exact set of files a confirmation covers."""
+    import hashlib
+    blob = json.dumps(sorted(hashes.items()), separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def pending_author(rnd: dict | None) -> list[dict]:
+    """Protected findings handed to the author that the author has not decided yet."""
+    if not rnd:
+        return []
+    return [f for f in rnd.get("finding_list", [])
+            if f.get("status") == "author" and not f.get("author_decision")]
 
 
 def _now() -> str:
@@ -135,7 +163,7 @@ def start(project: Path, scope: str, stage: str, delta: bool = False) -> dict:
 
 
 def close(project: Path, scope: str, findings: dict[str, int], changes: list[dict],
-          not_changed: list[dict]) -> dict:
+          not_changed: list[dict], finding_list: list[dict] | None = None) -> dict:
     data = load(project)
     if not data[scope] or data[scope][-1].get("closed_at"):
         raise ValueError("no open review round; start one first")
@@ -146,8 +174,19 @@ def close(project: Path, scope: str, findings: dict[str, int], changes: list[dic
     for c in changes:
         if not str(c.get("file", "")).strip() or not str(c.get("summary", "")).strip():
             raise ValueError("each change needs a file and a one-line summary")
+    finding_list = list(finding_list or [])
+    if len(finding_list) != sum(counts.values()):
+        raise ValueError(f"list every finding with --finding ID CATEGORY STATUS \"one line\" "
+                         f"({sum(counts.values())} counted, {len(finding_list)} listed)")
+    for f in finding_list:
+        if f.get("category") not in CATEGORIES or f.get("status") not in STATUSES:
+            raise ValueError(f"finding {f.get('id')}: category must be {'|'.join(CATEGORIES)}, "
+                             f"status {'|'.join(STATUSES)}")
+        if f["category"] in PROTECTED and f["status"] == "kept":
+            raise ValueError(f"finding {f['id']} ({f['category']}) cannot be kept on your own "
+                             "judgement: change it, or mark it 'author' so the user decides")
     rnd.update(findings=counts, changes=changes, not_changed=not_changed,
-               after=inputs(project, scope), closed_at=_now())
+               finding_list=finding_list, after=inputs(project, scope), closed_at=_now())
     _save(project, data)
     _write_summary(project, scope, data[scope])
     return rnd
@@ -163,14 +202,84 @@ def decide(project: Path, scope: str, answer: str, words: str) -> dict:
     if not rnd or not rnd.get("closed_at"):
         raise ValueError("close the round (report to the user) before recording the answer")
     if answer == DONE:
-        drift = _changed_since(rnd, inputs(project, scope), project)
+        if not is_confirmation(words):
+            raise ValueError(f"not a confirmation: ask the user to state exactly "
+                             f"'{CONFIRM_PHRASES[0]}' (or '{CONFIRM_PHRASES[1]}'); other words "
+                             "('OK', '可以', '无需审阅') do not count")
+        pend = pending_author(rnd)
+        if pend:
+            raise ValueError("author decision(s) pending: " + ", ".join(f["id"] for f in pend)
+                             + " (review_round.py author ID change|keep --words ...)")
+        current = inputs(project, scope)
+        drift = _changed_since(rnd, current, project)
         if drift:
             raise ValueError("changed after the round closed (run another round, --delta is "
                              "fine): " + ", ".join(drift[:6]))
+        rnd["confirmed_version"] = version_id(current)
     rnd.update(user_decision=answer, user_words=words.strip(), decided_at=_now())
     _save(project, data)
     _write_summary(project, scope, data[scope])
     return rnd
+
+
+def author_decide(project: Path, scope: str, fid: str, choice: str, words: str) -> dict:
+    """Record the author's decision on one protected finding handed to them."""
+    if choice not in ("change", "keep"):
+        raise ValueError("author decision must be change or keep")
+    if len(words.strip()) < 2:
+        raise ValueError("record the author's words")
+    data = load(project)
+    rnd = data[scope][-1] if data[scope] else None
+    if not rnd or not rnd.get("closed_at"):
+        raise ValueError("no closed round to decide on")
+    hit = next((f for f in rnd.get("finding_list", []) if f.get("id") == fid
+                and f.get("status") == "author"), None)
+    if hit is None:
+        raise ValueError(f"no finding {fid} awaiting the author in {rnd['id']}")
+    hit["author_decision"] = {"choice": choice, "words": words.strip(), "at": _now()}
+    _save(project, data)
+    _write_summary(project, scope, data[scope])
+    return hit
+
+
+def export(project: Path, scope: str) -> Path:
+    """1.10.0 (#11), only on the user's explicit request: a read-only copy of the current
+    files plus a one-page change summary since the last confirmed version. Never default."""
+    import zipfile
+    project = Path(project)
+    current = inputs(project, scope)
+    rounds = load(project)[scope]
+    confirmed = next((r for r in reversed(rounds) if r.get("user_decision") == DONE), None)
+    base = (confirmed or {}).get("after") or {}
+    changed = sorted(r for r, h in current.items() if base.get(r) != h)
+    removed = sorted(set(base) - set(current))
+    since = [r for r in rounds if not confirmed or r["started_at"] > confirmed.get("decided_at", "")]
+    files = sorted(set(current) | {
+        p.relative_to(project).as_posix()
+        for pat in ("08_submission/bundle/*.docx", "08_submission/bundle/*.pdf",
+                    "04_tables/main/*.xlsx", "04_tables/supplementary/*.xlsx", "05_figures/out/*.png")
+        for p in project.glob(pat) if p.is_file()})
+    vid = version_id(current)
+    lines = [f"# Change summary ({scope}, version {vid[:12]})", "",
+             "Since the last confirmed version: "
+             + (f"{confirmed['id']} ({confirmed.get('decided_at')})" if confirmed else "none (first version)"),
+             "", f"Changed files ({len(changed)}):"] + [f"- {r}" for r in changed[:40]]
+    if removed:
+        lines += ["", "Removed:"] + [f"- {r}" for r in removed[:20]]
+    lines += ["", "Changes made in review rounds:"]
+    lines += [f"- {r['id']} {c['file']}: {c['summary']}" for r in since for c in r.get("changes", [])][:40]
+    out = project / "07_manuscript/review_packages" / f"export-{scope}-{vid[:12]}.zip"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
+        for rel in files:
+            info = zipfile.ZipInfo(rel, date_time=(2000, 1, 1, 0, 0, 0))
+            info.external_attr = 0o444 << 16  # read-only on extraction
+            info.compress_type = zipfile.ZIP_DEFLATED
+            zf.writestr(info, (project / rel).read_bytes())
+        info = zipfile.ZipInfo("CHANGES.md", date_time=(2000, 1, 1, 0, 0, 0))
+        info.external_attr = 0o444 << 16
+        zf.writestr(info, "\n".join(lines) + "\n")
+    return out
 
 
 def _write_summary(project: Path, scope: str, rounds: list[dict]) -> None:
@@ -194,12 +303,20 @@ def _write_summary(project: Path, scope: str, rounds: list[dict]) -> None:
             lines.append(f"- {r['id']} {c['file']}: {c['summary']}")
         for n in r.get("not_changed", []):
             lines.append(f"- {r['id']} not changed - {n.get('item', '')}: {n.get('reason', '')}")
+        for f in r.get("finding_list", []):
+            dec = f.get("author_decision")
+            tail = (f" -> author: {dec['choice']} (\"{dec['words']}\")" if dec else
+                    " -> PENDING AUTHOR DECISION" if f.get("status") == "author" else "")
+            lines.append(f"- {r['id']} {f.get('id')} [{f.get('category')}] {f.get('status')}: "
+                         f"{f.get('summary', '')}{tail}")
     lines += ["", f"## {h[3]}", "",
               f"- {last['id']}: hashes after the changes recorded at {last.get('closed_at')}; "
               "the gate fails if any covered file changes afterwards.", "", f"## {h[4]}", ""]
     for r in rounds:
         if r.get("user_decision"):
-            lines.append(f"- {r['id']}: {r['user_decision']} - \"{r.get('user_words', '')}\"")
+            lines.append(f"- {r['id']}: {r['user_decision']} - \"{r.get('user_words', '')}\""
+                         + (f" (version {r['confirmed_version'][:12]})"
+                            if r.get("confirmed_version") else ""))
     if scope == "package":
         lines += ["", "The bundle is frozen in 08_submission/package_review_freeze.json after "
                   "the user's no-further-review answer."]
@@ -229,6 +346,9 @@ def problems(project: Path, scope: str, decision: dict | None) -> list[str]:
     last = rounds[-1]
     if not last.get("closed_at"):
         return out + [f"round {last['id']} is open: apply the fixes, then close and report it"]
+    if pending_author(last):
+        out.append(f"round {last['id']}: author decision pending on "
+                   + ", ".join(f["id"] for f in pending_author(last)))
     if last.get("user_decision") is None:
         return out + [f"round {last['id']} was reported; waiting for the user's single answer "
                       "(another round, or no further review)"]

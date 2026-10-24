@@ -58,7 +58,17 @@ DECLARATION_SYNONYMS = {
 DEFAULT_DRAFT_LIMITS = {"main_text_words": 4000, "abstract_words": 250}
 DEFAULT_SCOPE = ("Introduction", "Methods", "Results", "Discussion", "Conclusion", "Conclusions")
 LIMIT_FIELDS = ("main_text_words", "abstract_words", "reference_limit", "display_items",
-                "main_figures", "main_tables")
+                "main_figures", "main_tables", "figure_legend_words")
+# 1.10.0 (#10): legend length blocks only when the journal states a cap; otherwise
+# targets.figure_legend_words_max is advisory.
+NO_CAP = 10 ** 6
+
+
+def legend_cap(target: dict) -> int | None:
+    """The journal's explicit figure-legend word cap, or None when the guide states none."""
+    block = target.get("limits") if isinstance(target, dict) else None
+    value = block.get("figure_legend_words") if isinstance(block, dict) else None
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
 DEFAULT_LEGEND_STYLE = {"prefix": "Figure", "bold": True, "panel_label_case": "any",
                         "end_punctuation": "any"}
 PIPELINE_CODE_RE = re.compile(

@@ -47,6 +47,11 @@ first-citation order; a multi-panel figure with only some panels cited; and, for
 journal, any author name or e-mail in a review-facing file. Label each finding as
 presentation (facts unchanged) or scientific (a number, citation or conclusion changes).
 
+Give every finding an id (F1, F2, ...) and one category (1.10.0): `numbers` (a value, count,
+estimate or interval), `grouping` (cohort, subgroup, exposure/outcome grouping or definition),
+`conclusion_strength` (a claim stronger or weaker than the evidence), or `other`. The caller may
+not dismiss the first three on preference; tag them honestly.
+
 Separate three things, and never let them blur:
 
 - **Verified** - you read it and can quote the location.
