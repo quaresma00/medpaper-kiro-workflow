@@ -20,7 +20,10 @@ is required for the driver (`tomllib`); the driver itself has no third-party dep
 `--global` matters if you work in more than one folder. A workspace-level skill is only
 discoverable in that workspace, so typing `/` elsewhere will not find it. The global copy
 carries the engine's absolute path, so the agent can locate `tools/wf.py` from anywhere.
-Re-run it if you ever move the engine.
+It also installs the three delegated agents (`medpaper-reviewer`, which may write only its
+own `report.md` in a review bundle; `medpaper-deepreader`, read-only; and, from 1.12.0,
+`medpaper-clinical-writer`, which writes manuscript prose from a writer bundle and never
+reads analysis code). Re-run it if you ever move the engine.
 
 Set these before running searches:
 
