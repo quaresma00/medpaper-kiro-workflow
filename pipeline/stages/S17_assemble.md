@@ -8,8 +8,9 @@ Details (title scoring, assembly order, statements file): `reference/stage_detai
 1. Choose the single best title yourself (design accuracy, PICO specificity, searchability,
    brevity, no overclaim) -> `07_manuscript/title.md` (one level-1 heading).
 2. `07_manuscript/abstract.md` (structure suited to the design; numbers from results JSON;
-   conclusion consistent with the Discussion) and `07_manuscript/keywords.md`
-   (`Keywords: a, b, c`, 3-6 terms or the journal's min/max).
+   conclusion consistent with the Discussion), polished before assembly
+   (`tools/text/polish.py lint --file 07_manuscript/abstract.md`; `section_language_clean`),
+   and `07_manuscript/keywords.md` (`Keywords: a, b, c`, 3-6 terms or the journal's min/max).
 3. Central abbreviation list in `07_manuscript/statements.md` under the declarations heading
    (`## Abbreviations`); it is in addition to each display's own definitions. Then assemble:
 ```
@@ -19,7 +20,8 @@ Details (title scoring, assembly order, statements file): `reference/stage_detai
    declarations, References, Figure legends. Journal heading names are applied at the DOCX
    build, not in Markdown.
 4. Read it end to end; fix the source section (never the assembled file) and re-assemble.
-5. Reproduce if any analysis code, data or result changed since S06 (`REUSED` otherwise):
+5. Only if `wf check` says the proof is stale (analysis code, data or results changed since
+   S06) reproduce; never "to be safe" - an unchanged proof is accepted by hash:
 ```
 .\.venv\Scripts\python.exe tools/reproduce.py run --wait
 ```

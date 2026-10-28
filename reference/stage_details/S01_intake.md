@@ -60,9 +60,12 @@ later stage argues against the same target instead of a remembered paraphrase.
 ## Hard rules
 - 1.10.0 `study_basis_recorded`: `study_design` and `data_source` are required structured fields (true/false/"unknown"). If the idea does not state them, ask the user now in one question; ethics, consent and data availability are later judged from them (S21).
 - Spelling system (1.9.0): new papers are American English (`.wf/config.toml` spelling = "american"). If the user wants British, record it now: `wf config set spelling british`. Table and R/Python figure builders read it (and the chosen journal's `target_journal.json` spelling later), so switching is a rebuild, never a scientific change.
-- If people will code, classify or adjudicate any variable, ask now in the same question who
-  they are: role, specialty and years of experience for each coder and the adjudicator.
-  Record it in `idea.json` (`human_coders`); Methods needs it and it cannot be reconstructed later.
+- 1.13.0: record `data_source.manual_abstraction` (true only when people read records,
+  images or free text and code variables by hand). For automated extraction (public
+  databases, coded EHR fields, registry files) it is false and the workflow never asks about
+  coders, double data entry, adjudicators or inter-rater agreement, and tells the reviewer
+  not to ask either. Only when it is true, ask in the same question who codes: role,
+  specialty and years of experience for each coder and the adjudicator (`human_coders`).
 - No literature search yet. That is S02, and it must be recorded through the PubMed client.
 - Do not write any manuscript prose in this stage.
 

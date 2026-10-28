@@ -537,6 +537,258 @@ def run_g2(tmp: Path, record, section) -> None:
            and total <= 1100 and not (tmp / "elsewhere").exists(), f"{target} {total}")
 
 
+# ------------------------------------------------------------------------------ G3
+def run_g3(tmp: Path, record, section) -> None:
+    from wfcore import declarations, presentation as pr, scifreeze
+    from wfcore.checks.text import deviation_hits
+    section("1.13.0 G3: rewind rule, multi-person checks only for manual coding, no deviations")
+    P = _paper(tmp / "rw")
+    _w(P, "03_analysis/results/primary.json", {"ror": 3.2, "lo": 2.1, "hi": 4.8, "n": 159,
+                                               "adj_ror": 2.9, "pct_ind": 20.4})
+    rel = "07_manuscript/full_manuscript.md"
+    base = ("# Results\n\nAmong 159 reports the ROR was 3.2 (95% CI 2.1 to 4.8). The association "
+            "persisted in sensitivity analyses.\n\nDuplicates were rare. We found 12 duplicate "
+            "reports.\n")
+    _w(P, rel, base)
+    before = pr.snapshot_facts(P)
+
+    def verdict(text, changed=(rel,)):
+        _w(P, rel, text)
+        return pr.classify(P, before, list(changed))
+    v1 = verdict(base.replace("The association persisted", "After adjustment for cancer type the "
+                              "ROR was 2.9, and the association persisted").replace(
+        "were rare.", "were rare; indications were recorded in 20.4% of reports."))
+    record("G3 a reviewer-driven edit that adds numbers traceable to the frozen results is "
+           "presentation; each added number is listed with its source",
+           v1["class"] == "presentation" and {a["number"] for a in v1["added_numbers"]} == {"2.9", "20.4"}
+           and all("primary.json" in a["source"] for a in v1["added_numbers"])
+           and any("2.9" in ln for ln in pr.change_summary(v1)), str(v1)[:300])
+    v2 = verdict(base.replace("Among 159 reports", "Among 160 reports"))
+    record("G3 a changed reported value is science", v2["class"] == "scientific"
+           and any("value changed: 159 -> 160" in r for r in v2["reasons"]), str(v2["reasons"]))
+    v3 = verdict(base.replace("were rare.", "were rare (7.7% of 159)."))
+    record("G3 a new number that cannot be traced to the results is science",
+           v3["class"] == "scientific" and any("7.7" in r and "cannot be traced" in r
+                                               for r in v3["reasons"]), str(v3["reasons"]))
+    _w(P, rel, base)
+    v4 = pr.classify(P, before, [rel, "03_analysis/results/primary.json"])
+    record("G3 a changed results JSON is science", v4["class"] == "scientific"
+           and any("results changed" in r for r in v4["reasons"]), str(v4["reasons"]))
+    v5 = verdict(base.replace(" We found 12 duplicate reports.", ""))
+    record("G3 deleting a sentence (and its numbers) is presentation, listed for the user",
+           v5["class"] == "presentation" and {d["number"] for d in v5["deleted_numbers"]} == {"12"},
+           str(v5)[:200])
+    legacy = {k: {kk: vv for kk, vv in f.items() if kk != "seq"} for k, f in before.items()}
+    _w(P, rel, base.replace("were rare.", "were rare in 20.4% of reports."))
+    v6 = pr.classify(P, legacy, [rel])
+    record("G3 a baseline taken before 1.13 (no reading order) still classifies traceable "
+           "additions as presentation", v6["class"] == "presentation", str(v6["reasons"]))
+    v7 = verdict(base.replace("analyses.", "analyses, as in a cohort of 412 reports [@smith2020]."))
+    record("G3 a new number in a cited sentence is traced to the citation (presentation)",
+           v7["class"] == "presentation"
+           and [a["source"] for a in v7["added_numbers"]] == ["cited reference"], str(v7)[:200])
+    # journal copy: removing a repeat of a value that is still stated is not dropped content
+    _w(P, "07_manuscript/full_manuscript.md", "# Results\n\nThere were 12 reports. Of the 12 "
+                                              "reports, 5 were fatal.\n")
+    _w(P, "08_submission/manuscript/full_manuscript.md", "# Results\n\nThere were 12 reports, 5 "
+                                                         "of them fatal.\n")
+    ok_dup, probs_dup, _ = scifreeze.variant_delta(P)
+    _w(P, "08_submission/manuscript/full_manuscript.md", "# Results\n\nThere were 12 reports.\n")
+    ok_drop, probs_drop, _ = scifreeze.variant_delta(P)
+    record("G3 journal copy: a merged duplicate value is not a drop; a value that disappears is",
+           ok_dup and not ok_drop and "5" in " ".join(probs_drop), f"{probs_dup} | {probs_drop}")
+    st = json.loads((P / ".wf/state.json").read_text(encoding="utf-8"))
+    st.setdefault("decisions", {})["journal_trim_authorised"] = {"value": "YES"}
+    (P / ".wf/state.json").write_text(json.dumps(st), encoding="utf-8")
+    record("G3 rebind honours a user-authorised journal trim (no hand-edited variant.json)",
+           scifreeze._trim_authorised(P))
+    # final copy uses the same rule
+    from docx import Document
+    from wfcore import finalcopy
+    a, b = tmp / "orig.docx", tmp / "copy.docx"
+    for path, text in ((a, "Among 159 reports the ROR was 3.2. We found 12 duplicate reports."),
+                       (b, "Among 159 reports the ROR was 3.2; after adjustment it was 2.9.")):
+        d = Document()
+        d.add_paragraph(text)
+        d.save(path)
+    fc_ok = finalcopy.compare(P, a, b)
+    d = Document()
+    d.add_paragraph("Among 160 reports the ROR was 3.2. We found 12 duplicate reports.")
+    d.save(b)
+    fc_bad = finalcopy.compare(P, a, b)
+    record("G3 final copy: traceable additions and deletions pass; a changed value is refused",
+           not fc_ok and any("value changed" in x for x in fc_bad), f"{fc_ok} | {fc_bad}")
+
+    # multi-person checks only for manual coding
+    pub = {"study_design": "case_control", "data_source": {"type": "public_database", "name": "FAERS"}}
+    meta = {"study_design": "meta_analysis", "data_source": {"type": "published_studies", "name": "x"}}
+    chart = {"study_design": "cohort_retrospective",
+             "data_source": {"type": "own_centre_retrospective", "name": "H", "manual_abstraction": True}}
+    _w(P, "01_protocol/idea.json", pub)
+    rules_pub = " ".join(declarations.review_rules(P))
+    _w(P, "01_protocol/idea.json", chart)
+    rules_chart = " ".join(declarations.review_rules(P))
+    toml = (ROOT / "pipeline/pipeline.toml").read_text(encoding="utf-8")
+    cards = {n: (ROOT / f"pipeline/stages/{n}.md").read_text(encoding="utf-8")
+             for n in ("S01_intake", "S03_protocol", "S21_authors")}
+    record("G3 automated extraction (public database) asks no coder/double-entry/agreement "
+           "question and the reviewer is told not to ask; manual abstraction still does",
+           declarations.needs_human_coding(pub) is False and declarations.needs_human_coding(meta) is True
+           and declarations.needs_human_coding(chart) is True
+           and "Do not request double data entry" in rules_pub
+           and "double data entry" not in rules_chart and "human_coders" not in toml
+           and all("manual_abstraction" in c for c in cards.values()), rules_pub[:160])
+
+    # protocol deviations never reach the paper
+    phrases = ["Departures from it are reported in the Discussion.",
+               "This was a protocol deviation.",
+               "The analysis deviated from the original protocol.",
+               "As originally planned, we used Firth regression.",
+               "The protocol was archived but not registered.",
+               "本研究存在方案偏离。", "与研究方案不一致的分析"]
+    caught = [p for p in phrases if deviation_hits(p)]
+    clean = deviation_hits("The analysis followed a logistic model with prespecified covariates.")
+    meta_p = _paper(tmp / "meta")
+    _w(meta_p, "01_protocol/idea.json", meta)
+    _w(meta_p, "01_protocol/protocol_v1.md", "# Ethics\n\nPROSPERO CRD42024000001\n")
+    allowed = deviation_hits("Deviations from the registered protocol are listed.", meta_p)
+    record("G3 protocol-deviation narration is blocked in manuscript text (EN and ZH); a "
+           "registered meta-analysis (PROSPERO) may report it (PRISMA 2020 item 24c)",
+           len(caught) == len(phrases) and not clean and not allowed, str(caught))
+    _w(P, "07_manuscript/methods.md", "# Methods\n\nThe protocol was written before any "
+                                      "contrast was computed; departures from it are reported "
+                                      "in the Discussion.\n")
+    g = _gate(P, "no_ai_boilerplate", "S08_methods", path="07_manuscript/methods.md")
+    record("G3 no_ai_boilerplate blocks plan-history text and simply asks to describe the "
+           "analysis performed", not g.ok and any("describe the analysis performed" in h
+                                                  for h in g.hints), g.detail[:160])
+    s06 = next(s for s in __import__("tomllib").loads(toml)["stage"] if s["id"] == "S06_protocol_final")
+    heads = [x for gg in s06["gate"] if gg.get("check") == "md_sections" for x in gg["headings"]]
+    from manuscript import writer_bundle
+    _w(P, "01_protocol/protocol_final.md", "# Objective\n\nX.\n\n## Deviations from protocol v1\n\n"
+                                           "We changed the outcome.\n\n## Design\n\nCase-control.\n")
+    src = (ROOT / "tools/manuscript/writer_bundle.py").read_text(encoding="utf-8")
+    record("G3 S06 no longer requires a deviations section; the writer bundle drops one; "
+           "outputs no longer include protocol_diff.md",
+           "Deviations from protocol v1" not in heads
+           and "01_protocol/protocol_diff.md" not in s06["outputs"]
+           and "Deviations\\b" in src and hasattr(writer_bundle, "build"), str(heads))
+
+
+# ------------------------------------------------------------------------------ G4
+def run_g4(tmp: Path, record, section) -> None:
+    import tomllib
+    import zipfile
+    from xml.etree import ElementTree as ET
+    section("1.13.0 G4: each section polished at its stage; Word without keep markers")
+    P = _paper(tmp / "pol")
+    _w(P, "03_analysis/results/primary.json", {"n": 159, "ror": 3.2})
+    _w(P, "07_manuscript/results.md", "# Results\n\nAmong 159 reports the reporting odds ratio "
+                                      "was 3.2.\n")
+    ok = _gate(P, "section_language_clean", "S09_results", path="07_manuscript/results.md")
+    _w(P, "07_manuscript/results.md", "# Results\n\nThe pipeline stage parsed 159 rows; it is "
+                                      "worth noting that the reporting odds ratio was 3.2. "
+                                      "Departures from the protocol are listed below.\n")
+    bad = _gate(P, "section_language_clean", "S09_results", path="07_manuscript/results.md")
+    record("G4 section_language_clean passes clinical prose and blocks engineering, AI and "
+           "backstage/plan-history language in the section",
+           ok.ok and not bad.ok and bad.severity == "fail" and "blocking" in bad.detail,
+           ok.detail[:80] + " | " + bad.detail[:200])
+    pipe = tomllib.loads((ROOT / "pipeline/pipeline.toml").read_text(encoding="utf-8"))
+    wired = {s["id"]: [g.get("path") for g in s["gate"] if g.get("check") == "section_language_clean"
+                       and g.get("since") == "1.13.0"] for s in pipe["stage"]}
+    record("G4 every writing stage polishes its own section (S08 Methods, S09 Results, S14 "
+           "Introduction, S16 Discussion, S17 Abstract); S22 only harmonises",
+           "07_manuscript/methods.md" in wired["S08_methods"]
+           and wired["S09_results"] == ["07_manuscript/results.md"]
+           and wired["S14_introduction"] == ["07_manuscript/introduction.md"]
+           and wired["S16_discussion"] == ["07_manuscript/discussion.md"]
+           and wired["S17_assemble"] == ["07_manuscript/abstract.md"]
+           and "cross-section consistency" in (ROOT / "pipeline/stages/S22_polish.md").read_text(
+               encoding="utf-8"), str(wired)[:300])
+    # Word: build a synthetic manuscript with an embedded figure and a Word table
+    if not shutil.which("pandoc"):
+        record("G4 Word build needs pandoc", False, "pandoc missing")
+        return
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from manuscript import build_docx as bd
+    from tables.threeline import write_table
+    from wfcore import docxaudit
+    W = tmp / "word"
+    Q = _paper(W)
+    (Q / "05_figures/out").mkdir(parents=True)
+    fig = plt.figure(figsize=(6, 7))
+    plt.plot([0, 1], [0, 1])
+    fig.savefig(Q / "05_figures/out/Figure1.png", dpi=60)
+    plt.close(fig)
+    with _envset(MEDPAPER_PROJECT=Q):
+        write_table(Q / "04_tables/main/Table1.xlsx", "Table 1", "Table 1. Characteristics.",
+                    ["Characteristic", "Value"], [["Age, years", "62"], ["Women, n (%)", "40 (25)"]],
+                    ["Data are n (%)."])
+    _w(Q, "01_protocol/artifact_plan.json", {
+        "main_figures": [{"id": "Figure 1", "file": "05_figures/out/Figure1.png"}],
+        "supp_figures": [], "main_tables": [{"id": "Table 1", "file": "04_tables/main/Table1.xlsx"}],
+        "supp_tables": []})
+    _w(Q, "04_tables/table_captions.md", "## Table 1. Characteristics of the reports\n\nData are n (%).\n")
+    _w(Q, "08_submission/target_journal.json", {"journal": "J", "embed_figures": True,
+                                                "word_tables": True, "limits": {"source": "x"}})
+    legend = " ".join(["The figure shows the cumulative reports over time."] * 25)
+    _w(Q, "07_manuscript/full_manuscript.md",
+       "# Title of the study\n\n# Results\n\nText (Table 1; Figure 1).\n\n# Figure legends\n\n"
+       f"## Figure 1. Reports over time\n\n{legend}\n")
+    out = W / "manuscript.docx"
+    style = bd.load_style_defaults()
+    with _envset(MEDPAPER_PROJECT=Q):
+        work = W / "render"
+        work.mkdir()
+        rendered = bd.prepare_source("manuscript", [Q / "07_manuscript/full_manuscript.md"], Q, work, style)
+        bd.run_pandoc(rendered, out, None, None)
+        bd.normalize_docx(out, style, "manuscript")
+    with zipfile.ZipFile(out) as zf:
+        root = ET.fromstring(zf.read("word/document.xml"))
+        styles = ET.fromstring(zf.read("word/styles.xml"))
+        raw = zf.read("word/document.xml") + zf.read("word/styles.xml")
+    probs = docxaudit.keep_problems(root, styles)
+    tbl = docxaudit.table_layout_problems(root)
+    ext = root.find(f".//{{{docxaudit.WP}}}extent")
+    W_ = docxaudit.W
+    # paragraphs and tables only (Pandoc puts heading bookmarks between them)
+    kids = [el for el in root.find(f"{{{W_}}}body") if el.tag in (f"{{{W_}}}p", f"{{{W_}}}tbl")]
+
+    def _brk(el):
+        return el.find(f".//{{{W_}}}br[@{{{W_}}}type='page']") is not None
+
+    def _sect(el):
+        return el.find(f"{{{W_}}}pPr/{{{W_}}}sectPr") is not None
+    # a page break right after a next-page section break is a blank page (Word COM check)
+    blank = any(_sect(a) and _brk(b) for a, b in zip(kids, kids[1:]))
+    fig_i = next((i for i, el in enumerate(kids) if el.find(f".//{{{docxaudit.WP}}}extent")
+                  is not None), 0)
+    j = fig_i - 1
+    while j >= 0 and not _sect(kids[j]) and not _brk(kids[j]) and "".join(kids[j].itertext()).strip():
+        j -= 1
+    new_page = j >= 0 and (_sect(kids[j]) or _brk(kids[j]))
+    record("G4 the built DOCX has zero keepNext/keepLines/pageBreakBefore (document and styles), "
+           "cantSplit rows with a repeated header, the table on its own section, and the figure "
+           "on a new page without a blank page, sized to fit with its long legend",
+           not probs and not tbl and b"keepNext" not in raw and b"keepLines" not in raw
+           and b"pageBreakBefore" not in raw and b"cantSplit" in raw and b"tblHeader" in raw
+           and new_page and not blank and ext is not None
+           and int(ext.get("cy")) / 914400 < 9.0, f"{probs} | {tbl} | blank={blank} new={new_page}")
+    import copy
+    marked = copy.deepcopy(root)
+    for p in marked.iter(f"{{{docxaudit.W}}}p"):
+        ppr = p.find(f"{{{docxaudit.W}}}pPr")
+        if ppr is None:
+            ppr = ET.SubElement(p, f"{{{docxaudit.W}}}pPr")
+        ET.SubElement(ppr, f"{{{docxaudit.W}}}keepNext")
+        break
+    record("G4 the audit (docx_bundle_ready keep_with_next) reports a keep marker as a black square",
+           any("black squares" in x for x in docxaudit.keep_problems(marked, styles)))
+
+
 def _gate(p: Path, name: str, stage: str, **spec):
     import selftest_v180 as v180
     return v180._gate(p, name, stage, **spec)
@@ -546,3 +798,5 @@ def run(tmp: Path, record, section) -> None:
     tmp.mkdir(parents=True, exist_ok=True)
     run_g1(tmp / "g1", record, section)
     run_g2(tmp / "g2", record, section)
+    run_g3(tmp / "g3", record, section)
+    run_g4(tmp / "g4", record, section)

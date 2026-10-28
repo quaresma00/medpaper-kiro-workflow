@@ -420,9 +420,16 @@ path = "07_manuscript/methods.md"
 since = "1.9.0"
 # 1.11.0: Methods state principles; implementation detail -> Supplementary Methods (warning).
 [[stage.gate]]
-check = "engineering_language_clean"
-paths = ["07_manuscript/methods.md"]
-since = "1.11.0"
+# 1.13.0 (#5): the section is polished at its own stage (engineering lint included,
+# advisory in Methods as in 1.11); S22 only harmonises across sections and to the journal.
+check = "section_language_clean"
+path = "07_manuscript/methods.md"
+since = "1.13.0"
+[[stage.gate]]
+check = "section_language_clean"
+path = "07_manuscript/supplementary_methods.md"
+optional = true
+since = "1.13.0"
 [[stage.gate]]
 check = "clinical_labels_used"
 paths = ["07_manuscript/methods.md"]
@@ -550,9 +557,9 @@ check = "effects_with_intervals"
 path = "07_manuscript/results.md"
 since = "1.10.0"
 [[stage.gate]]
-check = "engineering_language_clean"
-paths = ["07_manuscript/results.md"]
-since = "1.11.0"
+check = "section_language_clean"
+path = "07_manuscript/results.md"
+since = "1.13.0"
 [[stage.gate]]
 check = "clinical_labels_used"
 paths = ["07_manuscript/results.md"]
@@ -661,9 +668,9 @@ check = "prose_not_lists"
 path = "07_manuscript/introduction.md"
 since = "1.9.0"
 [[stage.gate]]
-check = "engineering_language_clean"
-paths = ["07_manuscript/introduction.md"]
-since = "1.11.0"
+check = "section_language_clean"
+path = "07_manuscript/introduction.md"
+since = "1.13.0"
 
 [[stage]]
 id = "S15_deepread"
@@ -718,9 +725,9 @@ check = "prose_not_lists"
 path = "07_manuscript/discussion.md"
 since = "1.9.0"
 [[stage.gate]]
-check = "engineering_language_clean"
-paths = ["07_manuscript/discussion.md"]
-since = "1.11.0"
+check = "section_language_clean"
+path = "07_manuscript/discussion.md"
+since = "1.13.0"
 [[stage.gate]]
 check = "clinical_labels_used"
 paths = ["07_manuscript/discussion.md"]
@@ -734,6 +741,10 @@ outputs = ["07_manuscript/title.md", "07_manuscript/abstract.md", "07_manuscript
 [[stage.gate]]
 check = "outputs_exist"
 optional = ["07_manuscript/statements.md"]
+[[stage.gate]]
+check = "section_language_clean"
+path = "07_manuscript/abstract.md"
+since = "1.13.0"
 [[stage.gate]]
 check = "prose_not_lists"
 path = "07_manuscript/full_manuscript.md"

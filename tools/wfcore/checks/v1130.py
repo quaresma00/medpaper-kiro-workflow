@@ -9,6 +9,73 @@ from __future__ import annotations
 from . import Ctx, Result, check
 
 
+_POLISH = None
+# Structural lint kinds that block a section (AI tells, pipeline/plan history, list density).
+SECTION_BLOCKING = frozenset({"backstage_language", "bullets_in_prose", "em_dash_density",
+                              "transition_density", "hedge_stacking"})
+
+
+def _polish():
+    global _POLISH
+    if _POLISH is None:
+        import importlib.util
+        from .. import paths
+        spec = importlib.util.spec_from_file_location(
+            "medpaper_polish_lint", paths.tools_dir() / "text" / "polish.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _POLISH = mod
+    return _POLISH
+
+
+@check("section_language_clean")
+def section_language_clean(ctx: Ctx) -> Result:
+    """G4 (#5): each writing stage polishes its own section before it advances - medical
+    register, de-AI, de-engineering, no pipeline/plan history, prose not lists. Blocking:
+    engineering language (warning in Methods, as in 1.11), backstage/deviation narration,
+    tier-A AI phrases, AI rhythm (em dashes, transitions, stacked hedges), list density.
+    Style issues warn; S22 then only harmonises across sections and to the journal."""
+    from .v1110 import _file_hits
+    from .. import clinical
+    rel = ctx.src(ctx.spec["path"])
+    if not ctx.p(rel).is_file():
+        if ctx.spec.get("optional"):
+            return Result(True, "section_language_clean", f"{rel}: optional file absent")
+        return Result(False, "section_language_clean", f"{rel} missing")
+    text = ctx.read(rel)
+    pol = _polish()
+    try:
+        allow = pol.allowlist()
+    except (Exception, SystemExit):  # noqa: BLE001 - no allowlist outside a paper
+        allow = {}
+    ai = pol.lint_ai(rel, text, allow)
+    struct = pol.lint_structure(rel, text)
+    style = pol.lint_style(rel, text)
+    eng_block, eng_warn = _file_hits(ctx, rel, text, clinical.allowlist(ctx.project))
+    block = [f"engineering: {x}" for x in eng_block]
+    block += [f"AI phrase '{x['match']}' (line {x['line']})" for x in ai if x["tier"] == "A"]
+    block += [f"{x['kind']}: {x['detail'][:140]}" for x in struct if x["kind"] in SECTION_BLOCKING]
+    warn = [f"engineering (advisory): {x}" for x in eng_warn]
+    warn += [f"{x['kind']}: {x['detail'][:100]}" for x in struct + style
+             if x["kind"] not in SECTION_BLOCKING and x["severity"] == "blocking"]
+    tier_b = sum(1 for x in ai if x["tier"] == "B")
+    hints = [f"Polish this section now: python tools/text/polish.py lint --file {rel} - rewrite "
+             "every blocking item in clinical prose without changing a number, citation or "
+             "table/figure reference; a genuine exception goes in "
+             "07_manuscript/polish_allowlist.tsv with a reason.",
+             "Never narrate the pipeline, an initial plan or protocol deviations; simply "
+             "describe the analysis performed."]
+    if block:
+        return Result(False, "section_language_clean", f"{rel}: {len(block)} blocking language "
+                      "item(s): " + "; ".join(block[:6]), hints)
+    if warn or tier_b:
+        return Result(False, "section_language_clean", f"{rel}: clean of engineering, AI and "
+                      f"backstage language; {len(warn)} style item(s), {tier_b} tier-B phrase(s) "
+                      "to consider: " + "; ".join(warn[:4]), hints, severity="warn")
+    return Result(True, "section_language_clean", f"{rel}: polished (medical register, no AI, "
+                                                  "engineering or backstage language)")
+
+
 @check("data_not_copied")
 def data_not_copied(ctx: Ctx) -> Result:
     """G2: the user's datasets are used in place. A copy (or hard link) of a declared data

@@ -7,7 +7,8 @@ Details (statements placement, blinding, abbreviation placement, reference count
 ## Ask the user (one message)
 Exact author order and names, affiliations, ORCIDs, corresponding-author details,
 funding/grants, conflicts, code availability, acknowledgements, CRediT roles, preprint and
-prior presentation; coders'/adjudicators' specialty and experience if `human_coders` is
+prior presentation; coders'/adjudicators' specialty and experience only if the study basis
+declares manual abstraction (`data_source.manual_abstraction`) and `human_coders` is
 missing. Ethics, consent and data availability are judged by the workflow - add only the
 open questions this prints:
 ```

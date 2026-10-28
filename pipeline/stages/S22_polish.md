@@ -9,9 +9,11 @@ Details (variant comparison, trim authorisation, log headings): `reference/stage
 ```
 .\.venv\Scripts\python.exe tools/text/polish.py snapshot
 ```
-2. Lint, fix blocking AI tells, house-style and engineering-language findings; align abstract
-   structure, spelling, limits and headings with the journal. Continuous prose; Keywords right
-   after the Abstract; References heading and Figure legends kept.
+2. Each section was already polished at its own stage (`section_language_clean` at
+   S08/S09/S14/S16/S17). Here only: cross-section consistency (abbreviations defined once,
+   spelling variant, P/p style, terminology) and the journal's style - abstract structure,
+   limits, headings. Continuous prose; Keywords right after the Abstract; References
+   heading and Figure legends kept.
 ```
 .\.venv\Scripts\python.exe tools/text/polish.py lint
 .\.venv\Scripts\python.exe tools/text/polish.py diff

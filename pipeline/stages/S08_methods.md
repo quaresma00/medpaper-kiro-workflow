@@ -19,7 +19,13 @@ and `reference/methods-structure.md`.
    statistics); implementation detail - parsing, matching rules, character handling, file
    formats, re-execution - goes to `07_manuscript/supplementary_methods.md` (prose only, no
    tables or rules) or nowhere. Clinical labels from the display dictionary only.
-5. Check the result, fix, and re-run the engineering-language lint (part of `wf check`).
+5. Polish this section now (medical register, de-AI, de-engineering, no pipeline or plan
+   history, prose not lists, abbreviations), fix every blocking item, then `wf check`
+   (`section_language_clean` for methods.md and supplementary_methods.md). Describe the
+   analysis performed; never an initial plan or protocol deviations.
+```
+.\.venv\Scripts\python.exe tools/text/polish.py lint --file 07_manuscript/methods.md
+```
 
 ## Outputs
 - `07_manuscript/methods.md`

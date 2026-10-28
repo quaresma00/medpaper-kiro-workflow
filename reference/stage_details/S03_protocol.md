@@ -38,9 +38,10 @@ pre-specified rather than fitted to whatever happened to be significant.
      `- Comparator: precedent no - justification: <methodological reason>`. A choice with no
      precedent is allowed; an undefended one is what reviewers attack at submission.
      `design_precedent_recorded` checks the three lines here and again at S06.
-   - If any variable is coded or adjudicated by people, name each coder/adjudicator role with
-     specialty and years of experience under `Variables` now (they are needed in Methods and
-     cannot be reconstructed later).
+   - Only if `data_source.manual_abstraction` is true (people code or adjudicate variables by
+     hand), name each coder/adjudicator role with specialty and years of experience under
+     `Variables` now. Automated extraction (public databases, coded fields, registry files)
+     needs no coders, double entry, adjudication or agreement statistics (1.13.0).
 3. Write `project/02_data/acquisition_plan.md` with exactly these headings:
    `Source`, `Access route`, `Licence and ethics`, `Protocol-defined data universe`,
    `Exact retrieval steps`, `Pagination and completeness proof`, `Expected shape`,

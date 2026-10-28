@@ -231,17 +231,22 @@ def docx_keep_with_next(ctx: Ctx) -> Result:
         try:
             with zipfile.ZipFile(p) as zf:
                 root = ET.fromstring(zf.read("word/document.xml"))
+                styles = ET.fromstring(zf.read("word/styles.xml")) \
+                    if "word/styles.xml" in zf.namelist() else None
         except (OSError, KeyError, zipfile.BadZipFile, ET.ParseError) as exc:
             problems.append(f"{p.name}: unreadable ({exc})")
             continue
-        problems += [f"{p.name}: {x}" for x in docxaudit.keep_problems(root)]
+        problems += [f"{p.name}: {x}" for x in docxaudit.keep_problems(root, styles)]
     if problems:
         return Result(False, "docx_keep_with_next", "; ".join(problems[:6]),
-                      ["Rebuild with this engine's build_docx.py: it keeps table caption -> "
-                       "table -> footnote and legend -> figure together (keepNext/keepLines), "
-                       "and strips outline/collapse only from headings."])
+                      ["Rebuild with this engine's build_docx.py (1.13.0): no keepNext/keepLines/"
+                       "pageBreakBefore anywhere (Word shows them as black squares); tables "
+                       "start their own section with cantSplit rows and a repeated header, each "
+                       "embedded figure starts after a page break and is sized to fit with its "
+                       "legend, or set figures_at_end in target_journal.json."])
     return Result(True, "docx_keep_with_next",
-                  f"{len(files)} DOCX: captions, tables, footnotes and legends keep with their item")
+                  f"{len(files)} DOCX: no keep markers (no black squares); tables and figures "
+                  "held by structure")
 
 
 # --------------------------------------------------------------- 1f review closure

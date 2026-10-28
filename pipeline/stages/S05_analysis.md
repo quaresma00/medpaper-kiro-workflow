@@ -31,7 +31,7 @@ Details (code templates, R/Python split, sandbox rules): `reference/stage_detail
 ## Gate
 >= 5 recorded queries, notes populated, environment receipts, scripts scoped, no plot calls
 (Python or R; figures are S11), temp clean. The primary analysis does not change silently -
-a change is a deviation recorded at S06.
+a change is logged in `.wf/protocol_changes.md` at S06 (internal, never in the paper).
 
 ## Close
 ```

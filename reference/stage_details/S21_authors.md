@@ -23,8 +23,9 @@ its conclusions into statements.md, and add only its printed open questions to t
 message (record answers with `tools/declarations.py answer <id> "<value>"`).
 Do not ask for or write a study-registration statement unless the journal requires one; a
 meta-analysis states its PROSPERO ID (or that it was not registered).
-If people coded or adjudicated data and `idea.json` lacks `human_coders`, ask in the same
-message for each coder's and adjudicator's specialty and years of experience.
+Only if the study basis declares manual abstraction (`data_source.manual_abstraction` true)
+and `idea.json` lacks `human_coders`, ask in the same message for each coder's and
+adjudicator's specialty and years of experience; automated extraction never triggers it.
 
 Write the response faithfully to `project/00_input/author_info.json`, then create:
 - `project/07_manuscript/title_page.md` using the already selected title without offering

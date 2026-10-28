@@ -182,6 +182,21 @@ reducing the requested work:
 - Agent plans and check records go in `08_submission/notes/` (or `.wf/`, `temp/`); they are
   never unplanned changes or orphans.
 - Revised prose never mentions the pipeline's history (independent review, earlier draft,
-  previous version, reviewer request). A genuine change of plan is written as a protocol
-  deviation or a post hoc analysis; `no_ai_boilerplate` and the S22 lint block such phrases.
+  previous version, reviewer request) or the plan's history (initial plan, protocol
+  deviations): it simply describes the analysis performed; `no_ai_boilerplate`,
+  `section_language_clean` and the S22 lint block such phrases (registered meta-analysis:
+  PRISMA 2020 item 24c is the only exception).
+
+## Post-freeze classification (1.13.0)
+
+SCIENCE - back to S19, only after the user's words '我确认回退' - is exactly one of:
+(a) analysis code, data, the analysis manifest/tolerances or the results JSON changed;
+(b) a reported number changed value (a positional diff of the reviewed text, tables and
+figure text); (c) a new number that cannot be traced to the frozen results JSON with the
+same meaning. Everything else is PRESENTATION-TRACEABLE: new numbers that trace to the
+results (each listed to the user with its file and JSON path), deletions (including a
+repeated value), wording and structure edits made for reviewers, label numbers (Online
+Resource 2). Only the deterministic checks re-run (provenance, denominators, citations); no
+new review round, no re-confirmation - the S24 '我确认这一版' covers them.
+`rework.py preview` shows the verdict and the added numbers before anything is recorded.
 

@@ -321,7 +321,7 @@ def verify_freeze(project: Path) -> tuple[bool, list[str], int]:
         if _sha256(p) != meta.get("sha256"):
             if meta.get("layer") == "presentation" and meta.get("facts") is not None:
                 from . import presentation
-                if presentation.facts(project, rel) == meta["facts"]:
+                if presentation.same_facts(presentation.facts(project, rel), meta["facts"]):
                     continue  # presentation layer: wording changed, facts identical
                 problems.append(f"{rel}: presentation-layer file changed its facts (numbers, "
                                 "citations or display references) after the freeze")
@@ -502,9 +502,11 @@ def rebind_variant(project: Path) -> dict:
     if not variant_exists(project):
         raise SystemExit(f"no journal variant in {VARIANT_DIR}/ to rebind")
     ok, problems, _ = variant_delta(project)
-    if not ok:
+    if not ok and not _trim_authorised(project):
         raise SystemExit("refusing to rebind: the journal copy is missing re-approved science:\n  "
-                         + "\n  ".join(problems[:8]))
+                         + "\n  ".join(problems[:8])
+                         + "\n(a cut the user authorised is recorded with `wf decide "
+                           "journal_trim_authorised YES --why ...`)")
     meta = variant_meta(project)
     live = _sha256(freeze_path(project))
     if meta.get("freeze_sha256") == live:
@@ -515,6 +517,17 @@ def rebind_variant(project: Path) -> dict:
     (project / VARIANT_DIR / "variant.json").write_text(
         json.dumps(meta, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return meta
+
+
+def _trim_authorised(project: Path) -> bool:
+    """1.13.0: rebind honours the same user-authorised journal trim as variant_preserves_science
+    (a sanctioned cut no longer forces hand-editing variant.json)."""
+    try:
+        data = json.loads((Path(project) / ".wf/state.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    rec = (data.get("decisions") or {}).get("journal_trim_authorised") if isinstance(data, dict) else None
+    return isinstance(rec, dict) and str(rec.get("value", "")).strip() == "YES"
 
 
 def variant_meta(project: Path) -> dict:
@@ -579,6 +592,10 @@ def variant_delta(project: Path) -> tuple[bool, list[str], dict]:
         entry = {"words_before": len(before.split()), "words_after": len(after.split())}
         for field in ("numbers", "citekeys", "artifacts"):
             lost = Counter(fb[field]) - Counter(fa[field])
+            # 1.13.0 (#9): removing a repeat of a value that the copy still states is not
+            # dropped content (e.g. a duplicated count merged into the previous sentence).
+            present = set(fa[field])
+            lost = Counter({k: v for k, v in lost.items() if k not in present})
             if lost:
                 items = ", ".join(sorted(lost.elements()))[:160]
                 entry[f"{field}_lost"] = items

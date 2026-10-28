@@ -12,7 +12,8 @@ Details (heading-by-heading content, sampling rule, pagination proof): `referenc
    `Population and eligibility`, `Variables`, `Statistical analysis plan`,
    `Sample size / power`, `Ethics`:
    - Variables: operational definition, source field, unit, missing-value handling, cited cutoffs;
-     human coders/adjudicators with specialty and experience.
+     only if `data_source.manual_abstraction` is true: coders/adjudicators with specialty and
+     experience (automated extraction needs no multi-person checks).
    - Statistical analysis plan: primary model and estimand, confounder choice, missing data,
      sensitivity analyses, primary result; plus `### Statistical reporting plan` with
      `Primary comparisons: <n>`, `Multiplicity: <...>`, `Effect measures: <...>`, `Intervals: <...>`.

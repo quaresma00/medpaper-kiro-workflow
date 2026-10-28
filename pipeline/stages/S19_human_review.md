@@ -21,6 +21,10 @@ Details (fixing rules, rework routing, preview/confirm-rewind): `reference/stage
 ```
    Edit owning sources only, rebuild dependants. Science already frozen or a rework round
    open -> `tools/rework.py` (`preview` first; an S19 return needs the user's 我确认回退).
+   After the freeze only changed analysis/data/results, a changed reported value or a new
+   number that cannot be traced to the frozen results is science; traceable new numbers
+   (listed with their source), deletions and reviewer-driven wording are presentation.
+   Never request multi-person coding for automated extraction, nor protocol-deviation text.
 3. Close against the saved report (default: the bundle's report.md); every F-numbered finding
    listed once; numbers/grouping/conclusion_strength are changed or `author`, never kept:
 ```

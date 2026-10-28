@@ -18,7 +18,6 @@ Interpret the finding against the literature you actually read. One file, this s
 - `06_refs/library.json` - abstracts for the wider context
 - `03_analysis/notes.md` -> `Discussion points`, `Limitations`, `Surprises`
 - `07_manuscript/results.md` - what you may interpret (and nothing beyond it)
-- `01_protocol/protocol_diff.md` - deviations that must be owned as limitations
 
 ## Procedure
 1. Structure, in this order:
@@ -30,9 +29,9 @@ Interpret the finding against the literature you actually read. One file, this s
    3. **Interpretation / mechanism** - clearly labelled as inference, not as demonstrated.
    4. **Clinical or research implications** - proportionate to the evidence. A single
       observational study does not change practice.
-   5. **Strengths and limitations** - specific and quantified. Include every protocol
-      deviation from `protocol_diff.md`, residual confounding, generalisability limits,
-      power, and measurement error. State the direction each bias would push the estimate.
+   5. **Strengths and limitations** - specific and quantified: residual confounding,
+      generalisability limits, power, and measurement error. State the direction each bias
+      would push the estimate. Never narrate an initial plan or protocol deviations (1.13.0).
    6. **Conclusion** - two or three sentences, no stronger than the Results support.
    Write these as **continuous prose with no subheadings**: each move opens with a topic
    sentence that carries the transition. Subheadings appear only if the journal guide frozen
@@ -50,7 +49,8 @@ Interpret the finding against the literature you actually read. One file, this s
 - Body text is continuous paragraphs (1.9.0). Lists only where a sentence truly cannot carry the content (rarely more than one short list per section); every result, count, criterion, covariate and sensitivity finding is written as a sentence. `prose_not_lists` fails above `body_list_items_max` items or `body_list_share_max` of the blocks.
 - ONE section file this stage.
 - Never mention the pipeline's own history (independent review, earlier draft, previous
-  version, reviewer). A change of analysis is a "protocol deviation" or "post hoc analysis".
+  version, reviewer) or the plan's history (initial plan, protocol deviations); simply
+  describe the analysis performed (1.13.0).
 - No new results. Own numbers must already be in `results.md` and a results JSON. A prior
   study's number is allowed only in the same sentence as `[@key]` of that study (verified
   library, ideally deep-read); `number_allowlist.tsv` never applies here (1.10.0).

@@ -38,9 +38,8 @@ def paragraphs(root) -> list[tuple[str, str, object]]:
     return [(_ptext(p), _style_id(p), p) for p in root.findall(".//w:body/w:p", NS)]
 
 
-# 1.11.0 (#1e): outline level and page-break-before are never wanted; keepNext/keepLines are
-# removed only from headings (where Word shows them as collapse markers) and kept where they
-# bind a caption to its table, a table to its footnote and a legend to its figure.
+# 1.11.0 (#1e) set keepNext/keepLines to bind captions, tables and legends; Word shows each as
+# a black square. 1.13.0 (#10): none may remain anywhere (keep_problems); layout is structural.
 HEADING_STYLES = {"SectionHeading", "ManuscriptTitle"}
 TABLE_CAPTION_RE = re.compile(r"^(?:Supplementary\s+)?Table\s+S?\d+[.:]", re.I)
 
@@ -60,45 +59,99 @@ def heading_keep_problems(root) -> list[str]:
     return [f"heading(s) carry keepNext/keepLines (collapse marker): {bad[:3]}"] if bad else []
 
 
-def keep_problems(root) -> list[str]:
-    """Structural: caption -> table -> footnote and legend -> figure stay on one page."""
+KEEP_MARKERS = ("keepNext", "keepLines", "pageBreakBefore")
+WP = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+
+
+def style_marker_problems(styles_root) -> list[str]:
+    """1.13.0 (#10): styles (followed through basedOn) and docDefaults carrying a keep marker."""
+    if styles_root is None:
+        return []
+    styles = {s.get(f"{{{W}}}styleId"): s for s in styles_root.iter(f"{{{W}}}style")}
+
+    def own(s) -> bool:
+        ppr = s.find("w:pPr", NS)
+        return ppr is not None and any(ppr.find(f"w:{t}", NS) is not None for t in KEEP_MARKERS)
+    bad = []
+    for sid, s in styles.items():
+        cur, seen = s, set()
+        while cur is not None and id(cur) not in seen:
+            seen.add(id(cur))
+            if own(cur):
+                bad.append(sid)
+                break
+            base = cur.find("w:basedOn", NS)
+            cur = styles.get(base.get(f"{{{W}}}val")) if base is not None else None
+    dd = styles_root.find("w:docDefaults/w:pPrDefault/w:pPr", NS)
+    if dd is not None and any(dd.find(f"w:{t}", NS) is not None for t in KEEP_MARKERS):
+        bad.append("docDefaults")
+    return [f"style(s) carry keepNext/keepLines/pageBreakBefore (directly or via basedOn): "
+            f"{sorted(bad)[:5]}"] if bad else []
+
+
+def _usable_height_in(body) -> float:
+    sp = body.find("w:sectPr", NS) if body is not None else None
+    if sp is None:
+        return 9.7
+    pg, mar = sp.find("w:pgSz", NS), sp.find("w:pgMar", NS)
+    h = int((pg.get(f"{{{W}}}h") if pg is not None else None) or 16838)
+    top = int((mar.get(f"{{{W}}}top") if mar is not None else None) or 1440)
+    bottom = int((mar.get(f"{{{W}}}bottom") if mar is not None else None) or 1440)
+    return (h - top - bottom) / 1440
+
+
+def keep_problems(root, styles_root=None) -> list[str]:
+    """1.13.0 (#10): the Word layout audit (replaces the 1.11 keep-with-next audit).
+
+    Zero keepNext/keepLines/pageBreakBefore in document.xml and in the effective styles, plus
+    structure: every table row cantSplit; each embedded figure starts after an explicit page
+    break, is followed by its legend, and image + estimated legend fit the usable page
+    height. (Tables starting their own section are checked by table_layout_problems.)"""
     body = root.find("w:body", NS)
     if body is None:
         return ["no document body"]
-    kids = list(body)
     out = []
+    marked = [(_ptext(p)[:30] or "(empty)") for p in root.iter(f"{{{W}}}p")
+              if any(_has(p, t) for t in KEEP_MARKERS)]
+    if marked:
+        out.append(f"{len(marked)} paragraph(s) carry keepNext/keepLines/pageBreakBefore (black "
+                   f"squares in Word): {marked[:3]}")
+    out += style_marker_problems(styles_root)
+    kids = [k for k in body if k.tag in (f"{{{W}}}p", f"{{{W}}}tbl")]
+    usable = _usable_height_in(body)
     for i, el in enumerate(kids):
         if el.tag == f"{{{W}}}tbl":
-            prev = kids[i - 1] if i else None
-            if prev is not None and prev.tag == f"{{{W}}}p" and TABLE_CAPTION_RE.match(_ptext(prev)) \
-                    and not _has(prev, "keepNext"):
-                out.append(f"table caption '{_ptext(prev)[:30]}' does not keep with its table")
-            rows = el.findall("w:tr", NS)
-            if rows:
-                last = rows[-1].findall(".//w:p", NS)
-                nxt = kids[i + 1] if i + 1 < len(kids) else None
-                if nxt is not None and nxt.tag == f"{{{W}}}p" and _ptext(nxt) \
-                        and not TABLE_CAPTION_RE.match(_ptext(nxt)) \
-                        and not is_heading(_style_id(nxt)) \
-                        and last and not all(_has(p, "keepNext") for p in last):
-                    out.append("a table's last row does not keep with its footnote")
-                if any(r.find("w:trPr/w:cantSplit", NS) is None for r in rows):
-                    out.append("a table row can split across pages (no cantSplit)")
-        elif el.tag == f"{{{W}}}p" and el.find(".//w:drawing", NS) is not None:
-            nxt = kids[i + 1] if i + 1 < len(kids) else None
-            run = []
-            for j in range(i - 1, max(i - 9, -1), -1):
-                if kids[j].tag != f"{{{W}}}p" or not _ptext(kids[j]):
-                    break
-                run.append(kids[j])
-                if LEGEND_HEAD_RE.match(_ptext(kids[j])):
-                    if not all(_has(p, "keepNext") for p in run):
-                        out.append(f"legend '{_ptext(kids[j])[:30]}' does not keep with its figure")
-                    break
-            if nxt is not None and nxt.tag == f"{{{W}}}p" and LEGEND_HEAD_RE.match(_ptext(nxt)) \
-                    and not _has(el, "keepNext"):
-                out.append("a figure does not keep with the legend that follows it")
-    return sorted(set(out)) + heading_keep_problems(root)
+            if any(r.find("w:trPr/w:cantSplit", NS) is None for r in el.findall("w:tr", NS)):
+                out.append("a table row can split across pages (no cantSplit)")
+            continue
+        if el.find(".//w:drawing", NS) is None:
+            continue
+        j = i - 1
+        while j >= 0 and kids[j].tag == f"{{{W}}}p" \
+                and kids[j].find(".//w:br[@w:type='page']", NS) is None \
+                and kids[j].find("w:pPr/w:sectPr", NS) is None and i - j <= 2 \
+                and (not _ptext(kids[j]) or is_heading(_style_id(kids[j]))):
+            j -= 1
+        if j < 0 or (kids[j].find(".//w:br[@w:type='page']", NS) is None
+                     and kids[j].find("w:pPr/w:sectPr", NS) is None):
+            out.append("an embedded figure does not start on a new page (no page-break run "
+                       "before it)")
+        nxt = kids[i + 1] if i + 1 < len(kids) else None
+        if nxt is None or nxt.tag != f"{{{W}}}p" or not LEGEND_HEAD_RE.match(_ptext(nxt)):
+            out.append("an embedded figure is not followed by its legend")
+            continue
+        ext = el.find(f".//{{{WP}}}extent")
+        img_h = int(ext.get("cy", "0")) / 914400 if ext is not None else 0.0
+        legend_chars, k = 0, i + 1
+        while k < len(kids) and kids[k].tag == f"{{{W}}}p" \
+                and kids[k].find(".//w:br[@w:type='page']", NS) is None \
+                and kids[k].find(".//w:drawing", NS) is None and k - i <= 12:
+            legend_chars += len(_ptext(kids[k])) + 60
+            k += 1
+        if img_h + legend_chars / 95 * 0.25 > usable + 0.05:
+            out.append(f"figure '{_ptext(nxt)[:24]}': image ({img_h:.1f} in) and legend do not "
+                       f"fit one page ({usable:.1f} in usable)")
+    return sorted(set(out))
 
 
 def plan_counts(project: Path) -> dict:

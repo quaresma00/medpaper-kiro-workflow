@@ -3073,11 +3073,10 @@ def run_manuscript_docx(proj: Path) -> None:
                              if item.startswith("word/") and item.endswith(".xml"))
             heading_keep += _dxa.heading_keep_problems(ET.fromstring(zf.read("word/document.xml")))
     forbidden_controls = (b"<w:outlineLvl", b"<w:pageBreakBefore", b"<w:pBdr")
-    # 1.11.0: keepNext/keepLines survive only in the document body (caption/table/footnote,
-    # legend/figure), never in styles or on headings (the folding markers).
-    record("all Word XML parts remove black-square and folding controls",
+    # 1.13.0 (#10): keepNext/keepLines remain nowhere - not in the body, not in styles.
+    record("all Word XML parts remove black-square and folding controls (keep markers too)",
            builds_ok and not any(tag in blob for tag in forbidden_controls for _, blob in word_xmls)
-           and not any(t in blob for n, blob in word_xmls if n != "word/document.xml"
+           and not any(t in blob for _n, blob in word_xmls
                        for t in (b"<w:keepNext", b"<w:keepLines")) and not heading_keep,
            str(heading_keep[:2]))
     with zipfile.ZipFile(bundle / "manuscript.docx") as zf:

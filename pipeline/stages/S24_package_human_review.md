@@ -16,8 +16,12 @@ Details (presentation vs science, rework kinds, Word layout edits): `reference/s
    `08_submission/manuscript/` and `08_submission/`; rebuild affected DOCX and re-check.
    Science (07_manuscript, results, tables, figures, references) goes through
    `tools/rework.py` (`preview`, then `batch --sealed --plan ...`, `status`, `check --quiet`,
-   `mark`, `close`). Facts unchanged = presentation: no S19 return, no new round. A number
-   inside a label (Online Resource 2, Table S3) is not a fact. An S19 return needs 我确认回退.
+   `mark`, `close`). Science = changed analysis/data/results, a changed reported value, or
+   a new number that cannot be traced to the frozen results. Everything else - new numbers
+   traceable to the results (show the user each with its source), deletions, reviewer-
+   driven wording/structure, label numbers (Online Resource 2) - is presentation: checks
+   only, no S19 return, no new round, this round's 我确认这一版 covers it. An S19 return
+   needs 我确认回退.
 3. Close against the saved report; every F-numbered finding once; protected categories
    changed or `author`:
 ```

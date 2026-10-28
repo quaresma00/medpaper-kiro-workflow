@@ -24,6 +24,10 @@ FORBIDDEN_PARAGRAPH_CONTROLS = (
     "outlineLvl", "pageBreakBefore",
 )
 HEADING_ONLY_CONTROLS = ("keepNext", "keepLines")
+# 1.13.0 (#10): Word shows keepNext/keepLines/pageBreakBefore as black squares beside every
+# paragraph that carries them; none may remain anywhere (document and styles). Papers pinned
+# to an older engine keep the 1.11 rule until `wf migrate --yes` (their frozen bundles).
+STRICT_PARAGRAPH_CONTROLS = ("outlineLvl", "pageBreakBefore", "keepNext", "keepLines")
 THEMATIC_BREAK_RE = re.compile(
     r"(?m)^\s{0,3}(?:(?:\*\s*){3,}|(?:-\s*){3,}|(?:_\s*){3,})\s*$"
 )
@@ -334,7 +338,7 @@ def _docx_legend_problems(root, expected: list[str], cap: int,
 
 def _audit_docx(path: Path, style: dict, role: str,
                 planned_figures: list[str] | None = None, legend_cap: int = 180,
-                spec: dict | None = None) -> list[str]:
+                spec: dict | None = None, strict_keep: bool = False) -> list[str]:
     problems: list[str] = []
     try:
         with zipfile.ZipFile(path) as zf:
@@ -366,10 +370,13 @@ def _audit_docx(path: Path, style: dict, role: str,
             problems.append(f"{path.name}: manual line-break control remains in {name}")
         if any("\u2193" in (node.text or "") for node in part.findall(".//w:t", NS)):
             problems.append(f"{path.name}: forbidden down-arrow character remains in {name}")
-        for tag in FORBIDDEN_PARAGRAPH_CONTROLS + (
-                () if name == "word/document.xml" else HEADING_ONLY_CONTROLS):
+        tags = STRICT_PARAGRAPH_CONTROLS if strict_keep else FORBIDDEN_PARAGRAPH_CONTROLS + (
+            () if name == "word/document.xml" else HEADING_ONLY_CONTROLS)
+        for tag in tags:
             if part.findall(f".//w:{tag}", NS):
-                problems.append(f"{path.name}: forbidden {tag} paragraph control remains in {name}")
+                problems.append(f"{path.name}: forbidden {tag} paragraph control remains in {name}"
+                                + (" (Word shows it as a black square; rebuild with this "
+                                   "engine's build_docx.py)" if tag.startswith("keep") else ""))
         if part.findall(".//w:pBdr", NS):
             problems.append(f"{path.name}: paragraph border/horizontal-rule residue remains in {name}")
     from .. import docxaudit as _dxa
@@ -503,9 +510,11 @@ def docx_bundle_ready(ctx: Ctx) -> Result:
         if role == "supplementary_pdf" and (path.suffix.casefold() != ".pdf" or not path.is_file()):
             problems.append(f"supplementary_pdf: {path.name} is not an existing PDF")
         if path.suffix.casefold() == ".docx":
+            from ..state import version_tuple
+            strict = version_tuple(ctx.state.engine_pin) >= (1, 13, 0)
             problems.extend(_audit_docx(path, style, role, planned,
                                         journalspec.legend_cap(journalspec.load(ctx.project))
-                                        or journalspec.NO_CAP, spec))
+                                        or journalspec.NO_CAP, spec, strict_keep=strict))
     for role in ("manuscript", "title_page", "cover_letter"):
         if not any(p.suffix.casefold() == ".docx" for p in roles.get(role, [])):
             problems.append(f"no DOCX for required role '{role}'")
@@ -529,6 +538,8 @@ def docx_bundle_ready(ctx: Ctx) -> Result:
     # 1.12.0 (B4): docx_keep_with_next merged here - the same bundle DOCX audit, one gate line.
     # Gated by the stage spec so S24/S25 keep their pre-1.12 behaviour unless they ask for it.
     pinned = getattr(ctx.state, "pin_excludes", None)
+    # 1.13.0 (#10): this is now the layout audit - zero keepNext/keepLines/pageBreakBefore
+    # (document and effective styles) plus the structural checks (docxaudit.keep_problems).
     if ctx.spec.get("keep_with_next") and not (pinned and pinned(ctx.stage.id, "1.11.0")):
         from .v1110 import docx_keep_with_next
         keep = docx_keep_with_next(ctx)

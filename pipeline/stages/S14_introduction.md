@@ -23,8 +23,10 @@ this stage only.
 ```
 .\.venv\Scripts\python.exe tools/manuscript/writer_bundle.py build --stage S14_introduction
 ```
-3. Check the soft upper budgets (no lower bound) and the engineering-language lint:
+3. Polish this section now (medical register, de-AI, de-engineering, prose not lists),
+   then check the soft upper budgets (no lower bound) and `section_language_clean`:
 ```
+.\.venv\Scripts\python.exe tools/text/polish.py lint --file 07_manuscript/introduction.md
 .\.venv\Scripts\python.exe tools/wf.py config list        # intro_words_max, intro_refs_min/max
 .\.venv\Scripts\python.exe tools/wf.py check
 ```

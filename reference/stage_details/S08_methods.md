@@ -15,7 +15,9 @@ Write a concise, journal-native main Methods section. Create a supplementary Met
 only when reproducibility requires detail that would obscure the main narrative.
 
 ## Inputs
-- `01_protocol/protocol_final.md` and `01_protocol/protocol_diff.md`
+- `01_protocol/protocol_final.md` (the analysis actually performed; 1.13.0: the internal
+  plan-change log is never an input - Methods describe what was done, never an initial plan
+  or protocol deviations, except a registered meta-analysis under PRISMA 2020 item 24c)
 - `02_data/codebook.md`, `02_data/provenance.md`
 - `03_analysis/method_scan.md` (for the methods you cite)
 - `03_analysis/results/*.json` (for every number)

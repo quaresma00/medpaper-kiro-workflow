@@ -91,22 +91,26 @@ def compare(project: Path, original: Path, copy: Path) -> list[str]:
     before, after = text_of(original), text_of(copy)
     for s in admin:
         before, after = before.replace(s, " "), after.replace(s, " ")
+    # 1.13.0 (#9): the same rule as every post-freeze change - a changed reported value or a
+    # number that cannot be traced to the results is refused; traceable additions and
+    # deletions are presentation (listed by `final_copy.py check`, covered by the author's
+    # confirmation).
+    ch = presentation.number_changes(presentation.token_seq(before), presentation.token_seq(after))
+    for o, n in ch["changed"]:
+        problems.append(f"{copy.name}: a reported value changed (numbers {', '.join(o)[:80]} -> "
+                        f"{', '.join(n)[:80]})")
+    if ch["added"]:
+        index = presentation.results_index(project)
+        untraced = [t for t in sorted(ch["added"]) if presentation.trace_number(project, t, index) is None]
+        if untraced:
+            problems.append(f"{copy.name}: numbers added that no results JSON holds: "
+                            + ", ".join(untraced)[:160])
+        problems += [f"{copy.name}: {p}" for p in ratio_problems(after)]
     fb, fa = presentation.text_facts(before), presentation.text_facts(after)
-    for key, label in (("numbers", "numbers/citations"), ("artifacts", "figure/table references")):
-        lost = Counter(fb[key]) - Counter(fa[key])
-        new = Counter(fa[key]) - Counter(fb[key])
-        if lost:
-            problems.append(f"{copy.name}: {label} removed: " + ", ".join(sorted(lost.elements()))[:160])
-        if new and key == "numbers":
-            # 1.11.0 (#3b): a small correction may add numbers that already exist in the
-            # executed results (n/N and its percentage checked); anything else is refused.
-            untraced = [t for t in sorted(new.elements()) if not traceable(project, t)]
-            if untraced:
-                problems.append(f"{copy.name}: numbers added that no results JSON holds: "
-                                + ", ".join(untraced)[:160])
-            problems += [f"{copy.name}: {p}" for p in ratio_problems(after)]
-        elif new:
-            problems.append(f"{copy.name}: {label} added: " + ", ".join(sorted(new.elements()))[:160])
+    new_refs = Counter(fa["artifacts"]) - Counter(fb["artifacts"])
+    unknown = [a for a in new_refs if a not in set(fb["artifacts"])]
+    if unknown:
+        problems.append(f"{copy.name}: figure/table references added: " + ", ".join(sorted(unknown))[:160])
     target = journalspec.load(project)
     if journalspec.blinded(target) and not any(k in copy.name.casefold()
                                                for k in ("title", "cover", "copyright")):

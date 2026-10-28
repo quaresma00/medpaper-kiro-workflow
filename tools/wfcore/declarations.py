@@ -76,6 +76,48 @@ def _types(src: dict) -> list[str]:
     return t if isinstance(t, list) else [t]
 
 
+def needs_human_coding(idea: dict) -> bool | None:
+    """1.13.0 (#7): does the study basis declare manual abstraction, coding or reading?
+
+    Only then do coder qualifications, double data entry, adjudication or inter-rater
+    agreement come up. `data_source.manual_abstraction` (true/false) decides; without it a
+    meta-analysis / systematic review counts as manual extraction, public databases and
+    registry files as automated, anything else as undeclared (None = ask once at S01)."""
+    src = idea.get("data_source") if isinstance(idea.get("data_source"), dict) else {}
+    flag = src.get("manual_abstraction", idea.get("manual_abstraction"))
+    if isinstance(flag, bool):
+        return flag
+    if idea.get("study_design") in ("meta_analysis", "systematic_review"):
+        return True
+    types = {t for t in _types(src) if t}
+    if types and types <= {"public_database", "third_party_registry"}:
+        return False
+    return None
+
+
+def review_rules(project: Path) -> list[str]:
+    """Study-specific lines for the reviewer brief (multi-person checks, protocol talk)."""
+    from .checks.text import deviation_reporting_allowed
+    try:
+        idea = json.loads((Path(project) / IDEA).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        idea = {}
+    idea = idea if isinstance(idea, dict) else {}
+    out = []
+    if needs_human_coding(idea) is not True:
+        name = str((idea.get("data_source") or {}).get("name", "")).strip() \
+            if isinstance(idea.get("data_source"), dict) else ""
+        out.append("Study basis: data are extracted by code" + (f" from {name}" if name else "")
+                   + " (no manual abstraction or coding). Do not request double data entry, "
+                   "multiple coders, adjudicators or inter-rater agreement; judge the "
+                   "documented extraction rules instead.")
+    if not deviation_reporting_allowed(project):
+        out.append("The protocol is internal (not a registered meta-analysis): do not ask for "
+                   "registration, protocol deviations or an initial-versus-final plan; judge the "
+                   "analysis as described.")
+    return out
+
+
 def assess(idea: dict) -> dict:
     """Conclusion + basis for ethics, consent and data availability; open author questions."""
     design = idea.get("study_design")

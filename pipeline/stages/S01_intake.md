@@ -16,9 +16,11 @@ Details (JSON template, notes headings): `reference/stage_details/S01_intake.md`
 - Anything in `open_questions` that would change the design (population, exposure
   definition, outcome timing).
 - `study_design` / `data_source` if the idea does not state them (ethics, consent and data
-  availability are later judged from them).
-- Who codes or adjudicates variables, if anyone: role, specialty, years of experience
-  (`human_coders`).
+  availability are later judged from them), incl. `data_source.manual_abstraction`: true
+  only if people read records/images/text and code variables by hand. Public databases,
+  coded EHR fields and registry files are false: then never ask about coders, double data
+  entry, adjudicators or agreement. Only when true: each coder's role, specialty, years of
+  experience (`human_coders`).
 - British spelling only if wanted (`wf config set spelling british`; default american).
 
 ## Outputs

@@ -40,13 +40,16 @@ PKG_REL = "http://schemas.openxmlformats.org/package/2006/relationships"
 NS = {"w": W, "r": R, "rel": PKG_REL}
 TEXT_ROLES = {"manuscript", "title_page", "cover_letter", "supplementary",
               "statements", "figure_legends"}
-# 1.11.0 (#1e): outline level and page-break-before are removed everywhere. keepNext/keepLines
-# are removed only from styles and headings (Word's collapse markers); the builder then sets
-# them where they bind caption -> table -> footnote and legend <-> figure (_keep_together).
+# 1.13.0 (#10): no paragraph and no style carries keepNext, keepLines or pageBreakBefore - Word
+# shows each as a black square beside every table row, caption and legend (1.11.0 had set them
+# on purpose). Layout is kept by structure instead: each table starts its own section (rows
+# cantSplit, header rows repeat, footnote right after the table); each embedded figure starts
+# after an explicit page-break run and is sized so the image and its legend fit one page.
 FORBIDDEN_PARAGRAPH_CONTROLS = (
-    "outlineLvl", "pageBreakBefore",
+    "outlineLvl", "pageBreakBefore", "keepNext", "keepLines",
 )
-HEADING_ONLY_CONTROLS = ("keepNext", "keepLines")
+HEADING_ONLY_CONTROLS: tuple[str, ...] = ()
+PAGE_BREAK_MD = '```{=openxml}\n<w:p><w:r><w:br w:type="page"/></w:r></w:p>\n```'
 THEMATIC_BREAK_RE = re.compile(
     r"(?m)^\s{0,3}(?:(?:\*\s*){3,}|(?:-\s*){3,}|(?:_\s*){3,})\s*$"
 )
@@ -261,78 +264,74 @@ def _remove_heading_metadata(paragraph, *, strip_numbering: bool = True) -> None
             ppr.remove(node)
 
 
-def _set_keep(p_el, next_: bool = True, lines: bool = True) -> None:
-    ppr = p_el.get_or_add_pPr()
-    for tag, on in (("w:keepNext", next_), ("w:keepLines", lines)):
-        if on and ppr.find(qn(tag)) is None:
-            node = OxmlElement(tag)
-            # keepNext/keepLines precede numbering/spacing in CT_PPr order
-            anchor = ppr.find(qn("w:pStyle"))
-            if anchor is not None:
-                anchor.addnext(node)
-            else:
-                ppr.insert(0, node)
+KEEP_TAGS = ("w:keepNext", "w:keepLines", "w:pageBreakBefore")
 
 
-def _keep_together(doc) -> None:
-    """1.11.0 (#1e): caption -> table -> footnote and legend <-> figure on one page."""
-    body = doc.element.body
-    kids = list(body)
-    w_p, w_tbl = qn("w:p"), qn("w:tbl")
+def _strip_keep_markers(doc) -> None:
+    """1.13.0 (#10): remove keepNext/keepLines/pageBreakBefore from every paragraph (body,
+    table cells, section paragraphs), every style and the document defaults."""
+    roots = [doc.element.body, doc.styles.element]
+    for root in roots:
+        for ppr in list(root.iter(qn("w:pPr"))):
+            for tag in KEEP_TAGS + ("w:outlineLvl",):
+                for node in ppr.findall(qn(tag)):
+                    ppr.remove(node)
 
-    def text(el) -> str:
-        return "".join(t.text or "" for t in el.iter(qn("w:t"))).strip()
 
-    for i, el in enumerate(kids):
-        if el.tag == w_tbl:
-            prev = kids[i - 1] if i else None
-            if prev is not None and prev.tag == w_p and docxaudit.TABLE_CAPTION_RE.match(text(prev)):
-                _set_keep(prev)
-            rows = el.findall(qn("w:tr"))
-            for r, row in enumerate(rows):
-                trpr = row.find(qn("w:trPr"))
-                if trpr is None:
-                    trpr = OxmlElement("w:trPr")
-                    row.insert(0, trpr)
-                if trpr.find(qn("w:cantSplit")) is None:
-                    trpr.insert(0, OxmlElement("w:cantSplit"))
-                for p in row.iter(w_p):
-                    _set_keep(p, next_=True, lines=True)
-            notes = []
-            for nxt in kids[i + 1:i + 9]:
-                if nxt.tag != w_p or not text(nxt) or nxt.find(".//" + qn("w:sectPr")) is not None:
-                    break
-                sid = nxt.find(qn("w:pPr") + "/" + qn("w:pStyle"))
-                if sid is not None and docxaudit.is_heading(sid.get(qn("w:val")) or ""):
-                    break
-                if docxaudit.TABLE_CAPTION_RE.match(text(nxt)):
-                    break
-                notes.append(nxt)
-            if not notes and rows:  # nothing follows: the last row need not keep with it
-                for p in rows[-1].iter(w_p):
-                    node = p.get_or_add_pPr().find(qn("w:keepNext"))
-                    if node is not None:
-                        node.getparent().remove(node)
-            for p in notes[:-1]:
-                _set_keep(p)
-        elif el.tag == w_p and el.find(".//" + qn("w:drawing")) is not None:
-            # legend before the image (embedded figures): legend heading + body keep with it
-            run = []
-            for j in range(i - 1, max(i - 9, -1), -1):
-                if kids[j].tag != w_p or not text(kids[j]):
-                    break
-                run.append(kids[j])
-                if docxaudit.LEGEND_HEAD_RE.match(text(kids[j])):
-                    for p in run:
-                        _set_keep(p)
-                    break
-            nxt = kids[i + 1] if i + 1 < len(kids) else None
-            if nxt is not None and nxt.tag == w_p and docxaudit.LEGEND_HEAD_RE.match(text(nxt)):
-                _set_keep(el)
-    # grouped legends (figures at the end): a legend never splits across pages
-    for el in kids:
-        if el.tag == w_p and docxaudit.LEGEND_HEAD_RE.match(text(el)):
-            _set_keep(el, next_=True, lines=True)
+def _table_rows_hold(doc) -> None:
+    """Table layout by structure, never by keep markers: every row cantSplit (row property,
+    no Word marker); header rows already repeat (tblHeader) from _table_xml."""
+    for row in doc.element.body.iter(qn("w:tr")):
+        trpr = row.find(qn("w:trPr"))
+        if trpr is None:
+            trpr = OxmlElement("w:trPr")
+            row.insert(0, trpr)
+        if trpr.find(qn("w:cantSplit")) is None:
+            trpr.insert(0, OxmlElement("w:cantSplit"))
+
+
+def _png_size(path: Path) -> tuple[int, int] | None:
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(24)
+    except OSError:
+        return None
+    if head[:8] == b"\x89PNG\r\n\x1a\n" and head[12:16] == b"IHDR":
+        import struct
+        w, h = struct.unpack(">II", head[16:24])
+        return (w, h) if w and h else None
+    return None
+
+
+def figure_size(img: Path, legend: str, style: dict | None, presentation: dict | None = None,
+                extra_lines: int = 0) -> tuple[float, float]:
+    """(width, height) in inches so the image plus its estimated legend fit the usable page
+    height; the width never exceeds the text width or the journal's double-column width."""
+    style = style or {}
+    w_tw, h_tw, m_tw = _page_geometry(style)
+    usable_w, usable_h = (w_tw - 2 * m_tw) / 1440, (h_tw - 2 * m_tw) / 1440
+    max_w = min(usable_w, 6.5)
+    mm = (presentation or {}).get("double_column_mm") or (presentation or {}).get("max_width_mm")
+    try:
+        if mm:
+            max_w = min(max_w, float(mm) / 25.4)
+    except (TypeError, ValueError):
+        pass
+    size = _png_size(img)
+    aspect = (size[1] / size[0]) if size else 0.75
+    font = float(style.get("body_font_pt", 12))
+    spacing = float(style.get("line_spacing", 1.5))
+    per_line = max(40, int(usable_w * 72 / (font * 0.5)))
+    paras = [p for p in re.split(r"\n\s*\n", legend) if p.strip()]
+    lines = extra_lines + sum(max(1, -(-len(" ".join(p.split())) // per_line)) for p in paras)
+    legend_h = lines * font * spacing / 72 + 0.15 * len(paras) + 0.25
+    avail = max(1.5, usable_h - legend_h - 0.3)
+    width = max_w
+    height = width * aspect
+    if height > avail:
+        height = avail
+        width = height / aspect
+    return round(width, 2), round(height, 2)
 
 
 def _source_problems(kind: str, inputs: list[Path]) -> list[str]:
@@ -497,6 +496,7 @@ def normalize_docx(path: Path, style: dict, kind: str, *, legend_bold: bool = Tr
             node = ppr.find(qn(tag))
             if node is not None:
                 ppr.remove(node)
+    _strip_keep_markers(doc)  # 1.13.0: every style (Caption, Table Caption, ...) and default
 
     _flatten_hyperlinks(doc)
     _replace_manual_line_breaks(doc)
@@ -539,7 +539,8 @@ def normalize_docx(path: Path, style: dict, kind: str, *, legend_bold: bool = Tr
         for run in p.runs:
             _set_run(run, font, size)
     _format_references(doc, font, body_pt, reference_separator)
-    _keep_together(doc)
+    _table_rows_hold(doc)
+    _strip_keep_markers(doc)  # 1.13.0 (#10): structure keeps the layout, no Word markers
     _add_page_numbers(doc, font, body_pt)
 
     margin = Inches(float(style["margins_in"]))
@@ -1151,19 +1152,35 @@ def prepare_source(kind: str, inputs: list[Path], project: Path, workdir: Path,
             legends = _style_legends(legends, journalspec.legend_style(target))
             counts = docxaudit.plan_counts(project)
             plan = counts["plan"]
-            if target.get("embed_figures") is True:
+            if target.get("embed_figures") is True and not target.get("figures_at_end"):
+                # 1.13.0 (#10): each figure starts after an explicit page-break run (never the
+                # pageBreakBefore property), then the image, then its legend; the image is
+                # sized so image + estimated legend fit the usable page height.
+                from wfcore import presentparams
+                pres = presentparams.params(project)
                 entries = {docxaudit.canon_figure_id(str(e.get("id", ""))): e
                            for e in plan.get("main_figures", [])}
-                out, last = [], 0
                 blocks = list(_LEGEND_H_RE.finditer(legends))
+                head_text = legends[:blocks[0].start()].strip() if blocks else ""
+                # Word tables end with a next-page section break; a page break right after it
+                # would leave a blank page before the first figure.
+                tables_before = target.get("word_tables") is True and bool(plan.get("main_tables"))
+                out = []
                 for i, b in enumerate(blocks):
                     end = blocks[i + 1].start() if i + 1 < len(blocks) else len(legends)
-                    out.append(legends[last:end].rstrip())
+                    block = legends[b.start():end].rstrip()
                     img = _figure_image(project, entries.get(f"figure {b.group(2).lower()}", {}))
+                    if i > 0 or not tables_before:
+                        out.append(PAGE_BREAK_MD)
+                    if i == 0 and head_text:
+                        out.append(head_text)
                     if img is not None:
-                        out.append(f"![]({img.as_posix()}){{width=6in}}")
-                    last = end
-                out.append(legends[last:].rstrip())
+                        w, h = figure_size(img, block, style, pres,
+                                           extra_lines=2 if i == 0 and head_text else 1)
+                        out.append(f"![]({img.as_posix()}){{width={w}in height={h}in}}")
+                    out.append(block)
+                if not blocks:
+                    out.append(legends.rstrip())
                 legends = "\n\n".join(x for x in out if x) + "\n"
             if target.get("word_tables") is True and plan.get("main_tables"):
                 # Each table on a new page, in its own portrait/landscape section; the section

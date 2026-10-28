@@ -30,6 +30,11 @@ Write the Results from the final tables and figures (1.10.0: S09 runs after S10/
    Those belong in the Discussion.
 5. Do not restate a table row by row. The prose carries the findings the reader must not
    miss; the table carries the rest.
+6. Polish this section before advancing (medical register, de-AI, de-engineering, no
+   processing log, prose not lists); fix every blocking item (`section_language_clean`):
+```
+.\.venv\Scripts\python.exe tools/text/polish.py lint --file 07_manuscript/results.md
+```
 
 ## Outputs
 - `07_manuscript/results.md`

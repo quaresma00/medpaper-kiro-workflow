@@ -13,11 +13,15 @@ Details (move-by-move structure, inputs): `reference/stage_details/S16_discussio
 2. Structure, as continuous prose without subheadings (only if the journal requires them):
    principal finding (no new numbers) -> comparison with prior work (every deep-read paper,
    with a methodological reason for disagreement) -> interpretation, labelled as inference ->
-   proportionate implications -> specific strengths and limitations (every protocol deviation,
-   direction of each bias) -> a two-to-three-sentence conclusion. Adjacent citations in one
-   group `[@a; @b]`.
-3. Review the written `07_manuscript/discussion.md`, then `wf check` (engineering language,
-   prose, citations, deep reads cited, soft word/reference budget).
+   proportionate implications -> specific strengths and limitations (direction of each
+   bias; never an initial plan or protocol deviations) -> a two-to-three-sentence
+   conclusion. Adjacent citations in one group `[@a; @b]`.
+3. Polish this section now (medical register, de-AI, de-engineering, no pipeline history,
+   prose not lists, abbreviations); fix every blocking item, then `wf check`
+   (`section_language_clean`, citations, deep reads cited, soft word/reference budget):
+```
+.\.venv\Scripts\python.exe tools/text/polish.py lint --file 07_manuscript/discussion.md
+```
 
 ## Outputs
 - `07_manuscript/discussion.md`

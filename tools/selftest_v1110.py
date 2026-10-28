@@ -217,39 +217,45 @@ def run_keep(tmp: Path, record, section) -> None:
     from docx import Document
     from manuscript import build_docx as bd
     from wfcore import docxaudit as da
-    section("1.11.0 #1e Word keeps caption -> table -> footnote and legend -> figure together")
+    section("1.11.0 #1e / 1.13.0 #10 Word layout by structure, never by keep markers")
     out = tmp / "keep.docx"
     out.parent.mkdir(parents=True, exist_ok=True)
     d = Document()
     d.add_heading("Results", level=1)
-    d.add_paragraph("Table 1. Characteristics of reports")
+    cap = d.add_paragraph("Table 1. Characteristics of reports")
+    cap.paragraph_format.keep_with_next = True  # what 1.11.0 used to write
     t = d.add_table(rows=3, cols=2)
     for r in range(3):
         for c in range(2):
             t.cell(r, c).text = f"r{r}c{c}"
+            t.cell(r, c).paragraphs[0].paragraph_format.keep_together = True
     d.add_paragraph("Data are n (%).")
-    d.add_paragraph("Abbreviations: CI, confidence interval.")
     d.add_heading("Discussion", level=1)
+    d.styles["Normal"].paragraph_format.keep_with_next = True
     d.save(out)
     with zipfile.ZipFile(out) as zf:
-        before = da.keep_problems(ET.fromstring(zf.read("word/document.xml")))
+        before = da.keep_problems(ET.fromstring(zf.read("word/document.xml")),
+                                  ET.fromstring(zf.read("word/styles.xml")))
     d = Document(out)
     for p in d.paragraphs:
         bd._remove_heading_metadata(p, strip_numbering=False)
-    bd._keep_together(d)
+    bd._table_rows_hold(d)
+    bd._strip_keep_markers(d)
     d.save(out)
     bd._sanitize_package_xml(out, "Arial")
     with zipfile.ZipFile(out) as zf:
         root = ET.fromstring(zf.read("word/document.xml"))
         styles = zf.read("word/styles.xml")
-    after = da.keep_problems(root)
-    record("unbound captions/footnotes are detected; the builder binds them and keeps them after sanitising",
-           before and not after and b"keepNext" not in styles
-           and b"keepNext" in ET.tostring(root), f"{before} | {after}")
+    after = da.keep_problems(root, ET.fromstring(styles))
+    record("keep markers in paragraphs, cells and styles are detected; the builder removes them "
+           "all and holds table rows with cantSplit instead",
+           any("black squares" in b for b in before) and any("style(s)" in b for b in before)
+           and not after and b"keepNext" not in styles and b"keepNext" not in ET.tostring(root)
+           and b"cantSplit" in ET.tostring(root), f"{before} | {after}")
     record("headings carry no keepNext/keepLines collapse markers", not da.heading_keep_problems(root))
-    record("FORBIDDEN controls are outline level and page-break-before only; keep is heading/style-only",
-           bd.FORBIDDEN_PARAGRAPH_CONTROLS == ("outlineLvl", "pageBreakBefore")
-           and bd.HEADING_ONLY_CONTROLS == ("keepNext", "keepLines"))
+    record("FORBIDDEN controls now include keepNext/keepLines everywhere (1.13.0)",
+           bd.FORBIDDEN_PARAGRAPH_CONTROLS == ("outlineLvl", "pageBreakBefore", "keepNext",
+                                               "keepLines") and bd.HEADING_ONLY_CONTROLS == ())
 
 
 def run_review(tmp: Path, record, section) -> None:

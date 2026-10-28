@@ -63,6 +63,18 @@ conclusion_strength | other, and say whether it is presentation or scientific.
 Write the complete report to {bundle}/report.md - the only file you may write."""
 
 
+def brief(project, rnd: dict, bundle) -> str:
+    """The neutral brief plus the study-specific rules (1.13.0: no multi-person checks for
+    automated extraction, no protocol-deviation requests outside a registered meta-analysis)."""
+    from .declarations import review_rules
+    text = BRIEF.format(rid=rnd["id"], scope=rnd["scope"], mode=rnd["mode"], bundle=bundle)
+    try:
+        rules = review_rules(project)
+    except Exception:  # noqa: BLE001 - the brief must always print
+        rules = []
+    return text + ("\n" + "\n".join(rules) if rules else "")
+
+
 def is_confirmation(words: str) -> bool:
     text = str(words or "").strip().strip("\"'“”‘’「」『』").strip()
     text = text.rstrip("。.!！ ").strip()
@@ -241,7 +253,7 @@ def write_bundle(project: Path, rnd: dict) -> Path:
         shutil.rmtree(out)
     (out / "files").mkdir(parents=True)
     lines = [f"# Review bundle {rnd['id']} ({rnd['scope']}, {rnd['mode']})", "",
-             BRIEF.format(rid=rnd["id"], scope=rnd["scope"], mode=rnd["mode"], bundle=out), "",
+             brief(project, rnd, out), "",
              "## Files (copy -> source, sha256)", ""]
     docx = []
     for rel in rnd["reviewed"]:

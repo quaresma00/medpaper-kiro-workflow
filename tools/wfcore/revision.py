@@ -293,7 +293,7 @@ def certified_drift(project: Path) -> list[str]:
                 # 1.11.0 (#3a): a presentation-layer edit with unchanged facts is not drift.
                 if p.is_file() and meta.get("layer") == "presentation" \
                         and meta.get("facts") is not None \
-                        and presentation.facts(project, rel) == meta["facts"]:
+                        and presentation.same_facts(presentation.facts(project, rel), meta["facts"]):
                     continue
                 drift.append(rel)
     revision = active(project)

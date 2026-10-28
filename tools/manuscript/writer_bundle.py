@@ -216,7 +216,10 @@ def build(project: Path, stage: str, target: str | None = None) -> Path:
     proto = next((p for p in (project / "01_protocol/protocol_final.md",
                               project / "01_protocol/protocol_v1.md") if p.is_file()), None)
     if proto:
-        files["protocol_summary.md"] = clean(_read(proto), names)
+        # 1.13.0 (#8): plan-versus-practice history never reaches the writer - a protocol
+        # section on deviations (older papers) is dropped; the paper describes what was done.
+        text = re.sub(r"(?ms)^#{1,6}\s+Deviations\b.*?(?=^#{1,6}\s|\Z)", "", _read(proto))
+        files["protocol_summary.md"] = clean(text, names)
     if stage in ("S16_discussion", "S19_human_review"):
         notes = sorted((project / "06_refs/deepread").glob("*.md"))
         if notes:

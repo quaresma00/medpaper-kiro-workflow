@@ -74,8 +74,7 @@ def _main() -> int:
                   f"  {bundle / 'MANIFEST.md'}")
             print("Brief to send unchanged - add nothing about known deviations, earlier "
                   "conclusions or what you expect:")
-            print("  " + rr.BRIEF.format(rid=rnd["id"], scope=scope, mode=rnd["mode"],
-                                          bundle=bundle).replace("\n", "\n  "))
+            print("  " + rr.brief(project, rnd, bundle).replace("\n", "\n  "))
             print(f"The reviewer writes its full report to {bundle / 'report.md'} (its only "
                   "writable file); then close with --report (defaults to that file). Do not "
                   "paraphrase the findings.")

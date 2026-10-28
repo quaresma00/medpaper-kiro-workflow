@@ -460,13 +460,21 @@ def _classify_for_check(project: Path, pipe, state: State, path: Path, revision:
     revision["classification"] = verdict
     if verdict["class"] == "presentation":
         summary = "; ".join(i["request"][:120] for i in revision["items"])
+        added = verdict.get("added_numbers") or []
+        if added:
+            summary += "; added numbers: " + ", ".join(f"{a['number']} <- {a['source']}"
+                                                       for a in added[:20])
         touched = presentation.record_delta(project, revision["round_id"], summary, changed)
         revision["presentation_delta"] = {"at": verdict["at"], "files": sorted(changed), **touched}
         _write_round(path, revision)
-        print(f"PRESENTATION change (facts unchanged in {len(verdict['checked'])} reviewed file(s)): "
-              "deterministic checks only; no return to S19, no new review round, no re-confirmation.")
+        print(f"PRESENTATION change ({len(verdict['checked'])} reviewed file(s); every new number "
+              "traces to the frozen results): deterministic checks only; no return to S19, no "
+              "new review round, no re-confirmation (the S24 confirmation covers it).")
         print("changed: " + (", ".join(sorted(changed)) or "none"))
-        print("Show the user this change summary when reporting the round.")
+        for line in presentation.change_summary(verdict):
+            print(line)
+        print("Show the user this change summary (each added number with its source) when "
+              "reporting the round.")
         return None
     print("SCIENTIFIC change: facts differ from the reviewed version:")
     for reason in verdict["reasons"][:12]:
@@ -520,9 +528,11 @@ def _rewind_request(items: list[dict]) -> str:
             "approvals). Nothing was moved. Show the user the reasons above (or "
             "`rework.py preview`) and ask; only the exact words '" + REWIND_PHRASES[0]
             + "' (or '" + REWIND_PHRASES[1] + "') authorise it: rework.py confirm-rewind --words "
-            "\"<user's words>\" (or seal --rewind-words ...). Otherwise restore the facts, or "
-            "reclassify: a number inside a label (Online Resource 2, Table S3, panel/item "
-            "numbers) is not a fact. Items: " + "; ".join(i.get("request", "")[:60] for i in items[:4]))
+            "\"<user's words>\" (or seal --rewind-words ...). Otherwise restore the facts: only a "
+            "changed analysis/data/results, a changed reported value or a number that cannot be "
+            "traced to the frozen results is science (1.13.0); traceable new numbers, deletions "
+            "and label numbers (Online Resource 2, Table S3) are presentation. Items: "
+            + "; ".join(i.get("request", "")[:60] for i in items[:4]))
 
 
 def _cmd_preview(project: Path, state: State) -> int:
@@ -539,6 +549,8 @@ def _cmd_preview(project: Path, state: State) -> int:
           f"({len(changed)} changed file(s), {len(verdict['checked'])} fact-checked); nothing recorded")
     for reason in verdict["reasons"][:12]:
         print(f"  - {reason}")
+    for line in presentation.change_summary(verdict):
+        print(line)
     if verdict["class"] == "scientific" and revision["review_stage"] == "S24_package_human_review":
         print("check would STOP and ask for '" + REWIND_PHRASES[0] + "' before any S19 return")
     return 0

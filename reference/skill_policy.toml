@@ -278,7 +278,7 @@ name = "write-protocol"
 verdict = "blocked"
 replaced_by = "S03 protocol v1, S06 protocol final"
 reason = """Produces a different protocol structure. The gate checks for specific headings,
-including 'Deviations from protocol v1', which is what keeps a retrofitted protocol honest."""
+and the internal .wf/protocol_changes.md log is what keeps a retrofitted protocol honest."""
 
 [[skill]]
 name = "analyze-stats"
