@@ -61,12 +61,19 @@ unlooked-at.
 4. The builder applies journal-specified size and spacing, with the recorded fallback only
    where the guide is silent. It forces all text black, removes hyperlinks, uses one
    font family throughout, and maps Markdown section headings to the Normal-based
-   `SectionHeading` paragraph style. Across every Word XML part it removes `outlineLvl` and
-   `pageBreakBefore`; `keepNext`/`keepLines` are removed from styles and headings only, so
-   headings have neither a collapsible marker nor the black-square indicator. 1.11.0: they are
-   kept where they bind table caption -> table -> footnote and legend <-> figure, rows are
-   `cantSplit`, grouped legends never split (`docx_keep_with_next`). Alternatively the
-   journal's figures-at-end layout keeps all legends together, never interleaved.
+   `SectionHeading` paragraph style. Across every Word XML part (body, table cells, styles,
+   document defaults) it removes `outlineLvl`, `pageBreakBefore`, `keepNext` and `keepLines`.
+   Word draws a black square beside every paragraph that carries one of the last three, so a
+   1.12.0 build showed one before every table title, table row, table footnote, figure title
+   and legend; since 1.13.0 the delivered DOCX has none anywhere (no black squares is a
+   delivery requirement, audited by `docx_bundle_ready`). Layout is kept by structure instead:
+   each table starts its own portrait/landscape section, rows are `cantSplit`, the header row
+   repeats (`tblHeader`) and the footnote follows the table; each embedded figure starts after
+   an explicit page-break run, at a readable size (never below `FIGURE_MIN_PAGE_FRACTION` of
+   the usable page height, or its natural size if smaller), with its legend after it - a
+   legend too long to share the page continues on the next page rather than shrinking the
+   figure. Alternatively the journal's figures-at-end layout keeps all legends together,
+   never interleaved.
    It also converts Shift+Enter/text-wrapping controls to ordinary paragraphs and rejects the
    literal down-arrow character. Use blank lines for paragraph boundaries in Markdown and
    natural wrapping within paragraphs; never pad layout with manual line breaks.
@@ -195,8 +202,9 @@ Before the user submits, list for them what the portal will ask beyond the files
   fixed forms retain their mandated non-Markdown format.
 - All text is black; no external hyperlinks; no Aptos/theme-font leakage when the selected
   font is Times New Roman; no outline numbering, `outlineLvl`, `pageBreakBefore`,
-  paragraph-border residue or collapsible heading level in any Word XML; keepNext/keepLines
-  only on captions, table rows, footnotes and legends (never on headings or styles).
+  paragraph-border residue or collapsible heading level in any Word XML; no black squares:
+  zero keepNext/keepLines/pageBreakBefore on any paragraph, table cell, caption, footnote,
+  legend, heading or style; embedded figures at a readable size, never thumbnails.
 - `References` and `Figure legends` must be visible in the manuscript.
 - Any title-page reference count must equal the distinct citations actually used in the
   canonical manuscript; both the Markdown source and generated Word title page are checked.

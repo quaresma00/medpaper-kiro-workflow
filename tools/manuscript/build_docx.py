@@ -49,6 +49,9 @@ FORBIDDEN_PARAGRAPH_CONTROLS = (
     "outlineLvl", "pageBreakBefore", "keepNext", "keepLines",
 )
 HEADING_ONLY_CONTROLS: tuple[str, ...] = ()
+# Embedded figures keep at least this share of the usable page height (or their natural size if
+# smaller); a legend too long to share the page continues on the next page instead.
+FIGURE_MIN_PAGE_FRACTION = 0.55
 PAGE_BREAK_MD = '```{=openxml}\n<w:p><w:r><w:br w:type="page"/></w:r></w:p>\n```'
 THEMATIC_BREAK_RE = re.compile(
     r"(?m)^\s{0,3}(?:(?:\*\s*){3,}|(?:-\s*){3,}|(?:_\s*){3,})\s*$"
@@ -325,11 +328,18 @@ def figure_size(img: Path, legend: str, style: dict | None, presentation: dict |
     paras = [p for p in re.split(r"\n\s*\n", legend) if p.strip()]
     lines = extra_lines + sum(max(1, -(-len(" ".join(p.split())) // per_line)) for p in paras)
     legend_h = lines * font * spacing / 72 + 0.15 * len(paras) + 0.25
-    avail = max(1.5, usable_h - legend_h - 0.3)
+    avail = usable_h - legend_h - 0.3
     width = max_w
     height = width * aspect
-    if height > avail:
-        height = avail
+    # A figure is never shrunk below a readable size to make a long legend share its page:
+    # at most to FIGURE_MIN_PAGE_FRACTION of the usable height (or its natural size if smaller),
+    # and the rest of the legend then flows onto the next page. 1.13.0 had a 1.5 in floor, which
+    # turned two full-width forest/flow figures into thumbnails beside 230-300-word legends.
+    floor = min(height, usable_h * FIGURE_MIN_PAGE_FRACTION)
+    cap = usable_h - (extra_lines + 1) * font * spacing / 72 - 0.3  # image + "Fig. N" line
+    target = min(height, max(avail, floor), cap)
+    if target < height:
+        height = target
         width = height / aspect
     return round(width, 2), round(height, 2)
 

@@ -787,6 +787,34 @@ def run_g4(tmp: Path, record, section) -> None:
         break
     record("G4 the audit (docx_bundle_ready keep_with_next) reports a keep marker as a black square",
            any("black squares" in x for x in docxaudit.keep_problems(marked, styles)))
+    # A long legend never turns the figure into a thumbnail: it keeps >= the minimum page share
+    # (or its natural size) and the legend continues on the next page.
+    import struct
+    import tempfile
+    import zlib
+    bdx = bd
+
+    def _png(path: Path, w: int, h: int) -> None:
+        raw = b"".join(b"\x00" + b"\xff" * w for _ in range(h))
+        def chunk(t: bytes, d: bytes) -> bytes:
+            return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d))
+        path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 0, 0, 0, 0))
+                         + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+    with tempfile.TemporaryDirectory(prefix="medpaper_selftest_") as tdir:
+        sq, wide = Path(tdir) / "sq.png", Path(tdir) / "wide.png"
+        _png(sq, 400, 400)
+        _png(wide, 400, 200)
+        style = {"body_font_pt": 12, "line_spacing": 2}
+        long_legend = "Figure 1. " + " ".join(["word"] * 300)
+        _pw, _ph, _pm = bdx._page_geometry(style)
+        usable_h = (_ph - 2 * _pm) / 1440
+        w_long, h_long = bdx.figure_size(sq, long_legend, style)
+        w_short, h_short = bdx.figure_size(wide, "Figure 2. A short legend.", style)
+        floor = usable_h * bdx.FIGURE_MIN_PAGE_FRACTION
+    record("G4 a 300-word legend keeps the figure readable (>= minimum page share), never a "
+           "thumbnail; a short legend leaves the figure at its natural full width",
+           h_long >= floor - 0.01 and w_long > 3.0 and w_short >= 5.5,
+           f"long {w_long}x{h_long} (floor {floor:.2f}); short {w_short}x{h_short}")
 
 
 def _gate(p: Path, name: str, stage: str, **spec):

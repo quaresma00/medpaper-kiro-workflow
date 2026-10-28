@@ -15,8 +15,8 @@ Details (builder, manifest roles, checklist format, portal to-do): `reference/st
 .\.venv\Scripts\python.exe tools/manuscript/build_docx.py build --kind cover_letter --input project/08_submission/cover_letter.md --output project/08_submission/bundle/cover_letter.docx --style-config project/08_submission/docx_style.json
 ```
    The builder applies target_journal.json (page numbers, references, legends, line numbers,
-   heading names) and keeps caption/table/footnote and legend/figure together (headings get
-   no keepNext). Supplementary Methods -> DOCX (+ `--pdf` when `si_format` is pdf).
+   heading names). No black squares: zero keepNext/keepLines/pageBreakBefore anywhere
+   (`docx_bundle_ready`); figures stay readable. Supplementary Methods -> DOCX (+ `--pdf`).
 3. Write `08_submission/bundle/manifest.json` (every upload, role, rule), then measure:
 ```
 .\.venv\Scripts\python.exe tools/manuscript/submission_qc.py write

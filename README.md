@@ -372,7 +372,7 @@ python tools/wf.py override show
 
 仅根据目标期刊明确要求生成需要上传的文件。正文、title page、cover letter、补充方法和其他叙述性材料均生成 Word 文件，不会只把正文转成 DOCX 而把其余内容留成 Markdown。
 
-Word 样式优先采用官方投稿指南；若指南没有规定，默认使用 Times New Roman、12 pt、双倍行距、黑色文字。净化器会从所有 WordprocessingML 部件移除 `pageBreakBefore`、`outlineLvl` 和段落边框，`keepNext`/`keepLines` 只从样式和标题上移除，题注→表→表注、图注↔图保留同页设置，标题统一映射为基于正文样式的 `SectionHeading`，因而没有标题前小黑点、折叠三角形或可折叠大纲。文件同时移除超链接，统一同级标题字号，并拒绝字符 `↓` 和 Word 手动换行符。
+Word 样式优先采用官方投稿指南；若指南没有规定，默认使用 Times New Roman、12 pt、双倍行距、黑色文字。净化器会从所有 WordprocessingML 部件移除 `pageBreakBefore`、`outlineLvl` 和段落边框，`keepNext`/`keepLines`/`pageBreakBefore` 也从每个段落、表格单元格、题注、表注、图注和样式上全部移除（Word 会在带这些属性的段落前显示小黑方块；交付的 Word 不允许出现任何黑点，`docx_bundle_ready` 发现即失败）。版面靠结构保持：每张表单独成节、行不跨页（`cantSplit`）、表头跨页重复、表注紧随表格；每幅嵌入图另起一页、保持可读尺寸（至少占可用页高的 55%，或其原始尺寸），图注过长时续排到下一页而不是把图缩小；标题统一映射为基于正文样式的 `SectionHeading`，因而没有标题前小黑点、折叠三角形或可折叠大纲。文件同时移除超链接，统一同级标题字号，并拒绝字符 `↓` 和 Word 手动换行符。
 
 正文必须有 References 标题，并且只能有一个 Figure legends 区标题；每幅图也只能出现一个对应图注标题，图注正文不得再次以 `Figure N` 开头。补充方法 DOCX 不允许包含表格或 Markdown 长横线残留，补充表只存在于单独的三线表工作簿中。如期刊要求，也可另交单独图注文件，但同一文件内仍不得重复标题。
 
