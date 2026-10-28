@@ -124,6 +124,14 @@ def engineering_language_clean(ctx: Ctx) -> Result:
     for where, text, main in _display_texts(ctx, ctx.spec.get("displays")):
         hits = clinical.engineering_hits(text, allowed, "display")
         (block if main else warn).extend(f"{where}: '{m}' -> {s}" for _t, m, s in hits)
+    # 1.13.0 (G5): quoted labels coined during the analysis, absent from the dictionary (warn).
+    ddata = clinical.dictionary(ctx.project)
+    texts = [(ctx.src(r), ctx.read(ctx.src(r))) for r in ctx.spec.get("paths", [])
+             if ctx.p(ctx.src(r)).is_file()]
+    texts += [(w, t) for w, t, _m in _display_texts(ctx, ctx.spec.get("displays"))]
+    for where, text in texts:
+        warn += [f"{where}: coined label \"{x}\" -> use its clinical name and add it to "
+                 f"{clinical.DICT_REL}" for x in clinical.coined_labels(text, ddata, allowed)]
     hints = ["Body Methods state principles; implementation detail (parsing, matching rules, "
              "character handling, code-level steps) goes to Supplementary Methods.", ALLOW_HINT]
     if block:

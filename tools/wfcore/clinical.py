@@ -152,6 +152,26 @@ def engineering_hits(text: str, allowed: dict[str, str] | None = None,
     return out
 
 
+_QUOTED_LABEL = re.compile(r"[\"\u201c]([A-Za-z][A-Za-z\-/ ]{1,48}[A-Za-z])[\"\u201d]")
+
+
+def coined_labels(text: str, data: dict | None, allowed: dict[str, str] | None = None) -> list[str]:
+    """1.13.0 (G5): short quoted labels ("original rule", "record review") that are not in the
+    display dictionary - names coined during the analysis that the word list cannot know."""
+    known = {x.casefold() for x in labels(data)} | {x.casefold() for x in internal_names(data)}
+    for t in (data or {}).get("terms", []) or []:
+        if isinstance(t, dict):
+            known |= {str(a).strip().casefold() for a in t.get("aliases") or []}
+    text = re.sub(r"```.*?```", " ", text, flags=re.S)
+    out = set()
+    for m in _QUOTED_LABEL.finditer(text):
+        label = " ".join(m.group(1).split())
+        if 1 <= len(label.split()) <= 4 and label.casefold() not in known \
+                and label.casefold() not in (allowed or {}):
+            out.add(label)
+    return sorted(out)
+
+
 def sections(text: str) -> list[tuple[str, str]]:
     """(casefolded level-1 heading, body) of a full manuscript."""
     heads = list(re.finditer(r"(?m)^#\s+([^#\n].*)$", text))

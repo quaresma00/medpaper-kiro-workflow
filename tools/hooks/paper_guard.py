@@ -15,6 +15,8 @@ Blocked:
     this paper, an archive folder (medpaper_archive*, or `guard_deny` paths in
     ~/.medpaper/config.toml), or the system temp outside medpaper_* sandboxes;
   - file-tool writes outside this paper (never invent a location; data sources are read-only);
+  - hand edits of the engine-owned state inside this paper (.wf/state.json, progress.md,
+    review_rounds.json, revisions/, ...; ENGINE_STATE) - only engine commands write them;
   - shell commands referencing such paths (engine writes, other papers, stray temp logs).
 An unparseable payload or an internal error is allowed (fail open): the engine commands refuse
 other papers and a modified engine on their own (paths.project_dir, wfcore/integrity.py).
@@ -66,6 +68,16 @@ PY_WRITE_RE = re.compile(r"write_text|write_bytes|\.write\(|open\([^)]*['\"](?:w
                          r"replace|makedirs|mkdir|link|symlink|rmdir)|\.unlink\(|\.rename\(|"
                          r"\.replace\(\s*[\w\"']*[\\/]|\.mkdir\(|\.touch\(")
 PY_ASSIGN_RE = re.compile(r"\b(\w+)\s*=\s*(?:Path\()?r?[\"']([^\"'\r\n]+)[\"']")
+# 1.13.0 (G5): engine-owned paper state; agents read it, only engine commands write it. Paper-
+# owned .wf files stay writable (overrides.toml, language_allowlist.json, user_files.json,
+# logs/, review_bundle/<round>/report.md, writer_bundle/, engine_fork/).
+_ENGINE_STATE_NAMES = ("state.json", "progress.md", "review_rounds.json", "check_receipts.json",
+                       "data_sources.json", "hash_cache.json", "final_copy.json",
+                       "presentation_deltas.json", "review_coverage.json", "reference_live.json")
+ENGINE_STATE = frozenset(os.path.normcase(f".wf/{n}").replace("\\", "/")
+                         for n in _ENGINE_STATE_NAMES)
+ENGINE_STATE_DIRS = tuple(os.path.normcase(d).replace("\\", "/")
+                          for d in (".wf/revisions/", ".wf/repro/rerun/", ".wf/review_reports/"))
 COPY_DATA_RE = re.compile(r"(?i)\b(?:copy-item|cpi|cp|copy|robocopy|xcopy|move-item|mv|move|"
                           r"expand-archive|unzip|mklink|hardlink)\b|extractall|\.extract\(|"
                           r"\b7z\s+[xe]\b|\btar\s+-?\w*x|os\.link|shutil\.(?:copy\w*|move)")
@@ -186,6 +198,9 @@ class Guard:
 
     def _classify(self, p: Path, directory_scan: bool) -> str:
         if _within(p, self.paper):
+            rel = os.path.relpath(_norm(p), _norm(self.paper)).replace("\\", "/")
+            if rel in ENGINE_STATE or rel.startswith(ENGINE_STATE_DIRS):
+                return "paper_state"
             return "paper"
         if any(_within(p, e) for e in self.engines):
             return "engine"
@@ -228,6 +243,10 @@ class Guard:
                 "datasets go to 02_data/derived/",
         "outside": "it is outside this paper; files are written only inside the paper folder "
                    "(never invent a location such as a 'studies' folder next to the data)",
+        "paper_state": "it is the engine's record of this paper (written only by wf / rework.py / "
+                       "review_round.py / reproduce.py); never hand-edit it - use the command "
+                       "that owns it (wf note, wf decide, wf loop, review_round.py, rework.py), "
+                       "or ask the user",
         "kiro": None,
         "temp_sandbox": None,
         "paper": None,
@@ -369,6 +388,7 @@ class Guard:
             if not PY_WRITE_RE.search(line):
                 continue
             targets.extend(self.path_tokens(line))
+            targets.extend(re.findall(r"['\"]([^'\"\r\n]*\.wf[\\/][^'\"\r\n]+)['\"]", line))
             for var, val in assigned.items():
                 if re.search(rf"\b{re.escape(var)}\b", line):
                     targets.append(val)

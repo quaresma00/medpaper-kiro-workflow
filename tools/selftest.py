@@ -2149,8 +2149,8 @@ def run_codex_integration() -> None:
                f"card must name `{agent}` so the work is not done in the main context")
 
     record("pipeline and skill versions agree",
-           pipe["meta"]["version"] == "1.12.0" and 'version: "2.5.0"' in skill,
-           f'pipeline={pipe["meta"]["version"]}, skill=2.5.0 (Kiro adapter revision)')
+           pipe["meta"]["version"] == "1.13.0" and 'version: "2.6.0"' in skill,
+           f'pipeline={pipe["meta"]["version"]}, skill=2.6.0 (Kiro adapter revision)')
     record("all 25 stage cards exist",
            len(pipe["stage"]) == 25 and
            all((ROOT / "pipeline" / s["card"]).is_file() for s in pipe["stage"]),
@@ -2215,7 +2215,7 @@ def run_codex_integration() -> None:
            "08_submission/package_content_baseline.json" in package_stage["outputs"] and
            "tools/rework.py batch" in package_human_card and
            "tools/rework.py status" in package_human_card and
-           "Never recapture at S24" in package_human_card,
+           "never recapture to bless drift" in package_human_card,
            "persisted S19/S24 rounds + component equality + visible-text enforcement")
     record("S19 runs subagent review rounds (no review ZIP) and needs explicit no-further-review",
            "review_round_approved" in human_checks and
@@ -5182,7 +5182,7 @@ def run_v160(tmp: Path) -> None:
            any(g["check"] == "reader_review_coverage" for g in s18["gate"])
            and "review_round.py start --scope manuscript" in (ROOT / "pipeline/stages/S18_independent_review.md")
            .read_text(encoding="utf-8"))
-    record("pipeline version is 1.12.0", pipe.meta.get("version") == "1.12.0")
+    record("pipeline version is 1.13.0", pipe.meta.get("version") == "1.13.0")
 
 
 def run_v170(tmp: Path) -> None:

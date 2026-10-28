@@ -38,8 +38,10 @@ ask permission per finding or per small change. Present clickable paths to
    `tools/rework.py batch --sealed --plan ...` (then `tools/rework.py status` lists the only
    files you may change; `check`, `mark`, `close`) and back to S19 for a review round and
    re-freeze. A DOCX wording edit must come from its source; a visible-text-preserving layout
-   edit may stay in Word (`package_content.py verify` proves it). Never recapture at S24 to
-   bless drift. Never invent user-owned facts; list them as kept.
+   edit may stay in Word (`package_content.py verify` proves it). Order: edit the source,
+   `rework.py check` (classification), then rebuild DOCX/PDF. `package_content.py capture
+   --replace` is legal only inside a revision round that reopened S23 for a non-layout item
+   (the tool refuses otherwise); never recapture to bless drift. Never invent user-owned facts; list them as kept.
 3. **Close and report once.**
 ```
 .\.venv\Scripts\python.exe tools/review_round.py close --scope package --findings critical=<n>,major=<n>,minor=<n> --finding <id> <category> <status> "<one line>" --change <file> "<one line>" --kept "<id>" "<why>"

@@ -48,7 +48,9 @@ Details (presentation vs science, rework kinds, Word layout edits): `reference/s
 ## Gate
 review round approved, findings closed, explicit confirmation, revision rounds closed,
 package content matches baseline, bundle/DOCX/checklist (WARN never blocks), freeze intact.
-Never invent user-owned facts; never recapture a baseline to bless drift.
+Never invent user-owned facts. Classify first (`rework.py check`), then rebuild; recapture
+(`package_content.py capture --replace`) only inside a round that reopened S23 for content,
+never to bless drift.
 
 ## Close
 ```

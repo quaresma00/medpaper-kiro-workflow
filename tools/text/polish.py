@@ -171,6 +171,10 @@ def project_root() -> Path:
     return wfpaths.project_dir()
 
 
+NUM_ABBR = re.compile(r"(?:\b(?:No|Nos|no|nos|Fig|Figs|Ref|Refs|Vol|vol|pp|p|vs|cf|approx|"
+                      r"Suppl|Eq|Ch|Sect|ver|Ver)|\be\.g|\bi\.e|\bet al)\.\s*$")
+
+
 def body(text: str) -> str:
     """Prose only: no code fences, no headings."""
     return HEADING_RE.sub(" ", FENCE_RE.sub(" ", text))
@@ -428,7 +432,9 @@ def lint_style(rel: str, text: str) -> list[dict]:
     if spaced_pct and tight_pct:
         flag("percent_spacing", f"'5 %' ({spaced_pct}) and '5%' ({tight_pct}) both used")
 
-    m = re.search(r"(?:(?<=[.!?])\s+|(?<=\n\n))(\d[\w.,]*(?:\s+\S+){0,3})", b)
+    # 1.13.0 (G5): "No. 2026J...", "Fig. 2", "vs. 3" do not end a sentence.
+    m = next((x for x in re.finditer(r"(?:(?<=[.!?])\s+|(?<=\n\n))(\d[\w.,]*(?:\s+\S+){0,3})", b)
+              if not NUM_ABBR.search(b[max(0, x.start() - 12):x.start()])), None)
     if m:
         flag("sentence_starts_with_numeral",
              f"a sentence begins with a numeral ({m.group(1)[:30]!r}) - spell it out or restructure")

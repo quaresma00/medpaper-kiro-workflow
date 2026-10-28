@@ -123,8 +123,27 @@ class State:
             self._note_v1100(old_version, pipeline_version)
             self._note_v1110(old_version, pipeline_version)
             self._note_v1120(old_version, pipeline_version)
+            self._note_v1130(old_version, pipeline_version)
             self.save()
         return changed
+
+    def _note_v1130(self, old_version: str, new_version: str) -> None:
+        """1.13.0: paper isolation and engine protection. Event only; no file or stage is touched."""
+        if (version_tuple(old_version) >= (1, 13, 0) or version_tuple(new_version) < (1, 13, 0)
+                or self.data.get("v1130_migration_noted")):
+            return
+        self.data["v1130_migration_noted"] = True
+        self.event("requirements_changed",
+                   "1.13.0: the paper is the working folder (cwd/MEDPAPER_PROJECT, no wf use); "
+                   "engine integrity guard (a modified shared engine refuses paper commands; "
+                   "fixes via paper overrides or `wf engine-fork`); paper guard hook "
+                   "(install_adapters.py --paper); datasets registered in place (`wf data add`) "
+                   "and never copied (data_not_copied); reproduction in a paper-local sandbox, "
+                   "once per round, scoped re-runs, logs in .wf/logs/; traceable post-freeze "
+                   "edits never rewind; multi-person checks only for manual coding; no protocol "
+                   "deviations in the paper; per-section polishing; Word without keep markers. "
+                   "New gates are since=1.13.0: completed stages keep the pinned gate set. Paper "
+                   "files were not modified.")
 
     def _note_v1120(self, old_version: str, new_version: str) -> None:
         """1.12.0: a lighter engine. Event only; no file or stage is touched."""

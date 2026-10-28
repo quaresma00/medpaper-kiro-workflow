@@ -794,9 +794,76 @@ def _gate(p: Path, name: str, stage: str, **spec):
     return v180._gate(p, name, stage, **spec)
 
 
+# ------------------------------------------------------------------------------ G5
+def run_g5(tmp: Path, record, section) -> None:
+    sys.path.insert(0, str(ROOT / "tools/hooks"))
+    import paper_guard
+    from wfcore.state import State
+    section("1.13.0 G5: engine state not hand-edited, coined labels, numeral lint, S24 rule, migration")
+    P = _paper(tmp / "paper")
+    cases = [
+        ("fs_write .wf/state.json", {"tool_name": "fs_write", "tool_input": {"path": ".wf/state.json", "text": "{}"}}, True),
+        ("str_replace .wf/review_rounds.json", {"tool_name": "str_replace", "tool_input": {"path": str(P / ".wf/review_rounds.json"), "oldStr": "a", "newStr": "b"}}, True),
+        ("shell Set-Content .wf/progress.md", {"tool_name": "execute_pwsh", "tool_input": {"command": "Set-Content .wf/progress.md x", "cwd": str(P)}}, True),
+        ("python one-liner writes a revision round", {"tool_name": "execute_pwsh", "tool_input": {"command": "python -c \"open('.wf/revisions/R003.json','w').write('{}')\"", "cwd": str(P)}}, True),
+        ("read .wf/state.json", {"tool_name": "read_file", "tool_input": {"path": ".wf/state.json"}}, False),
+        ("reviewer writes its report.md", {"tool_name": "fs_write", "tool_input": {"path": ".wf/review_bundle/M001/report.md", "text": "x"}}, False),
+        ("paper allowlist edit", {"tool_name": "fs_write", "tool_input": {"path": ".wf/language_allowlist.json", "text": "{}"}}, False),
+        ("engine command redirects to .wf/logs", {"tool_name": "execute_pwsh", "tool_input": {"command": "python tools/wf.py check *> .wf/logs/c.txt", "cwd": str(P)}}, False),
+    ]
+    guard = paper_guard.Guard(P)
+    wrong = [f"{lab}: {got or 'allowed'}"[:120] for lab, pay, blk in cases
+             if bool(got := guard.decide(pay)) != blk]
+    record("G5 paper guard blocks hand edits of engine-owned .wf state (state, progress, rounds, "
+           "revisions) and keeps reads, report.md, allowlist and logs writable", not wrong,
+           "; ".join(wrong))
+
+    _w(P, "01_protocol/display_dictionary.json", {"terms": [
+        {"internal": "rule2", "aliases": ["second screen"], "label": "Confirmed bleeding",
+         "definition": "bleeding confirmed in the case narrative"}]})
+    _w(P, "07_manuscript/results.md", "# Results\n\nUnder the \u201coriginal rule\u201d 12 cases "
+       "remained; the \"second screen\" and \"Confirmed bleeding\" groups are named.\n")
+    res = _gate(P, "engineering_language_clean", "S09_results", paths=["07_manuscript/results.md"])
+    record("G5 engineering_language_clean warns on a quoted coined label absent from the display "
+           "dictionary (dictionary labels and aliases pass)",
+           not res.ok and res.severity == "warn" and "original rule" in res.detail
+           and "second screen" not in res.detail and "Confirmed bleeding" not in res.detail,
+           res.detail[:200])
+
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("pol_g5", ROOT / "tools/text/polish.py")
+    pol = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(pol)
+    ok_txt = "The protocol was approved (No. 2026J014). See Fig. 2 for details; vs. 3 controls.\n"
+    bad_txt = "The protocol was approved. 2026 patients were screened.\n"
+    kinds = lambda t: {x["kind"] for x in pol.lint_style("a.md", t)}  # noqa: E731
+    record("G5 numeral lint: 'No. 2026J', 'Fig. 2', 'vs. 3' are not sentence-initial numerals; a "
+           "real one still is", "sentence_starts_with_numeral" not in kinds(ok_txt)
+           and "sentence_starts_with_numeral" in kinds(bad_txt))
+
+    card = (ROOT / "pipeline/stages/S24_package_human_review.md").read_text(encoding="utf-8")
+    src = (ROOT / "tools/package_content.py").read_text(encoding="utf-8")
+    record("G5 S24 card and package_content.py agree: classify first, recapture only in a round "
+           "that reopened S23", "rework.py check" in card and "capture --replace" in card
+           and "revision.permits(project, \"S23_package\")" in src and len(card) <= 4000,
+           f"{len(card)} chars")
+
+    q = tmp / "old"
+    q.mkdir(parents=True, exist_ok=True)
+    st = State(q, ".wf").create("medpaper", "1.12.0", "S10_tables")
+    st.migrate_pipeline("1.13.0", ["S10_tables"])
+    st.migrate_pipeline("1.13.0", ["S10_tables"])
+    notes = [e for e in st.data["events"] if e["kind"] == "requirements_changed"
+             and str(e.get("detail", "")).startswith("1.13.0")]
+    record("G5 a 1.12 paper opened by 1.13 records exactly one 1.13.0 migration event (paper "
+           "files untouched)", len(notes) == 1 and st.data.get("v1130_migration_noted") is True,
+           str(len(notes)))
+
+
 def run(tmp: Path, record, section) -> None:
     tmp.mkdir(parents=True, exist_ok=True)
     run_g1(tmp / "g1", record, section)
     run_g2(tmp / "g2", record, section)
     run_g3(tmp / "g3", record, section)
     run_g4(tmp / "g4", record, section)
+    run_g5(tmp / "g5", record, section)
