@@ -1628,9 +1628,9 @@ globs = ["01_protocol/site_approvals/*.pdf"]
     record("engine helpers reject an explicit output outside the selected paper",
            absolute_output_rejected)
 
-    # Standalone engine tools (not launched through wf.py) follow the user-level `wf use`
-    # marker. Since 1.5.0 the marker lives under MEDPAPER_HOME (here a temp dir), holds the
-    # paper's absolute path, and the papers root is outside the engine.
+    # Standalone engine tools (not launched through wf.py) resolve the paper from the working
+    # directory (1.13.0). The old user-level `wf use` marker is written here only to prove it
+    # is ignored.
     st_root = Path(os.environ["MEDPAPER_SELFTEST_ROOT"])
     fake_paper = st_root / "papers2/selected"
     (fake_paper / ".wf").mkdir(parents=True)
@@ -1645,15 +1645,15 @@ globs = ["01_protocol/site_approvals/*.pdf"]
     p = subprocess.run([sys.executable, "-c",
                         "from pubmed import eutils; print(eutils.project_root()); "
                         "print(eutils.cache_dir())"], capture_output=True, text=True,
-                       env=standalone_env, cwd=st_root, encoding="utf-8", errors="replace")
-    record("standalone PubMed tools follow the paper selected with wf use",
+                       env=standalone_env, cwd=fake_paper, encoding="utf-8", errors="replace")
+    record("standalone PubMed tools resolve the paper from the working directory",
            p.returncode == 0 and str(fake_paper) in (p.stdout or "")
            and (fake_paper / "06_refs/cache").is_dir(),
            ((p.stdout or "") + (p.stderr or "")).strip()[-140:])
     p = subprocess.run([sys.executable, str(ROOT / "tools/data_manifest.py"), "init"],
-                       capture_output=True, text=True, env=standalone_env, cwd=st_root,
+                       capture_output=True, text=True, env=standalone_env, cwd=fake_paper,
                        encoding="utf-8", errors="replace")
-    record("standalone data_manifest writes to the selected paper without --project",
+    record("standalone data_manifest writes to the working-directory paper without --project",
            p.returncode == 0
            and (fake_paper / "02_data/acquisition_manifest.json").is_file(),
            ((p.stdout or "") + (p.stderr or "")).strip()[-140:])
@@ -1662,7 +1662,7 @@ globs = ["01_protocol/site_approvals/*.pdf"]
         "write_table('project/04_tables/main/Table1.xlsx','Table 1','Table 1. Test.',"
         "['Item','Value'],[['n','1']],['Data are counts.'])")
     p = subprocess.run([sys.executable, "-c", table_code], capture_output=True, text=True,
-                       env=standalone_env, cwd=st_root, encoding="utf-8", errors="replace")
+                       env=standalone_env, cwd=fake_paper, encoding="utf-8", errors="replace")
     record("the documented project/... alias maps table output into the selected paper",
            p.returncode == 0 and (fake_paper / "04_tables/main/Table1.xlsx").is_file(),
            ((p.stdout or "") + (p.stderr or "")).strip()[-120:])
@@ -1680,8 +1680,8 @@ globs = ["01_protocol/site_approvals/*.pdf"]
                         "from pubmed import eutils; print(eutils.project_root())"],
                        capture_output=True, text=True, env=standalone_env, cwd=st_root,
                        encoding="utf-8", errors="replace")
-    record("a stale active marker fails closed instead of guessing a paper",
-           p.returncode != 0 and "state is missing" in ((p.stdout or "") + (p.stderr or ""))
+    record("outside a paper, standalone tools refuse instead of following the old wf use marker",
+           p.returncode != 0 and "no paper here" in ((p.stdout or "") + (p.stderr or ""))
            and not (ROOT / "project").exists(),
            ((p.stdout or "") + (p.stderr or "")).strip()[-150:])
 
@@ -3589,17 +3589,22 @@ def run_engine_purity(tmp: Path) -> None:
     for name in ("project", "papers", "temp", ".wf"):
         if (ROOT / name).exists():
             record(f"precondition: engine has no {name}/", False, str(ROOT / name))
-    p = _wf("new", "demo", cwd=tmp)
+    p = _wf("new", "demo", "--central", cwd=tmp)
     demo = papers / "demo"
     marker = home / "active"
-    record("wf new creates the paper under the papers root with paper-local adapters",
+    guard_hook = demo / ".kiro/hooks/medpaper-paper-guard.json"
+    record("wf new --central creates the paper under the papers root with paper-local adapters "
+           "and the isolation guard hook",
            p.returncode == 0 and (demo / ".wf/state.json").is_file()
            and (demo / ".kiro/steering/medpaper-pipeline.md").is_file()
            and (demo / ".kiro/hooks/medpaper-status.json").is_file()
-           and (demo / ".kiro/hooks/medpaper-skill-guard.json").is_file(), _out(p)[-160:])
-    record("the user-level marker holds the paper's absolute path",
-           marker.is_file() and Path(marker.read_text(encoding="utf-8").strip()) == demo.resolve(),
-           marker.read_text(encoding="utf-8").strip() if marker.is_file() else "no marker")
+           and (demo / ".kiro/hooks/medpaper-skill-guard.json").is_file()
+           and guard_hook.is_file()
+           and f'--paper "{demo.resolve().as_posix()}"' in _json.loads(guard_hook.read_text(
+               encoding="utf-8"))["hooks"][0]["action"]["command"],
+           _out(p)[-160:])
+    record("no global 'current paper' marker is written (papers come from the workspace)",
+           not marker.exists(), str(marker))
     eng = ROOT.as_posix()
     steering = (demo / ".kiro/steering/medpaper-pipeline.md").read_text(encoding="utf-8")
     hooks = [_json.loads((demo / f".kiro/hooks/{n}").read_text(encoding="utf-8"))
@@ -3614,7 +3619,7 @@ def run_engine_purity(tmp: Path) -> None:
     p = _wf("new", "x", "--root", ROOT / "papers", cwd=tmp)
     record("wf new --root inside the engine is refused and creates nothing",
            p.returncode != 0 and not (ROOT / "papers").exists(), _out(p)[-120:])
-    p = _wf("new", "x", env=_env(MEDPAPER_PAPERS_ROOT=ROOT / "papers"), cwd=tmp)
+    p = _wf("new", "x", "--central", env=_env(MEDPAPER_PAPERS_ROOT=ROOT / "papers"), cwd=tmp)
     record("a papers root inside the engine is refused",
            p.returncode != 0 and not (ROOT / "papers").exists(), _out(p)[-120:])
     p = _wf("status", env=_env(MEDPAPER_PROJECT=ROOT / "project"), cwd=tmp)
@@ -3651,19 +3656,22 @@ def run_engine_purity(tmp: Path) -> None:
     record("wf card without a stage needs a paper", p.returncode == 2)
     p = _wf("status", "--brief", cwd=demo)
     record("wf status from the paper resolves it from the working directory",
-           p.returncode == 0 and "found at or above" in p.stdout, p.stdout[:160])
+           p.returncode == 0 and "(the working directory)" in p.stdout, p.stdout[:160])
 
-    marker.unlink()
     p = _wf("use", "demo", cwd=ROOT)
-    record("wf use from the engine writes only the user-level marker",
-           p.returncode == 0 and marker.is_file() and not (ROOT / ".wf").exists(), _out(p)[-100:])
+    record("wf use only says where a paper is; it writes no marker",
+           p.returncode == 0 and not marker.exists() and "no global selection" in p.stdout
+           and not (ROOT / ".wf").exists(), _out(p)[-100:])
     p = _wf("papers", cwd=tmp)
-    record("wf papers lists the selected paper and the root source",
-           "* demo" in p.stdout and "MEDPAPER_PAPERS_ROOT" in p.stdout, p.stdout[:160])
-    marker.write_text(str(papers / "gone") + "\n", encoding="utf-8")
-    p = _wf("status", cwd=tmp)
-    record("a stale marker fails closed", p.returncode != 0 and "state is missing" in _out(p))
+    record("wf papers (humans only) lists the central root and its papers",
+           "demo" in p.stdout and "MEDPAPER_PAPERS_ROOT" in p.stdout, p.stdout[:160])
+    marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text(str(demo.resolve()) + "\n", encoding="utf-8")
+    p = _wf("status", cwd=tmp)
+    record("the old wf use marker is ignored: outside a paper nothing is selected and no other "
+           "paper is listed", p.returncode != 0 and "no paper here" in _out(p)
+           and "demo" not in _out(p).replace(str(tmp), ""), _out(p)[-200:])
+    marker.unlink()
 
     with patch.dict(os.environ, {"MEDPAPER_PROJECT": str(demo)}):
         refused = []
@@ -3799,8 +3807,8 @@ def run_engine_purity(tmp: Path) -> None:
             pass
     record("paper_from_cli accepts the alias and real papers, refuses non-papers", ok_)
 
-    p = _wf("use", "demo", env=_env(MEDPAPER_HOME=ROOT / "h"), cwd=ROOT)
-    q = _wf("use", "demo", env=_env(MEDPAPER_HOME=ROOT.parent), cwd=tmp)
+    p = _wf("papers", env=_env(MEDPAPER_HOME=ROOT / "h", MEDPAPER_PAPERS_ROOT=None), cwd=ROOT)
+    q = _wf("papers", env=_env(MEDPAPER_HOME=ROOT.parent, MEDPAPER_PAPERS_ROOT=None), cwd=tmp)
     record("MEDPAPER_HOME inside or over the engine is refused",
            p.returncode != 0 and q.returncode != 0 and not (ROOT / "h").exists())
     fake_eng = tmp / "fake_engine_root"
@@ -3910,28 +3918,37 @@ def run_language_policy() -> None:
 
 def run_paper_header(tmp: Path) -> None:
     from wfcore import cli, paths as wp
-    section("1.7.1 resolved-paper header and global-marker warning")
+    section("1.7.1/1.13.0 resolved-paper header; commands act only on the workspace's paper")
     a, b = _new_paper(tmp / "paper_a"), _new_paper(tmp / "paper_b")
-    real_marker, real_cwd = wp.active_paper, Path.cwd()
+    real_cwd = Path.cwd()
     saved_env = os.environ.pop("MEDPAPER_PROJECT", None)
     try:
-        wp.active_paper = lambda: b
         os.chdir(a)
-        lines = cli.paper_header(a, "found at or above the working directory")
-        record("every command names the paper it acts on, and the cwd paper beats the marker",
-               lines[0].startswith("[medpaper] paper: ") and str(a) in lines[0]
-               and any("global `wf use` marker points at" in x for x in lines), str(lines))
-        lines = cli.paper_header(b, "MEDPAPER_PROJECT")
-        record("acting on another paper than the cwd's is a WARNING",
-               any("WARNING: the working directory is inside paper" in x for x in lines),
-               str(lines))
+        lines = cli.paper_header(a, "the working directory")
+        record("every command names the paper it acts on and prints no other paper",
+               lines == [f"[medpaper] paper: {a}  (the working directory)"], str(lines))
+        resolved = wp.project_dir()
+        os.environ["MEDPAPER_PROJECT"] = str(b)
+        try:
+            wp.project_dir()
+            refused = False
+        except wp.PaperLocationError as exc:
+            refused = "belongs to the paper" in str(exc)
+        try:
+            wp.paper_from_cli(str(b))
+            refused_cli = False
+        except wp.PaperLocationError:
+            refused_cli = True
+        os.environ.pop("MEDPAPER_PROJECT", None)
+        record("from paper A, MEDPAPER_PROJECT or --project naming paper B is refused",
+               resolved == a.resolve() and refused and refused_cli)
         os.chdir(tmp)
-        lines = cli.paper_header(b, "selected with wf use")
-        record("a marker-only selection says how to pin the paper",
-               any("chosen by the global `wf use` marker" in x for x in lines), str(lines))
+        os.environ["MEDPAPER_PROJECT"] = str(b)
+        record("outside every paper, MEDPAPER_PROJECT (the paper's own adapters, CI) still works",
+               wp.project_dir() == b.resolve())
+        os.environ.pop("MEDPAPER_PROJECT", None)
     finally:
         os.chdir(real_cwd)
-        wp.active_paper = real_marker
         if saved_env is not None:
             os.environ["MEDPAPER_PROJECT"] = saved_env
 
@@ -5791,6 +5808,8 @@ def main() -> int:
     os.environ["MEDPAPER_HOME"] = str(tmp / "home")
     os.environ["MEDPAPER_PAPERS_ROOT"] = str(tmp / "papers")
     os.environ["PYTHONDONTWRITEBYTECODE"] = "1"  # child tools must not leave __pycache__ in the engine
+    # 1.13.0: engine development - the integrity guard lets an edited engine run its own tests.
+    os.environ["MEDPAPER_ENGINE_DEV"] = "1"
     # 1.12.0 (F3): review bundles from S17 build a Word draft; page rendering through Word or
     # LibreOffice is slow and machine-dependent, so fixtures skip it unless a test asks.
     os.environ.setdefault("MEDPAPER_NO_PREVIEW", "1")
@@ -5844,6 +5863,8 @@ def main() -> int:
         selftest_v1110.run(tmp / "v1110_root", record, section)
         import selftest_v1120
         selftest_v1120.run(tmp / "v1120_root", record, section)
+        import selftest_v1130
+        selftest_v1130.run(tmp / "v1130_root", record, section)
         run_new_wiring()
         section("isolation")
         record("selftest did not touch the real papers root or user home",

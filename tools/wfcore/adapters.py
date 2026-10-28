@@ -58,9 +58,14 @@ inclusion: always
 > do not write pipeline artifacts. Do the job you were given and report back. Your own agent
 > prompt governs; this file does not.
 
-This workspace is one medpaper PAPER. The engine at `${engine}` is shared and read-only for
-you: never edit, create or delete anything under it. This paper's files live here, in this
-folder; `project/...` in a stage card means this folder.
+This workspace is one medpaper PAPER: this folder is the paper (`project/...` in a stage card
+means this folder). The engine at `${engine}` is shared and read-only for you: never edit,
+create or delete anything under it; the engine refuses to run when it was modified. If a gate
+is genuinely wrong for this paper: paper overrides first (`wf config set`, `wf override init`,
+target_journal.json), then a project-local fork (`${wf} engine-fork create`), never the global
+engine. Never read, list, search or copy another paper or the central papers root; the
+paper-guard hook blocks it. The user's datasets are read in place, read-only, and are never
+copied: declare each once with `${wf} data add <absolute path>`.
 
 **Before doing anything, run `${wf} status`.** It returns the current stage, the invariants,
 the gate state, the last handoff and the full stage card. Do not infer the stage from the
@@ -134,8 +139,16 @@ def _hook(name: str, trigger: str, description: str, command: str, timeout: int,
     return json.dumps({"version": "v1", "hooks": [spec]}, indent=2, ensure_ascii=False) + "\n"
 
 
+GUARD_MATCHER = ("read_file|read_code|read_multiple_files|list_directory|grep_search|file_search|"
+                 "fs_write|str_replace|fs_append|delete_file|smart_relocate|semantic_rename|"
+                 "execute_pwsh|execute_bash|control_pwsh_process|readFile|readCode|"
+                 "readMultipleFiles|listDirectory|grepSearch|fileSearch|fsWrite|strReplace|"
+                 "fsAppend|deleteFile|smartRelocate|semanticRename|executePwsh|executeBash|"
+                 "editCode|.*[Ss]ub_?[Aa]gent.*|.*[Ww]orkflow.*|invoke.*|delegate.*")
+
+
 def render_adapters(wf_cmd: str, tool_prefix: str, *, engine_workspace: bool,
-                    engine: Path) -> list[tuple[str, str]]:
+                    engine: Path, paper: Path | None = None) -> list[tuple[str, str]]:
     if engine_workspace:
         steering = STEERING_ENGINE
         guard = "python tools/hooks/skill_guard.py"
@@ -162,10 +175,22 @@ def render_adapters(wf_cmd: str, tool_prefix: str, *, engine_workspace: bool,
         "example a figure script at S23) unless an open revision round covers it, and names the "
         "rework.py command that opens one.", frozen_cmd, 30,
         matcher="fs_write|str_replace|fsWrite|strReplace|fsAppend|editCode")
-    return [(".kiro/steering/medpaper-pipeline.md", steering),
-            (".kiro/hooks/medpaper-status.json", status),
-            (".kiro/hooks/medpaper-skill-guard.json", skill_guard),
-            (".kiro/hooks/medpaper-frozen-guard.json", frozen_guard)]
+    files = [(".kiro/steering/medpaper-pipeline.md", steering),
+             (".kiro/hooks/medpaper-status.json", status),
+             (".kiro/hooks/medpaper-skill-guard.json", skill_guard),
+             (".kiro/hooks/medpaper-frozen-guard.json", frozen_guard)]
+    if not engine_workspace:
+        # 1.13.0: isolation. Blocks other papers, the central papers root, archives, stray temp
+        # files and any write into the shared engine, before the tool call runs.
+        arg = f' --paper "{Path(paper).resolve().as_posix()}"' if paper else ""
+        files.append((".kiro/hooks/medpaper-paper-guard.json", _hook(
+            "medpaper: keep this paper isolated", "PreToolUse",
+            "Blocks any read, list, search or write that touches another paper, the central "
+            "papers root or an archive, any write into the shared engine or outside this paper, "
+            "and shell commands that do either. The engine and the declared data sources stay "
+            "readable.", f'python "{tool_prefix}hooks/paper_guard.py"{arg}', 10,
+            matcher=GUARD_MATCHER)))
+    return files
 
 
 def engine_adapters() -> list[tuple[str, str]]:
@@ -173,10 +198,10 @@ def engine_adapters() -> list[tuple[str, str]]:
                            engine=paths.repo_root())
 
 
-def paper_adapters(engine: Path) -> list[tuple[str, str]]:
+def paper_adapters(engine: Path, paper: Path | None = None) -> list[tuple[str, str]]:
     e = Path(engine).as_posix()
     return render_adapters(f'python "{e}/tools/wf.py"', f"{e}/tools/",
-                           engine_workspace=False, engine=Path(engine))
+                           engine_workspace=False, engine=Path(engine), paper=paper)
 
 
 def write_adapters(dest_root: Path, files, *, check: bool) -> list[tuple[str, str]]:

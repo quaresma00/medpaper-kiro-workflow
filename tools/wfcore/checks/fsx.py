@@ -148,6 +148,8 @@ def no_orphans(ctx: Ctx) -> Result:
     declared = ctx.pipeline.all_declared_outputs()
     free = ctx.pipeline.freeform
     always = ctx.pipeline.policy.get("always_allowed", [])
+    from .. import paths as _paths
+    users = _paths.user_files(ctx.project)  # 1.13.0: the user's own files from before `wf init`
     orphans = []
     for p in ctx.project.rglob("*"):
         if not p.is_file():
@@ -156,7 +158,7 @@ def no_orphans(ctx: Ctx) -> Result:
         # Archived journal variants/packages are kept on purpose (a rejected journal's work).
         if rel.startswith("08_submission/journal_archives/"):
             continue
-        if rel in declared:
+        if rel in declared or rel in users:
             continue
         if any(fnmatch.fnmatch(rel, g) for g in free + always):
             continue

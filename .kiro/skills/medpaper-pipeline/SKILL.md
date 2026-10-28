@@ -24,8 +24,10 @@ python tools/wf.py advance --note "..."         # refuses on a red gate
 ```
 
 Run `status` once per session or stage change; never infer the stage from memory or files.
-Each paper is its own workspace under the papers root (`wf new <slug>`, `wf papers`,
-`wf use <slug>`); the engine folder is maintenance-only and never holds a paper.
+The paper is the folder the user opened as the Kiro workspace: `wf init` there, in place
+(never invent a location, never the data folder or its parent; ask once if the folder is
+unsuitable). Commands act only on that paper; never read or list another paper. Datasets are
+declared in place, read-only, never copied: `wf data add <absolute path>`.
 
 ## Execution economy (1.12.0)
 
@@ -64,8 +66,10 @@ gates; R for figures (`save_medpaper()`) and R-strong statistics. Paper code run
 
 ## One paper, never the engine
 
-Values: `wf config set KEY VALUE` (`.wf/config.toml`). Shape: `wf override init|show|validate`
-(`.wf/overrides.toml`). Never edit `pipeline/`, `tools/`, `reference/` or `.kiro/` for one paper.
+Order of preference when a gate does not fit the paper: values `wf config set KEY VALUE`
+(`.wf/config.toml`) -> shape `wf override init|show|validate` (`.wf/overrides.toml`) ->
+a project-local fork `wf engine-fork create` (diff kept for the maintainer) -> never the
+global engine (commands refuse to run on a modified engine; the guard hook blocks the write).
 A paper keeps the gate set of its pinned engine for completed stages until `wf migrate --yes`.
 
 ## The absolute rules

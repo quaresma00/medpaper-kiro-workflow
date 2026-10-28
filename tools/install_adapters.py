@@ -31,21 +31,19 @@ ENGINE_BLOCK = """
 > **Engine location: `{engine}`**
 >
 > This skill is installed at the user level, so it is discoverable from every workspace.
-> The engine lives at the path above, is shared by every paper and is maintenance-only: no
-> paper lives in it or writes into it.
+> The engine lives at the path above, is shared by every paper and is read-only for paper
+> sessions: no paper lives in it or writes into it, and it refuses to run when modified.
 >
-> Papers live under the papers root (`MEDPAPER_PAPERS_ROOT`, else `papers_root` in
-> `~/.medpaper/config.toml`, else `<engine parent>/medpaper_papers`). Start one with
-> `python "{engine}/tools/wf.py" new <slug>` and open the folder it prints as its own Kiro
-> workspace; from there:
+> The paper is the folder the user opened as the Kiro workspace. Initialise it in place with
+> `python "{engine}/tools/wf.py" init` (never invent another location, never use the data
+> folder or its parent); then:
 >
 > ```
 > python "{engine}/tools/wf.py" status
 > ```
 >
-> The driver resolves the paper in this order: `MEDPAPER_PROJECT`, an initialised paper at or
-> above the working directory, then the paper selected with `wf use` (`~/.medpaper/active`).
-> From the engine folder itself, paper-driving commands are refused.
+> The driver resolves the paper only from the working directory (or `MEDPAPER_PROJECT` set by
+> the paper's own adapters). From the engine folder itself, paper-driving commands are refused.
 """
 
 
@@ -98,12 +96,16 @@ def main() -> int:
     rows: list[tuple[str, str]] = []
     if args.paper:
         try:
-            paper = paths.paper_from_cli(args.paper)
+            paper = paths.paper_from_cli(args.paper, check_engine=False)
         except SystemExit as exc:
             print(f"install_adapters: {exc}", file=sys.stderr)
             return 2
+        # 1.13.0: a paper with a project-local engine fork keeps calling its fork.
+        fork = paper / paths.FORK_REL
+        engine = fork if (fork / paths.FORK_MARKER).is_file() else ROOT
         rows += [(f"{paper.as_posix()}/{rel}", status) for rel, status in
-                 adapters.write_adapters(paper, adapters.paper_adapters(ROOT), check=args.check)]
+                 adapters.write_adapters(paper, adapters.paper_adapters(engine, paper),
+                                         check=args.check)]
     else:
         rows.append((".kiro/skills/medpaper-pipeline/SKILL.md", "source of truth"))
         rows += adapters.write_adapters(ROOT, adapters.engine_adapters(), check=args.check)

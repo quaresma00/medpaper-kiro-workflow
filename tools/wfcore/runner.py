@@ -34,11 +34,14 @@ class RunnerError(Exception):
 
 def science_python() -> Path | None:
     root = paths.repo_root()
-    for cand in (root / ".venv/Scripts/python.exe", root / ".venv/bin/python",
-                 paths._physical_engine() / ".venv/Scripts/python.exe",
-                 paths._physical_engine() / ".venv/bin/python"):
-        if cand.exists():
-            return cand
+    roots = [root, paths._physical_engine()]
+    base = paths.base_engine()  # 1.13.0: an engine fork reuses the global engine's venv
+    if base is not None:
+        roots.append(base)
+    for r in roots:
+        for cand in (r / ".venv/Scripts/python.exe", r / ".venv/bin/python"):
+            if cand.exists():
+                return cand
     return None
 
 

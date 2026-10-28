@@ -2,16 +2,24 @@
 
 The engine lives in one place; the papers live somewhere else. Since 1.5.0 the engine is a
 pure, maintenance-only workflow: no paper may live in it, be resolved inside it, or write into
-it. Papers live under a papers root outside the engine (MEDPAPER_PAPERS_ROOT, then
-~/.medpaper/config.toml `papers_root`, then <engine parent>/medpaper_papers), each opened as its
-own Kiro workspace, and "which paper" is a user-level marker (~/.medpaper/active).
+it. 1.13.0: the paper is the Kiro workspace folder the user opened (`wf init` there, in place);
+the central papers root (MEDPAPER_PAPERS_ROOT, ~/.medpaper/config.toml `papers_root`,
+<engine parent>/medpaper_papers) is used only on explicit request (`wf new <slug> --central`).
+"Which paper" comes only from the working directory (or MEDPAPER_PROJECT); the old user-level
+`wf use` marker is no longer read. An engine fork (<paper>/.wf/engine_fork/ENGINE_FORK.json)
+is engine only inside its own folder, belongs to exactly one paper and keeps the global engine
+it was copied from protected.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import tomllib
 from pathlib import Path
+
+FORK_MARKER = "ENGINE_FORK.json"
+FORK_REL = ".wf/engine_fork"
 
 
 class EngineWorkspace(SystemExit):
@@ -73,18 +81,59 @@ def within(child: Path | str, parent: Path | str) -> bool:
         return False
 
 
+def fork_info(root: Path | str | None = None) -> dict | None:
+    """The ENGINE_FORK.json of an engine fork root (None for a normal engine)."""
+    p = Path(root or _physical_engine()) / FORK_MARKER
+    if not p.is_file():
+        return None
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"broken": True}
+    return data if isinstance(data, dict) else {"broken": True}
+
+
+def is_fork_root(root: Path | str) -> bool:
+    return (Path(root) / FORK_MARKER).is_file()
+
+
+def fork_owner(root: Path | str | None = None) -> Path | None:
+    """<paper> for an engine fork at <paper>/.wf/engine_fork, else None."""
+    root = Path(root or _physical_engine()).resolve()
+    return root.parents[1] if is_fork_root(root) and len(root.parents) >= 2 else None
+
+
+def base_engine() -> Path | None:
+    """The global engine a running fork was copied from (still protected, read-only)."""
+    info = fork_info()
+    raw = (info or {}).get("base_engine")
+    return Path(raw).resolve() if isinstance(raw, str) and raw else None
+
+
 def engine_roots() -> tuple[Path, ...]:
-    """The physical engine plus repo_root() when MEDPAPER_ROOT points elsewhere.
+    """The physical engine plus repo_root() when MEDPAPER_ROOT points elsewhere, plus the
+    global engine a fork was copied from.
 
     Redirecting MEDPAPER_ROOT therefore never removes protection from the physical engine.
     """
     phys, cfg = _physical_engine(), repo_root()
-    return (phys,) if _norm(phys) == _norm(cfg) else (phys, cfg)
+    roots = [phys] if _norm(phys) == _norm(cfg) else [phys, cfg]
+    base = base_engine()
+    if base is not None:
+        roots.append(base)
+    out: list[Path] = []
+    for r in roots:
+        if all(_norm(r) != _norm(o) for o in out):
+            out.append(r)
+    return tuple(out)
 
 
 def in_engine(p: Path | str) -> bool:
-    """p is an engine root, lies inside one, or contains one."""
-    return any(within(p, e) or within(e, p) for e in engine_roots())
+    """p is an engine root, lies inside one, or contains one.
+
+    A fork lives inside its paper, so for a fork root only "inside" counts: the paper that
+    holds .wf/engine_fork is not "over the engine"."""
+    return any(within(p, e) or (within(e, p) and not is_fork_root(e)) for e in engine_roots())
 
 
 def cwd_in_engine() -> bool:
@@ -100,8 +149,13 @@ def check_paper_location(p: Path | str, source: str) -> Path:
     if in_engine(resolved):
         raise PaperLocationError(
             f"refusing paper path from {source}: {resolved} is inside, equal to or contains the "
-            f"medpaper engine ({engine_roots()[0]}). Papers live under the papers root "
-            f"(wf papers), never in the engine.")
+            f"medpaper engine ({engine_roots()[0]}). A paper is the folder the user opened as "
+            f"its Kiro workspace, never the engine.")
+    owner = fork_owner()
+    if owner is not None and _norm(owner) != _norm(resolved):
+        raise PaperLocationError(
+            f"refusing paper path from {source}: this engine fork belongs to {owner} and drives "
+            f"no other paper")
     return resolved
 
 
@@ -205,9 +259,50 @@ def check_not_nested(target: Path) -> None:
     found: list[str] = []
     if target.is_dir():
         for pattern in ("*/.wf/state.json", "*/*/.wf/state.json"):
-            found.extend(str(p.parents[1]) for p in target.glob(pattern))
+            found.extend(str(p.parents[1]) for p in target.glob(pattern)
+                         if not _norm(p.parents[1]).startswith(_norm(target / ".wf")))
     if found:
-        raise SystemExit(f"{target} already contains the paper(s) {', '.join(sorted(found)[:3])}")
+        raise SystemExit(f"{target} already contains {len(found)} other paper(s); a paper folder "
+                         "never holds other papers")
+
+
+ASK_ONCE = ("Ask the user once which folder this paper should live in, open that folder as the "
+            "Kiro workspace and run `wf init` there. Never invent a location (such as a "
+            "'studies' folder next to the data) and never use the data folder or its parent.")
+
+
+def user_files(project: Path | str) -> set[str]:
+    """Files the user already had in the folder when `wf init` made it a paper (1.13.0)."""
+    p = Path(project) / ".wf" / "user_files.json"
+    try:
+        data = json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
+    except (OSError, ValueError):
+        return set()
+    return {f for f in data.get("files", []) if isinstance(f, str)} if isinstance(data, dict) \
+        else set()
+
+
+def unsuitable_paper_dir(target: Path | str) -> str | None:
+    """Why `target` cannot be a paper folder (1.13.0), or None.
+
+    Refused: a drive root, the user's home folder, the engine (or a folder inside or around
+    it), a folder inside another paper, the central papers root itself, a folder that already
+    holds other papers."""
+    t = Path(target).expanduser().resolve()
+    if t.parent == t:
+        return f"{t} is a drive root"
+    try:
+        if _norm(t) == _norm(Path.home()):
+            return f"{t} is your home folder"
+    except RuntimeError:
+        pass
+    if in_engine(t):
+        return f"{t} is inside, equal to or contains the medpaper engine"
+    try:
+        check_not_nested(t)
+    except SystemExit as exc:
+        return str(exc)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -221,37 +316,54 @@ def _find_upwards(start: Path, state_dir: str = ".wf") -> Path | None:
     return None
 
 
-def project_dir(layout: dict | None = None) -> Path:
-    """Resolve the paper directory, in priority order.
+def cwd_paper(state_dir: str = ".wf") -> Path | None:
+    """The paper the working directory belongs to (None in the engine or outside any paper)."""
+    try:
+        if cwd_in_engine():
+            return None
+        return _find_upwards(Path.cwd(), state_dir)
+    except OSError:
+        return None
 
-    1. MEDPAPER_PROJECT              explicit override, used by tests and CI
-    2. cwd inside the engine         EngineWorkspace (maintenance only)
+
+def _same_paper_as_cwd(resolved: Path, source: str, state_dir: str = ".wf") -> None:
+    """1.13.0: engine commands act only on the paper of the workspace they run in."""
+    here = cwd_paper(state_dir)
+    if here is not None and _norm(here) != _norm(resolved):
+        raise PaperLocationError(
+            f"refusing {source} {resolved}: the working directory belongs to the paper {here}. "
+            "Commands act only on the paper of the workspace you are in; never on another paper.")
+
+
+def project_dir(layout: dict | None = None, *, check_engine: bool = True) -> Path:
+    """Resolve the paper directory.
+
+    1. MEDPAPER_PROJECT        set by the paper's own adapters, tests and CI; refused when the
+                               working directory belongs to a different paper
+    2. cwd inside the engine   EngineWorkspace (maintenance only)
     3. an initialised paper at or above the working directory
-    4. the paper selected with `wf use` (user-level marker)
+    The user-level `wf use` marker is no longer read (1.13.0): a paper is the workspace you
+    are in. Then the shared engine must be unmodified (integrity.require_clean).
     """
+    state_dir = (layout or {}).get("state_dir", ".wf")
     env = os.environ.get("MEDPAPER_PROJECT")
     if env:
-        return check_paper_location(env, "MEDPAPER_PROJECT")
-    if cwd_in_engine():
+        found = check_paper_location(env, "MEDPAPER_PROJECT")
+        _same_paper_as_cwd(found, "MEDPAPER_PROJECT", state_dir)
+    elif cwd_in_engine():
         raise EngineWorkspace(ENGINE_MESSAGE)
-
-    state_dir = (layout or {}).get("state_dir", ".wf")
-    found = _find_upwards(Path.cwd(), state_dir)
-    if found is not None:
-        return check_paper_location(found, "working directory")
-
-    marker = active_paper()
-    if marker is not None:
-        if not (marker / state_dir / "state.json").is_file():
+    else:
+        here = _find_upwards(Path.cwd(), state_dir)
+        if here is None:
             raise SystemExit(
-                f"active paper marker names {marker}, but its state is missing. Refusing to "
-                f"guess.\nSelect a real paper with `wf use <slug|path>` or start one with "
-                f"`wf new <slug>`.")
-        return check_paper_location(marker, "wf use")
-
-    raise SystemExit(
-        "no paper selected. Start one with `wf new <slug>`, select one with `wf use <slug|path>`, "
-        "or open a paper folder as the workspace.")
+                "no paper here: the working directory is not inside an initialised paper.\n"
+                "The paper is the folder the user opened as the Kiro workspace: run `wf init` "
+                "there (in place). " + ASK_ONCE.split(". ", 1)[1])
+        found = check_paper_location(here, "working directory")
+    if check_engine:
+        from . import integrity
+        integrity.require_clean()
+    return found
 
 
 def describe_project_source(layout: dict | None = None) -> str:
@@ -260,25 +372,27 @@ def describe_project_source(layout: dict | None = None) -> str:
         return "MEDPAPER_PROJECT"
     state_dir = (layout or {}).get("state_dir", ".wf")
     if _find_upwards(Path.cwd(), state_dir) is not None:
-        return "found at or above the working directory"
-    marker = active_paper()
-    if marker is not None:
-        return f"selected with wf use ({marker})"
+        return "the working directory"
     return "nothing selected"
 
 
-def paper_from_cli(arg: Path | str | None) -> Path:
-    """The paper an engine CLI acts on (`--project`)."""
+def paper_from_cli(arg: Path | str | None, *, check_engine: bool = True) -> Path:
+    """The paper an engine CLI acts on (`--project`): only the paper of the working directory
+    (or of MEDPAPER_PROJECT when the cwd is outside every paper)."""
     if arg is None or str(arg) == "":
-        return project_dir()
+        return project_dir(check_engine=check_engine)
     p = Path(arg)
     if not p.is_absolute() and p.parts and p.parts[0].casefold() == "project":
-        return project_dir()
+        return project_dir(check_engine=check_engine)
     if not p.is_absolute():
         p = Path.cwd() / p
     resolved = check_paper_location(p, "--project")
     if not (resolved / ".wf" / "state.json").is_file():
         raise SystemExit(f"--project {resolved} is not an initialised paper")
+    _same_paper_as_cwd(resolved, "--project")
+    if check_engine:
+        from . import integrity
+        integrity.require_clean()
     return resolved
 
 

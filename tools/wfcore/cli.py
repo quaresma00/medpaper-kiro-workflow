@@ -95,19 +95,10 @@ def _no_state_help(pipe, proj: Path) -> None:
     print(f"  looked for    {proj / pipe.layout.get('state_dir', '.wf') / 'state.json'}")
     print(f"  because       {_PROJECT_SOURCE or paths.describe_project_source(pipe.layout)}")
     print()
-    existing = paths.list_papers()
-    if existing:
-        print("papers that already exist:")
-        for p in existing:
-            print(f"  {p.name}")
-        print()
-        print("select one:")
-        print(f"  {wf()} use {existing[0].name}")
-    else:
-        print("start a paper (it is created under the papers root, outside the engine):")
-        print(f"  {wf()} new sarcopenia-mortality")
-    print()
-    print(f"list papers at any time with:  {wf()} papers")
+    # 1.13.0: never list other papers to an agent; the paper is the workspace folder.
+    print("the paper is the folder the user opened as the Kiro workspace; initialise it in place:")
+    print(f"  {wf()} init")
+    print(paths.ASK_ONCE)
 
 
 def _export_paper_env(proj: Path) -> None:
@@ -151,28 +142,10 @@ _PROJECT_SOURCE = ""
 
 
 def paper_header(proj: Path, source: str) -> list[str]:
-    """Which paper this command acts on, and a warning when the global `wf use` marker would
-    have picked a different one (1.7.1). With several papers open in parallel the user-level
-    marker is the easiest way to act on the wrong paper, so every command names its target and
-    explicit context (MEDPAPER_PROJECT, --project, the paper folder you are in) visibly wins."""
-    lines = [f"[medpaper] paper: {proj}  ({source})"]
-    try:
-        marker = paths.active_paper()
-    except SystemExit:
-        marker = None
-    here = paths._find_upwards(Path.cwd())
-    resolved = paths._norm(proj)
-    if marker is not None and paths._norm(marker) != resolved:
-        lines.append(f"[medpaper] note: the global `wf use` marker points at {marker}; this "
-                     f"command acts on {proj} because of {source}")
-    if here is not None and paths._norm(here) != resolved:
-        lines.append(f"[medpaper] WARNING: the working directory is inside paper {here}, but "
-                     f"this command acts on {proj} ({source})")
-    elif here is None and marker is not None and paths._norm(marker) == resolved \
-            and not os.environ.get("MEDPAPER_PROJECT"):
-        lines.append("[medpaper] note: chosen by the global `wf use` marker; open the paper "
-                     "folder or set MEDPAPER_PROJECT to pin it when several papers are active")
-    return lines
+    """Which paper this command acts on (1.7.1). 1.13.0: the paper comes only from the working
+    directory (or MEDPAPER_PROJECT); the global marker is gone, and no other paper's path is
+    ever printed (a command targeting another paper than the cwd's is refused upstream)."""
+    return [f"[medpaper] paper: {proj}  ({source})"]
 
 
 def _load(need_state: bool = True, warn_stderr: bool = True):
@@ -290,8 +263,8 @@ def _gate_lines(results, proj: Path | None = None) -> None:
         # 1.11.0 (#3d): every failure has a legitimate path that is not an engine edit.
         print("  exception path: fix the paper; a journal's own names/rules go in "
               "target_journal.json; paper targets via `wf config set`; a genuine shape "
-              "difference via `wf override init` (.wf/overrides.toml). Never edit pipeline/, "
-              "tools/ or reference/ for one paper.")
+              "difference via `wf override init` (.wf/overrides.toml); only then a project-local "
+              "fork (`wf engine-fork create`). Never edit the global engine.")
 
 
 def _declared_and_free(pipe) -> tuple[set[str], list[str]]:
@@ -325,45 +298,85 @@ def _scaffold(pipe, proj: Path) -> None:
     (tmp / ".gitkeep").touch()
 
 
+def _record_user_files(pipe, proj: Path) -> None:
+    """1.13.0: files the user already had in the folder before `wf init` (an idea note, author
+    info) are the user's, never orphans; they are listed once in .wf/user_files.json."""
+    state_dir = proj / pipe.layout.get("state_dir", ".wf")
+    skip = {pipe.layout.get("state_dir", ".wf"), ".kiro", ".git"}
+    found = sorted(p.relative_to(proj).as_posix() for p in proj.rglob("*")
+                   if p.is_file() and not set(p.relative_to(proj).parts[:1]) & skip
+                   and p.name != ".gitkeep")
+    if found:
+        state_dir.mkdir(parents=True, exist_ok=True)
+        (state_dir / "user_files.json").write_text(
+            json.dumps({"schema": 1, "files": found[:500]}, indent=1, ensure_ascii=False) + "\n",
+            encoding="utf-8")
+
+
 def _finish_paper(pipe, proj: Path, verb: str) -> None:
-    adapters.write_adapters(proj, adapters.paper_adapters(paths.repo_root()), check=False)
+    adapters.write_adapters(proj, adapters.paper_adapters(paths.repo_root(), proj), check=False)
     st = State(proj, pipe.layout.get("state_dir", ".wf"))
     if st.exists() and "spelling" not in st.load().config().get("targets", {}):
         st.set_config("spelling", "american")  # 1.9.0 (#16): decided up front, changeable at S01/S03
-    paths.set_active_paper(proj)
-    print(f"{verb} {pipe.meta.get('name')} {pipe.meta.get('version')} paper at {proj} and selected it")
+    print(f"{verb} {pipe.meta.get('name')} {pipe.meta.get('version')} paper at {proj}")
     print(f"current stage: {pipe.first().id}")
+    print("isolation: the paper guard hook (.kiro/hooks/medpaper-paper-guard.json) blocks other "
+          "papers and engine writes; register datasets in place with `wf data add <path>` "
+          "(never copy them)")
+    try:
+        here = paths._norm(Path.cwd()) == paths._norm(proj)
+    except OSError:
+        here = False
     print(f"\nput your research idea in {proj.as_posix()}/00_input/, then:")
     print(f'  python "{paths.repo_root().as_posix()}/tools/wf.py" status')
-    print(f"\nopen this folder as a Kiro workspace: {proj}")
+    if not here:
+        print(f"\nopen this folder as the Kiro workspace (commands act on the workspace's paper "
+              f"only): {proj}")
+
+
+def _location_refusal(target: Path, source: str) -> tuple[Path | None, str | None]:
+    try:
+        proj = paths.check_paper_location(target, source)
+        why = paths.unsuitable_paper_dir(proj)
+        if why:
+            raise SystemExit(why)
+    except SystemExit as exc:
+        return None, f"{exc}\n{paths.ASK_ONCE}"
+    return proj, None
 
 
 def cmd_init(args) -> int:
-    """Initialise the current folder (or MEDPAPER_PROJECT) as a paper, outside the engine."""
+    """Initialise the working directory (the Kiro workspace the user opened) as a paper, in place."""
     pipe = registry.load()
     env = os.environ.get("MEDPAPER_PROJECT")
     target = Path(env) if env else Path.cwd()
-    try:
-        proj = paths.check_paper_location(target, "MEDPAPER_PROJECT" if env else "wf init")
-        paths.check_not_nested(proj)
-    except SystemExit as exc:
-        print(f"refusing to initialise: {exc}")
-        return 2
-    st = State(proj, pipe.layout.get("state_dir", ".wf"))
+    st = State(target.resolve(), pipe.layout.get("state_dir", ".wf"))
     if st.exists() and not args.force:
         print(f"run state already exists at {st.file}")
         print("keeping existing artifacts and state; use --force only to reset intentionally")
         return 0
+    proj, why = _location_refusal(target, "MEDPAPER_PROJECT" if env else "wf init")
+    if why:
+        print(f"refusing to initialise: {why}")
+        return 2
+    if not st.exists():
+        _record_user_files(pipe, proj)
     _scaffold(pipe, proj)
+    st = State(proj, pipe.layout.get("state_dir", ".wf"))
     st.create(pipe.meta.get("name", "pipeline"), pipe.meta.get("version", "0"), pipe.first().id)
     _finish_paper(pipe, proj, "initialised")
     return 0
 
 
 def cmd_new(args) -> int:
-    """Start a new paper under the papers root, and select it."""
+    """Start a new paper: in place in the working directory (default), or under an explicit
+    root / the central papers root (`--root DIR`, `--central`) only when the user asked."""
     pipe = registry.load()
-    slug = args.slug.strip().lower()
+    slug = (args.slug or "").strip().lower()
+    if not (args.root or args.central):
+        if args.slug and not SLUG_RE.match(slug):
+            print(f"note: '{args.slug}' is only a label here; the paper is this folder")
+        return cmd_init(args)
     if not SLUG_RE.match(slug):
         print(f"'{args.slug}' is not a usable name. Use lowercase letters, digits and hyphens,")
         print("e.g. sarcopenia-mortality")
@@ -377,25 +390,29 @@ def cmd_new(args) -> int:
                     f"--root {root} is inside, equal to or contains the medpaper engine")
         else:
             root = paths.papers_root()[0]
-        proj = paths.check_paper_location(root / slug, "wf new")
-        paths.check_not_nested(proj)
     except SystemExit as exc:
         print(f"refusing to create the paper: {exc}")
         return 2
-    st = State(proj, pipe.layout.get("state_dir", ".wf"))
+    st = State(root / slug, pipe.layout.get("state_dir", ".wf"))
     if st.exists() and not args.force:
-        print(f"a paper named '{slug}' already exists at {proj}")
-        print(f"select it with:  {wf()} use {slug}")
+        print(f"a paper named '{slug}' already exists at {root / slug}")
+        print("open that folder as the Kiro workspace to work on it")
         return 1
+    proj, why = _location_refusal(root / slug, "wf new")
+    if why:
+        print(f"refusing to create the paper: {why}")
+        return 2
     root.mkdir(parents=True, exist_ok=True)
     proj.mkdir(parents=True, exist_ok=True)
     _scaffold(pipe, proj)
+    st = State(proj, pipe.layout.get("state_dir", ".wf"))
     st.create(pipe.meta.get("name", "pipeline"), pipe.meta.get("version", "0"), pipe.first().id)
     _finish_paper(pipe, proj, f"created '{slug}':")
     return 0
 
 
 def cmd_use(args) -> int:
+    """1.13.0: there is no global selection any more; this only says where a paper is."""
     pipe = registry.load()
     if args.slug in (None, ""):
         return cmd_papers(args)
@@ -407,93 +424,67 @@ def cmd_use(args) -> int:
             proj = (cand if cand.is_absolute() else Path.cwd() / cand).resolve()
         else:
             proj = paths.papers_root()[0] / raw.lower()
-        if not (proj / state_dir / "state.json").exists():
-            print(f"no initialised paper at {proj}")
-            try:
-                known = [p.name for p in paths.list_papers()]
-            except SystemExit:
-                known = []
-            print(f"available: {', '.join(known) if known else '(none yet)'}")
-            print(f"create one with:  {wf()} new <slug>")
-            return 1
         proj = paths.check_paper_location(proj, "wf use")
-        paths.set_active_paper(proj)
     except SystemExit as exc:
-        print(f"refusing to select: {exc}")
+        print(f"refusing: {exc}")
         return 2
-    st = State(proj, state_dir).load()
-    print(f"selected {proj}  -  stage {pipe.stage(st.current).index + 1}"
-          f"/{len(pipe.stages)}: {st.current}")
-    print(f"open {proj} as a Kiro workspace to work on it")
+    if not (proj / state_dir / "state.json").exists():
+        print(f"no initialised paper at {proj}")
+        return 1
+    print(f"{proj} is a paper. There is no global selection (1.13.0): open that folder as the "
+          "Kiro workspace (or cd into it); commands act only on the workspace's paper.")
     return 0
 
 
 def cmd_papers(args) -> int:
+    """For humans only: the papers under the central papers root."""
     pipe = registry.load()
     try:
         root, source = paths.papers_root()
     except SystemExit as exc:
         print(f"papers root  !! {exc}")
         return 2
-    print(f"papers root  {root}  ({source})")
-    try:
-        active = paths.active_paper()
-    except SystemExit as exc:
-        print(f"!! {exc}")
-        active = None
+    print(f"papers root  {root}  ({source}; used only for `wf new <slug> --central`)")
     state_dir = pipe.layout.get("state_dir", ".wf")
     rows = []
     if not root.is_dir():
-        print(f"no papers yet; `wf new <slug>` creates {root}")
+        print(f"no papers yet under {root}")
         return 0
-    papers = paths.list_papers()
-    for p in papers:
-        is_active = active is not None and paths.within(p, active) and paths.within(active, p)
+    for p in paths.list_papers():
         try:
             st = State(p, state_dir).load()
             rows.append((p.name, f"{pipe.stage(st.current).index + 1}/{len(pipe.stages)}",
-                         st.current, is_active))
+                         st.current))
         except Exception:  # noqa: BLE001
-            rows.append((p.name, "-", "(unreadable state)", is_active))
-    if active is not None:
-        if not (active / state_dir / "state.json").is_file():
-            print(f"!! stale selection: {active}")
-        elif not paths.within(active, root):
-            print(f"selected (outside papers root): {active}")
+            rows.append((p.name, "-", "(unreadable state)"))
     if not rows:
-        print(f"no papers yet.\n\n  {wf()} new <slug>      e.g. new sarcopenia-mortality")
+        print("no papers yet.")
         return 0
     w = max(len(r[0]) for r in rows)
     print(f"{'':2}{'paper':<{w}}  {'stage':>6}  current")
-    for name, idx, stage, is_active in rows:
-        print(f"{'* ' if is_active else '  '}{name:<{w}}  {idx:>6}  {stage}")
-    print(f"\n* = selected.  Switch with:  {wf()} use <slug>")
+    for name, idx, stage in rows:
+        print(f"  {name:<{w}}  {idx:>6}  {stage}")
+    print("\nopen a paper's folder as the Kiro workspace to work on it")
     return 0
 
 
 def _engine_banner(as_json: bool) -> int:
     """`wf status` in the engine workspace: maintenance-only banner, exit 0."""
     pipe = registry.load()
-    root_line, root, source, n, selected = "", None, "", 0, None
+    root_line, root, source, n = "", None, "", 0
     try:
         root, source = paths.papers_root()
         n = len(paths.list_papers())
         root_line = f"{root}   ({source})"
     except SystemExit as exc:
         root_line = f"!! {exc}"
-    sel_line = "none"
-    try:
-        marker = paths.active_paper()
-        if marker is not None:
-            selected = str(marker)
-            sel_line = (str(marker) if (marker / ".wf/state.json").is_file()
-                        else f"!! stale: {marker}")
-    except SystemExit as exc:
-        sel_line = f"!! {exc}"
+    from . import integrity
+    kind, changed = integrity.engine_state(use_cache=False)
+    integ = kind + (f" ({len(changed)} file(s): {', '.join(changed[:4])})" if changed else "")
     if as_json:
         print(json.dumps({"engine_workspace": True, "engine": str(paths.repo_root()),
                           "papers_root": str(root) if root else None,
-                          "papers_root_source": source, "papers": n, "selected": selected},
+                          "papers_root_source": source, "papers": n, "integrity": kind},
                          indent=2, ensure_ascii=False))
         return 0
     print(BAR)
@@ -503,13 +494,12 @@ def _engine_banner(as_json: bool) -> int:
     print("This folder is the shared workflow. No paper may live in or write to it.")
     print("Use this workspace only to maintain pipeline/, tools/, reference/ and .kiro/.")
     print()
-    print(f"papers root   {root_line}")
+    print(f"papers root   {root_line}  (central root, only for `wf new <slug> --central`)")
     print(f"papers        {n}      (python tools/wf.py papers)")
-    print(f"selected      {sel_line}")
+    print(f"integrity     {integ}")
     print()
-    print("To work on a paper, open its folder as a Kiro workspace:")
-    print(f"  {(root.as_posix() if root else '<papers root>')}/<slug>")
-    print("Start one:    python tools/wf.py new <slug>")
+    print("To work on a paper, open its folder as a Kiro workspace and run `wf init` there "
+          "(in place).")
     print("Engine checks: python tools/wf.py doctor  |  .\\.venv\\Scripts\\python.exe -B tools\\selftest.py")
     return 0
 
@@ -552,8 +542,10 @@ def cmd_status(args) -> int:
     print(f"{pipe.meta.get('name')} {pipe.meta.get('version')}  |  stage {stage.index + 1}/{len(pipe.stages)}  |  {stage.id}")
     print(stage.title)
     print(BAR)
-    print(f"engine  {paths.repo_root()}")
+    print(f"engine  {paths.repo_root()}" + _fork_suffix(proj))
     print(f"paper   {proj}   ({_PROJECT_SOURCE or paths.describe_project_source(pipe.layout)})")
+    for line in _data_lines(proj):
+        print(f"data    {line}")
     # 1.12.0 (C2): both versions, always - the engine that last opened the state and the
     # gate set the paper is pinned to (changes only with `wf migrate --yes`).
     print(f"version engine {pipe.meta.get('version')}; state recorded by "
@@ -618,13 +610,37 @@ def cmd_status(args) -> int:
     return 0
 
 
+def _data_lines(proj: Path) -> list[str]:
+    from . import datasources
+    lines = datasources.describe(proj)
+    return lines or ["(none declared; register each dataset in place: wf data add <path>)"]
+
+
+def _fork_suffix(proj: Path) -> str:
+    """'  [ENGINE FORK of <base> <ver>: N file(s) differ]' when this paper runs its own fork."""
+    if not paths.is_fork_root(paths.repo_root()):
+        return ""
+    from . import enginefork
+    info = paths.fork_info() or {}
+    try:
+        n = len(enginefork.changed_files(proj))
+    except Exception:  # noqa: BLE001
+        n = "?"
+    return (f"  [ENGINE FORK of {info.get('base_engine')} {info.get('base_version')}: {n} "
+            f"file(s) differ; diff in .wf/engine_fork.diff]")
+
+
 def handoff_lines(pipe, st, proj: Path) -> list[str]:
     """1.12.0 (E1): a compact context pack (<= ~60 lines) for a new session or a delegated step."""
     from . import reviewrounds as rr
     from .checks.statecheck import parked_visual
     stage = pipe.stage(st.current)
     details = paths.repo_root() / "reference" / "stage_details" / Path(stage.card_path()).name
-    out = [f"paper: {proj}",
+    fork = paths.is_fork_root(paths.repo_root())
+    out = [f"paper: {proj}  (this workspace only; never read or write another paper)",
+           f"engine: {paths.repo_root()}" + (" (project-local fork)" if fork else " (read-only)")
+           + _fork_suffix(proj),
+           *[f"data: {d}" for d in _data_lines(proj)],
            f"engine {pipe.meta.get('version')} | state recorded by {st.data.get('pipeline_version')}"
            f" | paper pinned to {st.engine_pin}",
            f"stage: {stage.id} ({stage.index + 1}/{len(pipe.stages)}) - {stage.title}"
@@ -1035,6 +1051,7 @@ def cmd_tree(args) -> int:
 def cmd_clean(args) -> int:
     pipe, st, proj = _load()
     declared, allowed = _declared_and_free(pipe)
+    declared = set(declared) | paths.user_files(proj)
     tmp = pipe.layout.get("temp_dir", "temp")
     scratch, orphans = [], []
     for p in proj.rglob("*"):
@@ -1135,30 +1152,42 @@ def cmd_doctor(args) -> int:
     pipe = registry.load()
     rows: list[tuple[str, str, str]] = []
     proj: Path | None = None
-    selection = ("current paper", "none selected", f"start one: {wf()} new <slug>")
+    selection = ("current paper", "none selected", f"initialise this folder: {wf()} init")
     try:
-        proj = paths.project_dir(pipe.layout)
-        selection = ("current paper", "ok", str(proj))
+        proj = paths.project_dir(pipe.layout, check_engine=False)
+        selection = ("current paper", "ok", f"{proj} (from the working directory)")
     except paths.EngineWorkspace:
-        stale = None
-        try:
-            marker = paths.active_paper()
-            if marker is not None and not (marker / ".wf/state.json").is_file():
-                stale = marker
-        except SystemExit as exc:
-            stale = str(exc)
-        selection = (("current paper", "BROKEN", f"stale marker: {stale}") if stale else
-                     ("current paper", "ok", "engine workspace (no paper - expected)"))
+        selection = ("current paper", "ok", "engine workspace (no paper - expected)")
     except SystemExit as exc:
         msg = str(exc).replace("\n", " ")
-        if "marker names" in msg or isinstance(exc, paths.PaperLocationError):
-            selection = ("current paper", "BROKEN", msg)
+        selection = (("current paper", "BROKEN", msg) if isinstance(exc, paths.PaperLocationError)
+                     else ("current paper", "none selected", msg[:140]))
+    from . import integrity
+    kind, changed = integrity.engine_state(use_cache=False)
+    rows_integrity = ("engine integrity", "BROKEN" if kind == "modified" else "ok",
+                      {"clean": "committed engine, no local edits",
+                       "dev": "MEDPAPER_ENGINE_DEV=1 (engine development)",
+                       "worktree": "maintenance worktree",
+                       "fork": "project-local engine fork (edits allowed, diff recorded)",
+                       "unverifiable": "no git and no ENGINE_MANIFEST.json (cannot verify)"}
+                      .get(kind, "local edits: " + ", ".join(changed[:6])
+                           + " - paper commands refuse until the maintainer restores them"))
+    try:
+        if paths.active_marker().is_file():
+            rows_integrity_legacy = ("legacy wf use marker", "ok",
+                                     f"{paths.active_marker()} is ignored since 1.13.0 "
+                                     "(papers come from the workspace)")
         else:
-            selection = ("current paper", "none selected", msg[:140])
+            rows_integrity_legacy = None
+    except SystemExit:
+        rows_integrity_legacy = None
 
     rows.append(("python", "ok", sys.version.split()[0]))
     rows.append(("pipeline.toml", "ok" if paths.pipeline_file().exists() else "MISSING",
                  paths.rel(paths.pipeline_file())))
+    rows.append(rows_integrity)
+    if rows_integrity_legacy:
+        rows.append(rows_integrity_legacy)
 
     root = paths.repo_root()
     kiro_files = (
@@ -1247,6 +1276,11 @@ def cmd_doctor(args) -> int:
                          "nested paper(s): " + ", ".join(str(p) for p in nested[:3])))
         else:
             rows.append(("paper layout", "ok", str(proj)))
+        guard = proj / ".kiro/hooks/medpaper-paper-guard.json"
+        rows.append(("paper guard hook", "ok" if guard.is_file() else "MISSING",
+                     "isolation hook installed" if guard.is_file() else
+                     f'python "{paths.repo_root().as_posix()}/tools/install_adapters.py" '
+                     f'--paper "{proj}"'))
 
     # The driver is stdlib-only; the science deps belong to the engine venv, so probe
     # that interpreter rather than whichever one happens to be running this command.
@@ -1447,7 +1481,8 @@ def _r_rows(policy: dict, proj: Path | None = None) -> list[tuple[str, str, str]
 
 ENGINE_TOP_LEVEL = frozenset({".git", ".gitignore", ".kiro", ".venv", "bootstrap.py", "docs",
                               "LICENSE", "pipeline", "README.md", "reference",
-                              "requirements.txt", "tools", "workflow.md"})
+                              "requirements.txt", "tools", "workflow.md", "ENGINE_FORK.json",
+                              "ENGINE_MANIFEST.json"})
 ENGINE_DATA_SUFFIXES = (".xlsx", ".docx", ".pdf", ".csv", ".tsv", ".sav", ".dta", ".parquet",
                         ".rds", ".rdata", ".zip")
 
@@ -1587,6 +1622,108 @@ def cmd_run_script(args) -> int:
     return int(outcome.returncode)
 
 
+def cmd_engine_fork(args) -> int:
+    """1.13.0: a project-local engine copy for this paper only (never edit the global engine)."""
+    from . import enginefork
+    pipe = registry.load()
+    try:
+        proj = paths.project_dir(pipe.layout, check_engine=False)
+    except paths.EngineWorkspace as exc:
+        print(str(exc))
+        return 2
+    action = args.action or "status"
+    running_fork = paths.is_fork_root(paths.repo_root())
+    have = enginefork.info(proj)
+    if action == "create":
+        if have:
+            print(f"this paper already has an engine fork: {enginefork.fork_root(proj)}")
+            return 1
+        try:
+            rec = enginefork.create(proj, paths.repo_root())
+        except ValueError as exc:
+            print(f"refused: {exc}")
+            return 2
+        fork = enginefork.fork_root(proj)
+        st = State(proj, pipe.layout.get("state_dir", ".wf"))
+        if st.exists():
+            st.load().event("engine_fork", f"created from {rec['base_engine']} "
+                                           f"{rec['base_version']} ({rec['base_source']})")
+            st.save()
+        print(f"engine fork created: {fork}  (base {rec['base_version']}, {rec['base_source']})")
+        print("the paper's .kiro adapters now call the fork; edit only files under it, then "
+              "record the change for the maintainer:")
+        print(f'  python "{fork.as_posix()}/tools/wf.py" engine-fork diff')
+        return 0
+    if not have:
+        print("no engine fork in this paper (it uses the global engine read-only).")
+        print(f"create one only when paper overrides cannot express the need:  {wf()} "
+              "engine-fork create")
+        return 0 if action == "status" else 1
+    if action == "diff":
+        out, changes = enginefork.write_diff(proj)
+        for status, rel in changes[:30]:
+            print(f"  {status} {rel}")
+        print(f"{len(changes)} file(s) differ from base {have.get('base_version')}; diff: {out}")
+        return 0
+    if action == "remove":
+        out = enginefork.remove(proj)
+        print(f"fork removed; adapters point at {have.get('base_engine')} again; final diff kept: "
+              f"{out}")
+        return 0
+    changes = enginefork.changed_files(proj)
+    print(f"engine fork {enginefork.fork_root(proj)}  base {have.get('base_engine')} "
+          f"{have.get('base_version')} ({have.get('base_source')}); {len(changes)} file(s) differ"
+          + ("" if running_fork else "  [this command ran from the global engine]"))
+    return 0
+
+
+def cmd_data(args) -> int:
+    """1.13.0: declare the user's datasets in place (read-only, never copied)."""
+    from . import datasources
+    pipe = registry.load()
+    proj = paths.project_dir(pipe.layout)
+    action = args.action
+    if action == "add":
+        if not args.path:
+            print("wf data add <absolute path> [--name NAME]")
+            return 1
+        try:
+            rec = datasources.add(proj, args.path, args.name, args.note or "")
+        except ValueError as exc:
+            print(f"refused: {exc}")
+            return 2
+        st = State(proj, pipe.layout.get("state_dir", ".wf")).load()
+        st.event("data_source", f"{rec['name']}: {rec['path']} ({rec['files']} file(s), in place)")
+        st.save()
+        print(f"registered {rec['name']}: {rec['path']}  ({rec['kind']}, {rec['files']} file(s), "
+              f"{rec['bytes'] / 1e6:,.1f} MB) - read in place, read-only, never copied")
+        print("analysis code: from analysis.datasources import source_path; "
+              f"source_path('{rec['name']}')")
+        return 0
+    if action == "remove":
+        ok = datasources.remove(proj, args.path or args.name or "")
+        print("removed" if ok else "no such data source")
+        return 0 if ok else 1
+    if action == "verify":
+        bad = 0
+        for s in datasources.load(proj):
+            p = Path(s["path"])
+            if not p.exists():
+                print(f"  !! {s['name']}: {p} is missing")
+                bad += 1
+                continue
+            n = len(datasources.inventory(proj)) if args.hash else None
+            kind, size, files, _ = datasources._scan(p)
+            same = size == s.get("bytes") and files == s.get("files")
+            bad += 0 if same else 1
+            print(f"  {'ok' if same else 'CHANGED'} {s['name']}: {files} file(s), "
+                  f"{size / 1e6:,.1f} MB" + (f"; {n} file hash(es) cached" if n else ""))
+        return 0 if bad == 0 else 2
+    lines = datasources.describe(proj)
+    print("\n".join(lines) if lines else "no data sources declared (wf data add <path>)")
+    return 0
+
+
 def cmd_override(args) -> int:
     """Create, inspect or validate this paper's workflow overlay."""
     master = registry.load()
@@ -1700,17 +1837,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    p = sub.add_parser("init", help="initialise the current folder (outside the engine) as a paper")
+    p = sub.add_parser("init", help="initialise the working directory (the Kiro workspace the "
+                                    "user opened) as a paper, in place")
     p.add_argument("--force", action="store_true")
     p.set_defaults(fn=cmd_init)
 
-    p = sub.add_parser("new", help="start a new paper under the papers root and select it")
-    p.add_argument("slug", help="short lowercase name, e.g. sarcopenia-mortality")
-    p.add_argument("--root", help="create it under this folder instead of the papers root")
+    p = sub.add_parser("new", help="start a paper in place (default); --root DIR or --central "
+                                   "only when the user asked for that location")
+    p.add_argument("slug", nargs="?", help="short lowercase name, e.g. sarcopenia-mortality")
+    p.add_argument("--root", help="create <root>/<slug> (only on the user's explicit request)")
+    p.add_argument("--central", action="store_true",
+                   help="create it under the central papers root (only on explicit request)")
     p.add_argument("--force", action="store_true")
     p.set_defaults(fn=cmd_new)
 
-    p = sub.add_parser("use", help="select which paper the commands act on")
+    p = sub.add_parser("use", help="say where a paper is (there is no global selection)")
     p.add_argument("slug", nargs="?")
     p.set_defaults(fn=cmd_use)
 
@@ -1796,6 +1937,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("script_args", nargs=argparse.REMAINDER)
     p.set_defaults(fn=cmd_run_script)
 
+    p = sub.add_parser("engine-fork", help="project-local engine copy for this paper only "
+                                           "(create | status | diff | remove)")
+    p.add_argument("action", nargs="?", choices=("create", "status", "diff", "remove"))
+    p.set_defaults(fn=cmd_engine_fork)
+
+    p = sub.add_parser("data", help="declare datasets in place, read-only, never copied "
+                                    "(add PATH | list | verify | remove NAME)")
+    p.add_argument("action", nargs="?", default="list", choices=("add", "list", "verify", "remove"))
+    p.add_argument("path", nargs="?")
+    p.add_argument("--name")
+    p.add_argument("--note")
+    p.add_argument("--hash", action="store_true", help="verify: also (re)hash changed files")
+    p.set_defaults(fn=cmd_data)
+
     p = sub.add_parser("override", help="paper-local workflow shape; never edits the master")
     p.add_argument("action", choices=("init", "show", "validate"))
     p.add_argument("--force", action="store_true",
@@ -1837,6 +1992,7 @@ def _run_logged(args) -> int:
     from datetime import datetime, timezone
     log = args.log.resolve()
     log.parent.mkdir(parents=True, exist_ok=True)
+    print(f"[wf] log: {log}", file=sys.stderr)
     rc = 1
     with log.open("w", encoding="utf-8") as fh:
         out, err = sys.stdout, sys.stderr
@@ -1864,17 +2020,30 @@ def main(argv: list[str] | None = None) -> int:
         ap.error("config set needs KEY and VALUE")
     if args.cmd == "config" and args.action == "get" and not args.key:
         ap.error("config get needs KEY")
+    from . import integrity, logs
     if getattr(args, "wait", False) and not os.environ.get("MEDPAPER_WAIT_CHILD"):
         # 1.11.0 (#2g): one blocking call instead of background + sleep polling.
         from . import longrun
         try:
-            log = args.log or (paths.project_dir() / ".wf" / "logs" / f"wf_{args.cmd}.log")
-        except (SystemExit, Exception):  # noqa: BLE001 - no paper: log next to the cwd
-            log = args.log or Path.cwd() / f"wf_{args.cmd}.log"
+            proj = paths.project_dir()
+            log = logs.log_path(proj, f"wf_{args.cmd}", args.log)
+        except integrity.EngineModified as exc:
+            print(str(exc))
+            return 3
+        except (SystemExit, Exception):  # noqa: BLE001 - no paper: run in the foreground
+            args.wait = False
+            return args.fn(args)
         return longrun.run_quiet([sys.executable, sys.argv[0], *(argv if argv is not None
                                                                   else sys.argv[1:])],
                                  log, f"wf {args.cmd}")
     if getattr(args, "log", None):
+        try:
+            args.log = logs.log_path(paths.project_dir(), f"wf_{args.cmd}", args.log)
+        except integrity.EngineModified as exc:
+            print(str(exc))
+            return 3
+        except (SystemExit, Exception):  # noqa: BLE001
+            pass
         rc = _run_logged(args)
         _progress(args, rc)
         return rc
@@ -1882,6 +2051,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         rc = args.fn(args)
         return rc
+    except integrity.EngineModified as exc:
+        print(str(exc))
+        rc = 3
+        return 3
     except paths.EngineWorkspace as exc:
         print(str(exc))
         rc = 2

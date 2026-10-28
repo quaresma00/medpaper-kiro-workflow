@@ -54,19 +54,18 @@ stage card. Neither contains the workflow, so editing a stage never means editin
 
 ## Use
 
-One engine drives many papers. The engine folder is maintenance-only; every paper lives under
-the papers root (`MEDPAPER_PAPERS_ROOT`, else `papers_root` in `~/.medpaper/config.toml`, else
-`<engine parent>/medpaper_papers`) and is opened as its own Kiro workspace:
+One engine drives many papers. The engine folder is maintenance-only and read-only for paper
+sessions. A paper is the folder you open as the Kiro workspace; initialise it there, in place:
 
 ```powershell
-python tools/wf.py new sarcopenia-mortality   # creates <papers root>/sarcopenia-mortality/ and selects it
-python tools/wf.py papers                     # list them and the stage each is at
-python tools/wf.py use other-paper            # switch (user-level marker ~/.medpaper/active)
+python <engine>/tools/wf.py init                  # this folder becomes the paper
+python <engine>/tools/wf.py data add G:/data/x    # datasets stay where they are (read-only, never copied)
+python <engine>/tools/wf.py new <slug> --central  # only if you want it under the central papers root
 ```
 
-`wf new` also writes the paper's own `.kiro/` steering and hooks, which call the engine by
-absolute path. Open the printed folder in Kiro, put your research idea file in its
-`00_input/`, then in Kiro chat:
+`wf init` also writes the paper's own `.kiro/` steering and hooks (status, skill guard, frozen
+guard, paper isolation guard), which call the engine by absolute path. Put your research idea
+file in `00_input/`, then in Kiro chat:
 
 ```
 Start the medpaper pipeline. My research idea is in #00_input/idea.md
@@ -102,7 +101,7 @@ Four stages need your input and will stop to ask regardless: S01 intake, S17 fro
 
 | Command | Purpose |
 |---|---|
-| `wf new <slug>` / `wf papers` / `wf use <slug>` | Create, list and switch papers |
+| `wf init` / `wf data add <path>` / `wf engine-fork` | Paper in place, datasets in place, project-local engine fork |
 | `wf tree -v` | Whole pipeline with outputs and gates |
 | `wf card S11` | Read any stage card |
 | `wf check S09` | Run any gate without advancing |

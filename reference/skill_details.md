@@ -41,22 +41,25 @@ interrupted session resumes from the paper alone. Medical presentation (1.11.0):
 names become clinical labels via `01_protocol/display_dictionary.json`; no engineering
 language (strings, fields, parsed, snapshot, lines read ...) outside Supplementary Methods.
 
-## One engine, many papers
+## One engine, many papers (1.13.0)
 
 ```
-python tools/wf.py new sarcopenia-mortality   # creates <papers root>/<slug>/ and selects it
-python tools/wf.py papers                     # list them and the stage each is at
-python tools/wf.py use other-paper            # switch (user-level marker ~/.medpaper/active)
+python <engine>/tools/wf.py init                 # in the Kiro workspace the user opened: the paper, in place
+python <engine>/tools/wf.py data add G:/data/x   # register a dataset in place (read-only, never copied)
+python <engine>/tools/wf.py engine-fork create   # only if overrides cannot express a needed engine change
 ```
 
-The engine is the mother workflow and maintenance-only: no paper lives in it, is resolved in
-it or writes into it. Papers live under the papers root (`MEDPAPER_PAPERS_ROOT`, else
-`papers_root` in `~/.medpaper/config.toml`, else `<engine parent>/medpaper_papers`), and each
-paper is opened as its own Kiro workspace; `wf new` writes its `.kiro/` adapters, which call
-the engine by absolute path. `status` prints which paper it resolved and why. Resolution order:
-`MEDPAPER_PROJECT`, then an initialised paper at or above the working directory, then the
-paper selected with `wf use`. From the engine folder itself, paper-driving commands are
-refused and `wf status` prints a maintenance banner. A stale selection fails closed.
+The engine is the mother workflow, shared and read-only for paper sessions: no paper lives in
+it, is resolved in it or writes into it, and paper commands refuse to run when it has local
+edits (`wfcore/integrity.py`). The paper is the workspace folder; the paper is resolved only
+from the working directory (or `MEDPAPER_PROJECT` set by its own adapters) and a command naming
+another paper is refused. The old `wf use` marker is ignored. The central papers root
+(`MEDPAPER_PAPERS_ROOT`, `papers_root` in `~/.medpaper/config.toml`, `<engine parent>/
+medpaper_papers`) is used only for `wf new <slug> --central` on explicit request; `wf papers`
+is for humans. Every paper gets `.kiro/hooks/medpaper-paper-guard.json` (blocks other papers,
+archives, stray temp files, engine writes). A fork lives in `<paper>/.wf/engine_fork/` with
+`ENGINE_FORK.json`; it drives only its paper, reuses the global venv, and its diff
+(`.wf/engine_fork.diff`) is shown by `wf handoff` and S25 for upstreaming.
 
 ## Python and R
 
@@ -284,10 +287,11 @@ tools/text/polish.py         de-AI + academic-English linter, fact-preservation 
 tools/rework.py              routes a revision to the earliest owning stage
 tools/package_*.py           submission package build, content check, review freeze
 tools/hooks/skill_guard.py   refuses skills that would replace a stage
+tools/hooks/paper_guard.py   isolation hook: other papers, archives, temp, engine writes
 reference/                   figure, table and Methods standards; archetypes; skill policy
 reference/language_policy.toml      Python/R division of labour and required R packages
 reference/reporting_guidelines.toml reporting-guideline item lists for an on-demand S23 checklist
-<papers root>/<slug>/        the paper being written (its own Kiro workspace); state in .wf/
+<workspace folder>/          the paper being written (the Kiro workspace itself); state in .wf/
 ```
 
 ## Handoff discipline

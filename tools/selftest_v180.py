@@ -697,8 +697,11 @@ def run_runtime(tmp: Path, record, section) -> None:
            proc.returncode == 0 and why in handoff and
            (why in proc.stdout.decode("utf-8", "strict") or proc.stdout.decode("utf-8", "strict") != ""),
            proc.stdout[-200:].decode("utf-8", "replace"))
-    record("wf check --log writes a UTF-8 log ending with a completion marker",
-           log.is_file() and "[wf] finished rc=" in log.read_text(encoding="utf-8"),
+    # 1.13.0: logs live only in .wf/logs/ (one file per command); a path elsewhere is redirected.
+    log = P / ".wf/logs/check.log"
+    record("wf check --log writes a UTF-8 log ending with a completion marker (in .wf/logs/)",
+           log.is_file() and "[wf] finished rc=" in log.read_text(encoding="utf-8")
+           and not (P / "temp/check.log").exists(),
            chk.stdout[-200:].decode("utf-8", "replace"))
     from wfcore.state import State
     M = tmp / "mig"

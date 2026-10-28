@@ -46,7 +46,7 @@ def _paths(payload: str) -> list[str]:
 def blocked(payload: str) -> str | None:
     try:
         from wfcore import paths, revision, scifreeze
-        project = paths.project_dir().resolve()
+        project = paths.project_dir(check_engine=False).resolve()
     except (Exception, SystemExit):  # noqa: BLE001 - no paper selected: nothing to guard
         return None
     rels = []
