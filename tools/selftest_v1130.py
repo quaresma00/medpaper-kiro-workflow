@@ -816,6 +816,34 @@ def run_g4(tmp: Path, record, section) -> None:
            h_long >= floor - 0.01 and w_long > 3.0 and w_short >= 5.5,
            f"long {w_long}x{h_long} (floor {floor:.2f}); short {w_short}x{h_short}")
 
+    def _fig_body(img_h_in: float, legend_words: int) -> ET.Element:
+        w = docxaudit.W
+        xml = (f'<w:document xmlns:w="{w}" xmlns:wp="{docxaudit.WP}"><w:body>'
+               '<w:p><w:r><w:br w:type="page"/></w:r></w:p>'
+               f'<w:p><w:r><w:drawing><wp:inline><wp:extent cx="5000000" '
+               f'cy="{int(img_h_in * 914400)}"/></wp:inline></w:drawing></w:r></w:p>'
+               '<w:p><w:r><w:t>Fig. 1</w:t></w:r></w:p>'
+               f'<w:p><w:r><w:t>{" ".join(["word"] * legend_words)}</w:t></w:r></w:p>'
+               '</w:body></w:document>')
+        return ET.fromstring(xml)
+    fit = lambda probs: not any("do not fit one page" in x for x in probs)  # noqa: E731
+    record("G4 layout audit: a readable figure whose long legend continues overleaf passes; "
+           "an oversized figure beside a short legend still fails",
+           fit(docxaudit.keep_problems(_fig_body(5.33, 300)))
+           and fit(docxaudit.keep_problems(_fig_body(5.8, 60)))
+           and not fit(docxaudit.keep_problems(_fig_body(9.0, 60))))
+    from wfcore import dataproof
+    rows = [{"path": "02_data/raw/a_2022Q3.zip", "sha256": "1", "bytes": 1},
+            {"path": "02_data/raw/a_2022q1.zip", "sha256": "2", "bytes": 2}]
+    order_probs: list[str] = []
+    dataproof._same_inventory(list(reversed(rows)), rows, "raw_files", order_probs)
+    changed_probs: list[str] = []
+    dataproof._same_inventory([dict(rows[0], sha256="x"), rows[1]], rows, "raw_files",
+                              changed_probs)
+    record("G4 raw_files inventory comparison ignores list order (pre-1.13 manifests are in "
+           "case-insensitive Path order) but still catches a changed hash",
+           not order_probs and bool(changed_probs), f"{order_probs} | {changed_probs}")
+
 
 def _gate(p: Path, name: str, stage: str, **spec):
     import selftest_v180 as v180

@@ -60,6 +60,10 @@ def heading_keep_problems(root) -> list[str]:
 
 
 KEEP_MARKERS = ("keepNext", "keepLines", "pageBreakBefore")
+# An embedded figure keeps at least this share of the usable page height (or its natural size
+# if smaller); a legend too long to share that page continues on the next page by design.
+# build_docx.figure_size and keep_problems share this value.
+FIGURE_MIN_PAGE_FRACTION = 0.55
 WP = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
 
 
@@ -148,7 +152,12 @@ def keep_problems(root, styles_root=None) -> list[str]:
                 and kids[k].find(".//w:drawing", NS) is None and k - i <= 12:
             legend_chars += len(_ptext(kids[k])) + 60
             k += 1
-        if img_h + legend_chars / 95 * 0.25 > usable + 0.05:
+        legend_h = legend_chars / 95 * 0.25
+        floor = usable * FIGURE_MIN_PAGE_FRACTION
+        # Not a defect: the image is no larger than the readable floor, or the legend is too
+        # long to share a page with a readable image - the legend then continues overleaf.
+        by_design = img_h <= floor + 0.05 or legend_h > usable - floor
+        if img_h + legend_h > usable + 0.05 and not by_design:
             out.append(f"figure '{_ptext(nxt)[:24]}': image ({img_h:.1f} in) and legend do not "
                        f"fit one page ({usable:.1f} in usable)")
     return sorted(set(out))

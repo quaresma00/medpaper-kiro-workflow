@@ -246,7 +246,11 @@ def _same_inventory(declared: object, actual: list[dict], label: str, problems: 
             problems.append(f"{label}[{index}] is not an object")
             continue
         normalized.append({"path": item.get("path"), "sha256": item.get("sha256"), "bytes": item.get("bytes")})
-    if normalized != actual:
+    # Order is not content: manifests written before 1.13.0 list files in Windows Path order
+    # (case-insensitive: "2022q1" before "2022Q3"), raw_inventory now sorts by string.
+    def _by_path(rows: list[dict]) -> list[dict]:
+        return sorted(rows, key=lambda x: str(x.get("path", "")))
+    if _by_path(normalized) != _by_path(actual):
         actual_paths = {x["path"] for x in actual}
         declared_paths = {str(x.get("path", "")) for x in normalized}
         missing = sorted(actual_paths - declared_paths)

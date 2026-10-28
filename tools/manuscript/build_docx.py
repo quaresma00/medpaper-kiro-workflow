@@ -50,8 +50,9 @@ FORBIDDEN_PARAGRAPH_CONTROLS = (
 )
 HEADING_ONLY_CONTROLS: tuple[str, ...] = ()
 # Embedded figures keep at least this share of the usable page height (or their natural size if
-# smaller); a legend too long to share the page continues on the next page instead.
-FIGURE_MIN_PAGE_FRACTION = 0.55
+# smaller); a legend too long to share the page continues on the next page instead. One value,
+# shared with the layout audit (docxaudit.keep_problems).
+FIGURE_MIN_PAGE_FRACTION = docxaudit.FIGURE_MIN_PAGE_FRACTION
 PAGE_BREAK_MD = '```{=openxml}\n<w:p><w:r><w:br w:type="page"/></w:r></w:p>\n```'
 THEMATIC_BREAK_RE = re.compile(
     r"(?m)^\s{0,3}(?:(?:\*\s*){3,}|(?:-\s*){3,}|(?:_\s*){3,})\s*$"
@@ -1184,6 +1185,12 @@ def prepare_source(kind: str, inputs: list[Path], project: Path, workdir: Path,
                         out.append(PAGE_BREAK_MD)
                     if i == 0 and head_text:
                         out.append(head_text)
+                        # Text before the first figure (e.g. a Graphical Abstract legend) keeps
+                        # its own page; the figure itself then starts on a new page. A bare
+                        # "Figure legends" heading stays with the first figure.
+                        if any(line.strip() and not line.lstrip().startswith("#")
+                               for line in head_text.splitlines()):
+                            out.append(PAGE_BREAK_MD)
                     if img is not None:
                         w, h = figure_size(img, block, style, pres,
                                            extra_lines=2 if i == 0 and head_text else 1)
