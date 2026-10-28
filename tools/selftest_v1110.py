@@ -440,9 +440,10 @@ def run_repro_long(tmp: Path, record, section) -> None:
                           "the model. Earlier analyses were revised.")
     clean = backstage_hits("The internal review board approved the study. Two reviewers screened "
                            "records independently; a round of chemotherapy was given.")
+    # 1.13.0 (#8): the advice is now simply to describe the analysis performed.
     record("backstage list covers review/round/internal/rerun; IRB and clinical 'round' pass; "
-           "post hoc wording suggested", len(hits) >= 3 and not clean
-           and POST_HOC_PHRASE == "added after the data were examined", f"{hits} | {clean}")
+           "the analysis is simply described", len(hits) >= 3 and not clean
+           and POST_HOC_PHRASE == "describe the analysis performed", f"{hits} | {clean}")
 
 
 def run_freeze_final(tmp: Path, record, section) -> None:

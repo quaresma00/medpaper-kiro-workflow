@@ -4,11 +4,15 @@ Goal: the complete protocol-defined data, with an auditable trail, described bef
 Details (pilot/sampling markers, manifest fields, source-limited path): `reference/stage_details/S04_data.md`.
 
 ## Do
-1. Run the full retrieval from `02_data/acquisition_plan.md`: scripts in
-   `02_data/acquisition/`, raw payloads and count/page receipts in `02_data/raw/` (read-only
-   afterwards). Python for acquisition (`reference/language_policy.toml`); save raw bodies
-   verbatim; resolve the paper root with `wfcore.paths.project_dir()` and run through
-   `.\.venv\Scripts\python.exe tools/wf.py run-script 02_data/acquisition/<script>.py`.
+1. Data the user already has (local mirror, registry export, database files) is used in
+   place, read-only - never copied, hard-linked or fully extracted into the paper:
+   `.\.venv\Scripts\python.exe tools/wf.py data add <dataset_path> --name <name>`. Scripts
+   read it with `analysis.datasources` `source_path('<name>')` / `open_member(...)` (R
+   `tools/R/medsources.R`: `medpaper_source_path()`, `medpaper_unz()`); evidence and
+   `raw_files` use `datasource:<name>/<file>`. Only data you download (API pages, count
+   receipts) goes to `02_data/raw/` (read-only afterwards). Python for acquisition
+   (`reference/language_policy.toml`); resolve the paper root with
+   `wfcore.paths.project_dir()`; run via `tools/wf.py run-script 02_data/acquisition/<s>.py`.
    Request the source total first, exhaust every page/cursor, no convenience cap.
 2. Cleaning, recoding, exclusions and merges: scripts in `03_analysis/code/` writing
    `02_data/derived/`; no manual spreadsheet edits.
@@ -41,8 +45,9 @@ Details (pilot/sampling markers, manifest fields, source-limited path): `referen
 
 ## Gate
 data_acquisition_complete (non-overridable: raw recount, hashes, pagination, cap scan),
-variable crosswalk, environment receipts, paper-scoped scripts, temp clean. De-identify
-before any data reaches a prompt. No plotting.
+data_not_copied (no copy of a declared dataset in the paper), variable crosswalk,
+environment receipts, paper-scoped scripts, temp clean. De-identify before any data
+reaches a prompt. No plotting.
 
 ## Close
 ```

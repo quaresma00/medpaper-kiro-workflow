@@ -88,9 +88,10 @@ Hard rules, several mechanically enforced by the gates:
   slice when the source can return everything.
 - Every manuscript number must already exist in `03_analysis/results/*.json`, written by
   `write_results()` (Python `${tool}analysis/results.py`, R `${tool}R/medresults.R`), which
-  records the environment. S06 re-executes the analysis in a sandbox (`python
-  "${tool}reproduce.py" run --wait`, one blocking call with a heartbeat; log in `.wf/logs/`;
-  `REUSED` when nothing changed) and the result must be identical.
+  records the environment. S06 re-executes the analysis once in a paper-local sandbox
+  (`python "${tool}reproduce.py" run --wait`, one blocking call; data read in place, never
+  copied; log in `.wf/logs/`) and the result must be identical. Later stages accept the proof
+  by hash; never re-run it "to be safe" (`wf check` names the cheapest next command).
 - Context for a new session or a delegated step: pass the output of `${wf} handoff`, not a
   hand-written brief. Manuscript prose (S08/S09/S14/S16 and post-review rewrites) is written
   by the `medpaper-clinical-writer` agent from `.wf/writer_bundle/<stage>/`.

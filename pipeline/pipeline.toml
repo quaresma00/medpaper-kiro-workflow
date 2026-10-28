@@ -42,7 +42,7 @@ invariants = [
   "Discovery helpers may find literature, but formal metadata must be freshly re-fetched through tools/pubmed/verify.py. A verified=true boolean is never evidence by itself: every citable key must pass the hashed raw-PubMed XML receipt, exact library hash, PMID/DOI match and independent live S13 EFetch gate. Never hand-write or patch library.json, verified.json, refs.bib or refs.ris to satisfy a gate.",
   "A hash proves that bytes did not change, never that they are the right paper. Every downloaded or registered full text must identify itself as the requested article - a structured identifier in JATS/HTML metadata, the library DOI present in a PDF, or a title you read off page one and recorded with `fulltext.py verify --confirm-identity`. Absent that, it counts as unproven, not as fine. Identifiers are read only from an article's own metadata: a descendant XML search sweeps in every cited reference's ArticleIdList, which is how a bibliography entry's PMCID once replaced the article's own and five deep reads landed on different papers with clean receipts.",
   "Acquire the complete protocol-defined data universe whenever the source makes it available. Never silently use LIMIT/TOP, head(), sample(), first-N slices, fixed page counts, date narrowing, or preview caps to save time, tokens, download volume or compute. A schema pilot is non-analytic and must be followed by full acquisition; every source needs machine-countable total and received receipts plus terminal-pagination proof. Replacing a census with scientific sampling and accepting source-imposed partial access each require the user's explicit recorded authorization. This gate cannot be waived with --force.",
-  "Every number in the manuscript must already exist in 03_analysis/results/*.json, written there by executed code through write_results() (Python tools/analysis/results.py, R tools/R/medresults.R), which records the environment; S06 re-executes every analysis script in a sandbox and requires identical results, and S17, S23 and S25 re-check that proof against the current files. Never compute a statistic in your head or in prose.",
+  "Every number in the manuscript must already exist in 03_analysis/results/*.json, written there by executed code through write_results() (Python tools/analysis/results.py, R tools/R/medresults.R), which records the environment; S06 re-executes the analysis once in a paper-local sandbox (data read in place, never copied) and requires identical results; S17, S23 and S25 accept that proof by hash, and only a change of analysis code, data, manifest or tolerances re-runs the affected scripts. Never run reproduce.py 'to be safe' - `wf check` says whether the proof is valid and the cheapest next command. Never compute a statistic in your head or in prose.",
   "Draft scientific sections only at their active stages; the optional supplementary Methods file belongs only to S08. S17 then assembles the canonical full_manuscript.md from the completed, gated sections.",
   "Language polishing may change wording only. Never a number, never a citation, never a figure/table reference. A snapshot is taken before the pass and the gate diffs against it.",
   "Do not create files outside the stage's declared `outputs`. Scratch work goes in project/temp/ and is deleted before `wf advance`.",
@@ -226,16 +226,17 @@ card = "stages/S04_data.md"
 outputs = ["02_data/acquisition_manifest.json", "02_data/codebook.md", "02_data/provenance.md", "03_analysis/results/dataset_summary.json"]
 [[stage.gate]]
 check = "outputs_exist"
-[[stage.gate]]
-check = "file_count"
-glob = "02_data/raw/**"
-min = 1
+# 1.13.0 (#1): no "a file must exist in 02_data/raw/" rule any more - the user's own dataset is
+# a declared data source used in place; data_acquisition_complete needs raw payloads or sources.
 [[stage.gate]]
 check = "json_keys"
 path = "03_analysis/results/dataset_summary.json"
 keys = ["n_rows", "n_cols", "variables", "missingness", "source_hash", "acquisition_scope", "acquisition_status"]
 [[stage.gate]]
 check = "data_acquisition_complete"
+[[stage.gate]]
+check = "data_not_copied"
+since = "1.13.0"
 # 1.10.0: full extraction guards quantity; the crosswalk guards definitions.
 [[stage.gate]]
 check = "variable_crosswalk_confirmed"
@@ -290,21 +291,25 @@ check = "temp_clean"
 id = "S06_protocol_final"
 title = "Refine protocol from findings + publishability go/no-go #2"
 card = "stages/S06_protocol_final.md"
-outputs = ["01_protocol/protocol_final.md", "01_protocol/protocol_diff.md", "03_analysis/reproducibility_report.json"]
+outputs = ["01_protocol/protocol_final.md", "03_analysis/reproducibility_report.json"]
 [[stage.gate]]
 check = "outputs_exist"
 [[stage.gate]]
 check = "data_acquisition_complete"
 [[stage.gate]]
+check = "data_not_copied"
+since = "1.13.0"
+[[stage.gate]]
 check = "results_have_environment"
-# S06 re-executes every analysis script in a sandbox (tools/reproduce.py run); the results
-# must be identical. Re-checked at S17, S23 and S25 against the current files.
+# S06 re-executes the analysis once in a paper-local sandbox (tools/reproduce.py run); the
+# results must be identical. S17, S23 and S25 accept that proof by hash (nothing re-runs).
 [[stage.gate]]
 check = "analysis_reproduces"
+# 1.13.0 (#8): changes of plan are an internal log (.wf/protocol_changes.md), never a section.
 [[stage.gate]]
 check = "md_sections"
 path = "01_protocol/protocol_final.md"
-headings = ["Objective", "Design", "Population and eligibility", "Variables", "Statistical analysis plan", "Sample size / power", "Ethics", "Deviations from protocol v1"]
+headings = ["Objective", "Design", "Population and eligibility", "Variables", "Statistical analysis plan", "Sample size / power", "Ethics"]
 [[stage.gate]]
 check = "design_precedent_recorded"
 path = "01_protocol/protocol_final.md"
@@ -1201,6 +1206,10 @@ since = "1.13.0"
 [freeform]
 globs = [
   "00_input/*",
+  # 1.13.0: the internal plan-change log moved to .wf/protocol_changes.md; older papers keep this.
+  "01_protocol/protocol_diff.md",
+  # 1.13.0: size-capped extraction cache (analysis.datasources.extract_members), never data copies.
+  "02_data/cache/**",
   "02_data/raw/**",
   "02_data/acquisition/**",
   "02_data/derived/*",

@@ -84,8 +84,14 @@ def results_have_environment(ctx: Ctx) -> Result:
 def analysis_reproduces(ctx: Ctx) -> Result:
     outcome = reproproof.validate(ctx.project)
     if outcome.ok:
-        return Result(True, "analysis_reproduces", outcome.detail)
+        # 1.13.0: checked by hash - the proof is reused, nothing is re-executed here.
+        return Result(True, "analysis_reproduces",
+                      outcome.detail + "; valid by hash - nothing to re-run")
+    try:
+        nxt = reproproof.next_step(ctx.project)
+    except Exception as exc:  # noqa: BLE001 - the hint must never break the gate
+        nxt = f"reproduce.py run --wait ({type(exc).__name__} while scoping)"
     return Result(False, "analysis_reproduces", outcome.detail,
-                  ["Re-run the proof: python tools/reproduce.py run",
+                  [f"Cheapest next step: {nxt}",
                    "Make scripts deterministic (seed every RNG via set_seed()/medpaper_seed()), "
                    "or declare a justified tolerance (<= 1e-6) in 03_analysis/reproducibility.toml"])

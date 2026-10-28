@@ -51,15 +51,65 @@ BACKSTAGE_RE = re.compile(
     r"\b(?:added|introduced|included)\s+(?:after|following)\s+(?:the\s+)?(?:review|revision)\b|"
     r"\bpost\s+hoc\s*\(\s*(?:after|following)\s+review\s*\)",
     re.I)
-# The standard wording for an analysis decided after seeing the data (1.11.0 #2h).
-POST_HOC_PHRASE = "added after the data were examined"
+# 1.13.0 (#8): plan-versus-practice history is internal (.wf/protocol_changes.md). A medical
+# paper simply describes the analysis performed; it never narrates an initial plan, protocol
+# deviations or their handling. Exception: a meta-analysis with a registered protocol (PROSPERO)
+# reports deviations under PRISMA 2020 item 24c.
+DEVIATION_RE = re.compile(
+    r"\bprotocol\s+deviations?\b|"
+    r"\bdeviat(?:ed|es|ing|ions?)\s+from\s+(?:the\s+|our\s+|this\s+)?(?:study\s+)?"
+    r"(?:initial|original|pre-?specified|planned|registered)?\s*(?:study\s+)?"
+    r"(?:protocol|plan|analysis\s+plan)\b|"
+    r"\bdepartures?\s+from\s+(?:the\s+|our\s+)?(?:protocol|plan|it)\b|"
+    r"\boriginally\s+(?:planned|specified|intended|proposed)\b|"
+    r"\binitial\s+(?:study\s+)?(?:protocol|plan|analysis\s+plan)\b|"
+    r"\bchanged\s+from\s+(?:the\s+)?(?:protocol|plan)\b|"
+    r"\bas\s+planned\s+in\s+the\s+protocol\b|"
+    r"\b(?:the\s+)?(?:study\s+)?protocol\s+(?:was|is)\s+(?:not\s+)?(?:registered|archived)\b|"
+    r"\bunregistered\s+protocol\b|\barchived,?\s+(?:unregistered\s+)?protocol\b|"
+    r"方案偏离|偏离(?:了)?(?:原|初始|最初|预先|预设|既定|研究)?(?:研究)?(?:方案|计划)|"
+    r"(?:最初|初始|原定|原始)(?:的)?(?:研究)?(?:方案|计划)|与(?:研究)?方案不(?:同|一致)|"
+    r"按(?:研究)?方案(?:原)?计划", re.I)
+# 1.13.0: the advice is simply to describe the analysis performed (1.11 suggested a label).
+POST_HOC_PHRASE = "describe the analysis performed"
+
+
+def deviation_reporting_allowed(project) -> bool:
+    """PRISMA 2020 item 24c: a meta-analysis/systematic review with a registered protocol
+    (PROSPERO ID or CRD42 number recorded in the protocol, idea or author info)."""
+    from pathlib import Path
+    import json as _json
+    project = Path(project)
+    try:
+        idea = _json.loads((project / "01_protocol/idea.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        idea = {}
+    if not isinstance(idea, dict) or idea.get("study_design") not in ("meta_analysis",
+                                                                      "systematic_review"):
+        return False
+    for rel in ("01_protocol/protocol_v1.md", "01_protocol/protocol_final.md",
+                "01_protocol/idea.json", "00_input/author_info.json"):
+        p = project / rel
+        try:
+            if p.is_file() and re.search(r"PROSPERO|CRD42\d+", p.read_text(encoding="utf-8",
+                                                                            errors="replace")):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def deviation_hits(text: str, project=None) -> list[str]:
+    if project is not None and deviation_reporting_allowed(project):
+        return []
+    return sorted({m.group(0) for m in DEVIATION_RE.finditer(_body(text))})
 
 
 # (#10) CRediT contributor role names are journal-template text, not revision history:
 # "Writing - original draft", "Writing - review & editing" (any dash, "and" or "&").
 CREDIT_ROLE_RE = re.compile(
-    r"\bwriting\s*[-\u2010-\u2015:,]?\s*(?:original\s+draft(?:\s+preparation)?|"
-    r"review\s*(?:&|and)\s*editing)\b", re.I)
+    r"\bwriting\s*[-\u2010-\u2015:,]?\s*(?:the\s+)?(?:original\s+draft(?:\s+preparation)?|"
+    r"review\s*(?:&|and)\s*editing)\b", re.I)  # 1.13.0: "writing the original draft" too
 
 
 def backstage_hits(text: str) -> list[str]:
@@ -237,14 +287,15 @@ def no_ai_boilerplate(ctx: Ctx) -> Result:
             f"{rel} still contains placeholder text: " + ", ".join(sorted(set(hard))),
             ["Resolve every placeholder from real data or delete the sentence."],
         )
-    leaks = backstage_hits(raw)
+    leaks = backstage_hits(raw) + deviation_hits(raw, ctx.project)
     if leaks:
         return Result(
             False, "no_ai_boilerplate",
-            f"{rel} describes the pipeline's own review/draft history: " + "; ".join(leaks[:5]),
-            ["Delete it. A real change of plan is reported as a protocol deviation or post hoc "
-             "analysis, never by reference to an internal review or an earlier draft.",
-             f"Standard wording for a post hoc analysis: '{POST_HOC_PHRASE}'."])
+            f"{rel} describes the pipeline's own review/draft/plan history: "
+            + "; ".join(leaks[:5]),
+            ["Delete it and simply describe the analysis performed. Never narrate an initial "
+             "plan, protocol deviations or their handling, an internal review or an earlier "
+             "draft (a registered meta-analysis reports deviations per PRISMA 2020 item 24c)."])
     soft = [ph for ph in AI_TELLS if ph in low]
     if soft:
         return Result(

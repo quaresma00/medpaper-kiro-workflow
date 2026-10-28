@@ -4396,7 +4396,7 @@ def run_reproduce(tmp: Path) -> None:
     _wf("run-script", "03_analysis/code/03_r.R", env=env, cwd=tmp)
 
     # ---- 1.9.1: visible progress, reuse of an unchanged proof, default scope ----
-    log = P / "temp/repro.log"
+    log = P / ".wf/logs/repro.log"  # 1.13.0: logs live only in .wf/logs/
     r13 = _run([*RP, "run", "--full", "--log", log, "--project", P], cwd=tmp)
     rep13 = _json.loads(report.read_text(encoding="utf-8"))
     lines = log.read_text(encoding="utf-8").splitlines() if log.is_file() else []
@@ -4441,8 +4441,9 @@ def run_reproduce(tmp: Path) -> None:
     rs.write_text(rs_old, encoding="utf-8")
     _wf("run-script", "03_analysis/code/03_r.R", env=env, cwd=tmp)
     bad_log = _run([*RP, "run", "--log", P / "03_analysis/x.log", "--project", P], cwd=tmp)
-    record("N: 1.9.1 --log inside the paper outside temp/ is refused",
-           bad_log.returncode == 1 and not (P / "03_analysis/x.log").exists(), _out(bad_log)[-160:])
+    record("1.13.0 --log outside .wf/logs/ is redirected there (no stray logs in the paper)",
+           bad_log.returncode == 0 and not (P / "03_analysis/x.log").exists()
+           and (P / ".wf/logs/x.log").is_file(), _out(bad_log)[-160:])
     man.unlink()
     _run([*RP, "run", "--project", P], cwd=tmp)
     report.unlink()

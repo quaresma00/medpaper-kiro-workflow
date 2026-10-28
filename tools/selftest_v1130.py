@@ -363,6 +363,186 @@ def run_guard(tmp: Path, record, hook_paper: Path) -> None:
            and junk.returncode == 0 and ok_.returncode == 0, deny.stderr[-200:])
 
 
+# ------------------------------------------------------------------------------ G2
+def run_g2(tmp: Path, record, section) -> None:
+    import tempfile
+    import time
+    import zipfile
+    from wfcore import dataproof, datasources, logs, reproproof as rp
+    section("1.13.0 G2: data used in place (never copied), one reproduction, logs")
+    P = _paper(tmp / "repro_paper")
+    D = tmp / "userdata"
+    D.mkdir(parents=True)
+    (D / "big.csv").write_text("x,y\n1,2\n2,4\n", encoding="utf-8")
+    with zipfile.ZipFile(D / "arch.zip", "w") as zf:
+        zf.writestr("inner/rows.txt", "a$b\n1$2\n3$4\n5$6\n")
+    datasources.add(P, D, "src")
+    _w(P, "02_data/raw/small.csv", "k\n1\n")
+    C = "03_analysis/code/"
+    _w(P, C + "lib/util.py", "def total(rows):\n    return sum(len(r) for r in rows)\n")
+    _w(P, C + "01_load.py",
+       "from wfcore.paths import project_dir\nfrom analysis.datasources import source_path, open_member\n"
+       "P = project_dir()\n(P / '02_data/derived').mkdir(parents=True, exist_ok=True)\n"
+       "text = source_path('src', 'big.csv').read_text()\n"
+       "with open_member('src', 'arch.zip', 'inner/rows.txt', encoding='utf-8') as fh:\n"
+       "    n = sum(1 for _ in fh)\n"
+       "(P / '02_data/derived/clean.csv').write_text(text + f'#{n}\\n')\n")
+    _w(P, C + "02_model.py",
+       "import sys, os\nsys.path.insert(0, os.path.dirname(__file__))\nfrom lib.util import total\n"
+       "from wfcore.paths import project_dir\nfrom analysis.results import write_results\n"
+       "rows = (project_dir() / '02_data/derived/clean.csv').read_text().splitlines()\n"
+       "write_results('primary', {'n': len(rows), 'total': total(rows)})\n")
+    _w(P, C + "03_other.py", "from wfcore.paths import project_dir\nfrom analysis.results import "
+                             "write_results\nP = project_dir()\nwrite_results('other', {'k': 1})\n")
+    entries = [{"path": C + "01_load.py", "inputs": ["datasource:src"],
+                "outputs": ["02_data/derived/clean.csv"]},
+               {"path": C + "02_model.py", "inputs": ["02_data/derived/clean.csv"],
+                "outputs": ["03_analysis/results/primary.json"]},
+               {"path": C + "03_other.py", "inputs": [], "outputs": ["03_analysis/results/other.json"]}]
+    _w(P, "03_analysis/analysis_manifest.json", {"schema": 1, "scripts": entries})
+    env = _env(MEDPAPER_PROJECT=P)
+    rs = [_wf("run-script", C + s, env=env, cwd=tmp) for s in ("01_load.py", "02_model.py", "03_other.py")]
+    RP = [sys.executable, ROOT / "tools/reproduce.py"]
+    report = P / "03_analysis/reproducibility_report.json"
+
+    def rep():
+        return json.loads(report.read_text(encoding="utf-8")) if report.is_file() else {}
+
+    def started(r):
+        return [ln.split()[2] for ln in r.stdout.splitlines() if " start " in ln]
+    stale = P / rp.SANDBOX_DIR / "run_stale"
+    _w(stale, "x.bin", "x" * 100)
+    legacy = Path(tempfile.gettempdir()) / "medpaper_repro_selftest_legacy"
+    _w(legacy, "y.bin", "y")
+    old = time.time() - 7 * 3600
+    os.utime(legacy, (old, old))
+    r1 = _run([*RP, "run", "--project", P], cwd=tmp)
+    r = rep()
+    sb = r.get("sandbox", {})
+    inputs = [i["path"] for i in r.get("inputs", [])]
+    record("G2 reproduce: declared data read in place, in-paper data hard-linked, 0 bytes of "
+           "data copied, sandbox inside the paper and deleted after the run",
+           all(x.returncode == 0 for x in rs) and r1.returncode == 0 and r.get("all_match")
+           and sb.get("data_bytes_copied") == 0 and sb.get("data_files_linked", 0) >= 1
+           and sb.get("data_sources_in_place") == 2 and "datasource:src/big.csv" in inputs
+           and "02_data/raw/small.csv" in inputs
+           and not any((P / rp.SANDBOX_DIR).iterdir()), _out(r1)[-300:])
+    record("G2 leftovers of interrupted runs are removed at the next start (paper sandbox and "
+           "old medpaper_repro_* in the system temp)", not stale.exists() and not legacy.exists()
+           and "leftover sandbox" in r1.stdout, r1.stdout[:200])
+    eng = r.get("engine_inputs", {})
+    record("G2 the proof records only the engine helpers the analysis uses (no figure helpers)",
+           set(eng) == {"tools/analysis/results.py", "tools/analysis/datasources.py"}, str(sorted(eng)))
+    record("G2 an engine release that leaves the used helpers unchanged keeps the proof "
+           "(older, wider helper records are tolerated)",
+           rp.helpers_match({**eng, "tools/R/medresults.R": "old", "tools/analysis/spotcheck.py": "x"}, eng)
+           and not rp.helpers_match({**eng, "tools/analysis/results.py": "changed"}, eng))
+    _w(P, "02_data/codebook.md", "# codebook\n")
+    _w(P, "02_data/acquisition/fetch.py", "print('acquire')\n")
+    _w(P, "03_analysis/notes.md", "notes\n")
+    g = _gate(P, "analysis_reproduces", "S17_assemble")
+    old_rep = rep()
+    old_rep["inputs"].append({"path": "02_data/provenance.md", "sha256": "0" * 64})
+    report.write_text(json.dumps(old_rep), encoding="utf-8")
+    g_old = _gate(P, "analysis_reproduces", "S23_package")
+    record("G2 documentation, acquisition code and notes are not analysis inputs; an older proof "
+           "that listed them stays valid; the gate says so by hash",
+           g.ok and g_old.ok and "nothing to re-run" in g.detail, g.detail[:160] + " | " + g_old.detail[:80])
+    r2 = _run([*RP, "run", "--project", P], cwd=tmp)
+    record("G2 nothing changed: REUSED (no second full reproduction)",
+           r2.returncode == 0 and "REUSED" in r2.stdout and not started(r2), _out(r2)[-200:])
+    _w(P, C + "04_new.py", "from wfcore.paths import project_dir\nfrom analysis.results import "
+                           "write_results\nP = project_dir()\nwrite_results('newres', {'k': 2})\n")
+    entries.append({"path": C + "04_new.py", "inputs": [], "outputs": ["03_analysis/results/newres.json"]})
+    _w(P, "03_analysis/analysis_manifest.json", {"schema": 1, "scripts": entries})
+    _wf("run-script", C + "04_new.py", env=env, cwd=tmp)
+    hint = _gate(P, "analysis_reproduces", "S17_assemble")
+    r3 = _run([*RP, "run", "--project", P], cwd=tmp)
+    record("G2 a new analysis script re-runs alone (the others are carried); the gate names the "
+           "cheapest next command", r3.returncode == 0 and started(r3) == [C + "04_new.py"]
+           and any("Cheapest next step" in h and "1 of 4" in h for h in hint.hints),
+           _out(r3)[-200:] + " | " + "; ".join(hint.hints)[:200])
+    _w(P, C + "lib/util.py", "def total(rows):\n    return sum(len(r) for r in rows)\n# note\n")
+    r4 = _run([*RP, "run", "--project", P], cwd=tmp)
+    record("G2 a changed helper re-runs only the scripts that use it",
+           r4.returncode == 0 and started(r4) == [C + "02_model.py"], _out(r4)[-200:])
+    (D / "big.csv").write_text("x,y\n1,2\n2,4\n3,9\n", encoding="utf-8")
+    for s in ("01_load.py", "02_model.py"):
+        _wf("run-script", C + s, env=env, cwd=tmp)
+    r5 = _run([*RP, "run", "--project", P], cwd=tmp)
+    record("G2 a changed data source re-runs only the scripts that declare it and their "
+           "consumers", r5.returncode == 0 and started(r5) == [C + "01_load.py", C + "02_model.py"],
+           _out(r5)[-200:])
+    lock = P / rp.LOCK_REL
+    lock.write_text(json.dumps({"pid": os.getpid(), "started_at": "now"}), encoding="utf-8")
+    r6 = _run([*RP, "run", "--project", P], cwd=tmp)
+    lock.unlink(missing_ok=True)
+    record("G2 a second concurrent reproduction of the same paper is refused",
+           r6.returncode == 1 and "another reproduce.py run is active" in r6.stdout, _out(r6)[-160:])
+    src = D / "big.csv"
+    with patch("os.link", side_effect=OSError("no hard links here")):
+        try:
+            rp.provide(src, tmp / "copy_dst" / "big.csv", rp.Budget(5))
+            refused = ""
+        except rp.DataCopyRefused as exc:
+            refused = str(exc)
+    record("G2 copying more input data than data_copy_limit_mb is refused with the legal path",
+           "wf data add" in refused and "limit" in refused and not (tmp / "copy_dst/big.csv").exists(),
+           refused[:160])
+    keep, side = rp.split_paper_changes(["03_analysis/notes.md", "02_data/codebook.md",
+                                         "01_protocol/x.md", "x.txt", "03_analysis/code/a.py"])
+    record("G2 edits to notes and documentation during a run never invalidate it",
+           keep == ["x.txt", "03_analysis/code/a.py"] and len(side) == 3, str(keep))
+    raw_paths = {e["path"] for e in dataproof.raw_inventory(P)}
+    n = dataproof.evidence_count(P, {"path": "datasource:src/arch.zip", "kind": "zip_member_rows",
+                                     "member": "inner/rows.txt", "delimiter": "$", "header": True},
+                                 raw_paths)
+    nl = dataproof.evidence_count(P, {"path": "datasource:src/arch.zip", "kind": "zip_member_lines",
+                                      "member": "inner/rows.txt", "header": False}, raw_paths)
+    _w(P, "02_data/acquisition_manifest.json", {"schema_version": 1})
+    v = dataproof.validate(P)
+    record("G2 acquisition proof inventories declared data in place and counts archive members "
+           "by streaming (no extraction)", n == 3 and nl == 4
+           and "datasource:src/arch.zip" in raw_paths
+           and not any("no acquired payload" in p for p in v.problems), f"{n} {nl} {v.problems[:2]}")
+    shutil.copy2(D / "big.csv", P / "02_data/raw/big.csv")
+    dup = _gate(P, "data_not_copied", "S04_data")
+    (P / "02_data/raw/big.csv").unlink()
+    clean = _gate(P, "data_not_copied", "S04_data")
+    record("G2 data_not_copied fails on a copy of a declared dataset inside the paper",
+           not dup.ok and dup.severity == "fail" and "big.csv" in dup.detail and clean.ok,
+           dup.detail[:120] + " | " + clean.detail[:80])
+    sys.path.insert(0, str(ROOT / "tools/hooks"))
+    import paper_guard
+    with _envset(MEDPAPER_GUARD_TEMP=tmp / "systemp"):
+        guard = paper_guard.Guard(P)
+        cp = guard.decide({"tool_name": "execute_pwsh", "tool_input": {
+            "command": f'Copy-Item "{D}\\big.csv" 02_data/raw/', "cwd": str(P)}})
+        ex = guard.decide({"tool_name": "execute_pwsh", "tool_input": {
+            "command": f'Expand-Archive "{D}\\arch.zip" -DestinationPath 02_data/raw', "cwd": str(P)}})
+        rd = guard.decide({"tool_name": "execute_pwsh", "tool_input": {
+            "command": f'Get-Content "{D}\\big.csv" -TotalCount 3', "cwd": str(P)}})
+    record("G2 the paper guard blocks copying or extracting a declared dataset into the paper "
+           "but allows reading it", bool(cp) and bool(ex) and "never copy" in (cp or "") and rd is None,
+           f"{cp} | {ex} | {rd}"[:240])
+    _w(P, ".wf/config.toml", "[targets]\nlog_cap_mb = 0.001\n")
+    for i in range(5):
+        _w(P, f".wf/logs/old{i}.log", "z" * 400)
+        t = time.time() - 100 + i
+        os.utime(P / f".wf/logs/old{i}.log", (t, t))
+    target = logs.log_path(P, "reproduce", tmp / "elsewhere" / "repro12.txt")
+    total = sum(f.stat().st_size for f in (P / ".wf/logs").rglob("*") if f.is_file())
+    record("G2 logs: a requested path elsewhere lands in .wf/logs/ and the folder is pruned "
+           "oldest-first to log_cap_mb", target == P / ".wf/logs/repro12.txt"
+           and total <= 1100 and not (tmp / "elsewhere").exists(), f"{target} {total}")
+
+
+def _gate(p: Path, name: str, stage: str, **spec):
+    import selftest_v180 as v180
+    return v180._gate(p, name, stage, **spec)
+
+
 def run(tmp: Path, record, section) -> None:
     tmp.mkdir(parents=True, exist_ok=True)
     run_g1(tmp / "g1", record, section)
+    run_g2(tmp / "g2", record, section)

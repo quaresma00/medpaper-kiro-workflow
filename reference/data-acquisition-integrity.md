@@ -49,7 +49,14 @@ Evidence objects use these forms:
 {"path":"02_data/raw/records.json","kind":"json_array_length"}
 {"path":"02_data/raw/records.jsonl","kind":"jsonl_rows"}
 {"path":"02_data/raw/source_total.txt","kind":"text_integer"}
+{"path":"datasource:faers/aers_ascii_2004q1.zip","kind":"zip_member_rows","member":"ascii/DEMO04Q1.TXT","delimiter":"$","quoting":"none","encoding":"latin-1","header":true}
+{"path":"datasource:faers/aers_ascii_2004q1.zip","kind":"zip_member_lines","member":"ascii/DEMO04Q1.TXT"}
 ```
+
+1.13.0: a dataset the user already has (a local mirror, a registry export) is a declared data
+source (`wf data add <absolute path> --name <name>`), used in place and never copied into the
+paper; `sync` inventories it as `datasource:<name>/<file>` with hashes cached by size + mtime,
+and archive members are counted by streaming, never by extraction.
 
 `received_count_evidence` is an array; for paginated responses its recomputed counts are
 summed. `source_total_evidence` is one source-returned count receipt. Do not handwrite or edit

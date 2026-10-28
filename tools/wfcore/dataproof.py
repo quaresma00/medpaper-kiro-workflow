@@ -79,6 +79,7 @@ def _safe_rel(value: object, prefix: str) -> str | None:
 
 
 def inventory(project: Path, base_rel: str) -> list[dict]:
+    from . import datasources
     base = project / base_rel
     if not base.exists():
         return []
@@ -86,8 +87,53 @@ def inventory(project: Path, base_rel: str) -> list[dict]:
     for path in sorted(p for p in base.rglob("*") if p.is_file() and p.name != ".gitkeep"):
         rel = path.relative_to(project).as_posix()
         size = path.stat().st_size
-        found.append({"path": rel, "sha256": file_sha256(path), "bytes": size})
+        # 1.13.0: hashes cached by size + mtime - the gate no longer re-reads GBs on every run
+        found.append({"path": rel, "sha256": datasources.cached_sha256(project, path),
+                      "bytes": size})
     return found
+
+
+def raw_inventory(project: Path) -> list[dict]:
+    """1.13.0: downloaded payloads in 02_data/raw/ plus the declared data sources, which stay
+    in place (`datasource:<name>/<file>` labels) and are never copied into the paper."""
+    from . import datasources
+    return sorted(inventory(project, "02_data/raw") + datasources.inventory(project),
+                  key=lambda x: x["path"])
+
+
+def _evidence_file(project: Path, raw: object, raw_paths: set[str]) -> tuple[str, Path]:
+    from . import datasources
+    if isinstance(raw, str) and raw.startswith(datasources.LABEL_PREFIX):
+        path = datasources.resolve(project, raw) if raw in raw_paths else None
+        if path is None:
+            raise ValueError("evidence path must name a declared data-source file "
+                             "(datasource:<name>/<file>) or an inventoried file under 02_data/raw/")
+        return raw, path
+    rel = _safe_rel(raw, "02_data/raw")
+    if not rel or rel not in raw_paths:
+        raise ValueError("evidence path must name an inventoried file under 02_data/raw/ or a "
+                         "declared data-source file (datasource:<name>/<file>)")
+    return rel, project / rel
+
+
+def _zip_member(path: Path, spec: dict):
+    import io
+    import zipfile
+    member = spec.get("member")
+    if not isinstance(member, str) or not member:
+        raise ValueError("zip_member_* evidence needs a 'member' (path inside the archive)")
+    zf = zipfile.ZipFile(path)
+    try:
+        names = {n.casefold(): n for n in zf.namelist()}
+        name = names.get(member.casefold())
+        if name is None:
+            raise ValueError(f"{member} is not in {path.name}")
+        raw = zf.open(name)
+        return zf, io.TextIOWrapper(raw, encoding=spec.get("encoding", "utf-8"),
+                                    errors=spec.get("errors", "strict"), newline="")
+    except Exception:
+        zf.close()
+        raise
 
 
 def bundle_sha256(entries: list[dict]) -> str:
@@ -133,11 +179,26 @@ def _json_pointer(payload: object, pointer: str) -> object:
 def evidence_count(project: Path, spec: object, raw_paths: set[str]) -> int:
     if not isinstance(spec, dict):
         raise ValueError("evidence must be an object")
-    rel = _safe_rel(spec.get("path"), "02_data/raw")
-    if not rel or rel not in raw_paths:
-        raise ValueError("evidence path must name an inventoried file under 02_data/raw/")
-    path = project / rel
+    rel, path = _evidence_file(project, spec.get("path"), raw_paths)
     kind = spec.get("kind")
+    if kind in ("zip_member_rows", "zip_member_lines"):
+        # 1.13.0: archives are read by streaming one member - never extracted or copied.
+        zf, handle = _zip_member(path, spec)
+        try:
+            if kind == "zip_member_lines":
+                count = sum(1 for line in handle if line.strip())
+            else:
+                delimiter = spec.get("delimiter", ",")
+                if not isinstance(delimiter, str) or len(delimiter) != 1:
+                    raise ValueError("zip_member_rows delimiter must be one character")
+                quoting = csv.QUOTE_NONE if spec.get("quoting") == "none" else csv.QUOTE_MINIMAL
+                count = sum(1 for _ in csv.reader(handle, delimiter=delimiter, quoting=quoting))
+        finally:
+            handle.close()
+            zf.close()
+        if spec.get("header", True) and count:
+            count -= 1
+        return count
     if kind == "delimited_rows":
         delimiter = spec.get("delimiter")
         if delimiter is None:
@@ -170,7 +231,8 @@ def evidence_count(project: Path, spec: object, raw_paths: set[str]) -> int:
         return int(text)
     raise ValueError(
         "unsupported evidence kind; use delimited_rows, jsonl_rows, json_array_length, "
-        "json_pointer_integer, json_pointer_length, or text_integer"
+        "json_pointer_integer, json_pointer_length, text_integer, zip_member_rows or "
+        "zip_member_lines"
     )
 
 
@@ -263,10 +325,11 @@ def validate(project: Path, state: object | None = None) -> Validation:
     if method not in _METHODS:
         problems.append(f"acquisition_method must be one of {sorted(_METHODS)}")
 
-    raw_actual = inventory(project, "02_data/raw")
+    raw_actual = raw_inventory(project)
     code_actual = inventory(project, "02_data/acquisition")
     if not raw_actual:
-        problems.append("02_data/raw contains no acquired payload or source receipt")
+        problems.append("no acquired payload in 02_data/raw/ and no declared data source "
+                        "(the user's own dataset: `wf data add <path>`, used in place)")
     if any(item["bytes"] == 0 for item in raw_actual):
         problems.append("raw inventory contains an empty file")
     if method == "scripted" and not code_actual:
@@ -345,7 +408,8 @@ def validate(project: Path, state: object | None = None) -> Validation:
                 accessible = _integer(limit.get("accessible_total_expected"))
                 reason = str(limit.get("reason", "")).strip()
                 evidence = limit.get("evidence")
-                evrel = _safe_rel(evidence, "02_data/raw")
+                evrel = evidence if isinstance(evidence, str) and evidence in raw_paths \
+                    else _safe_rel(evidence, "02_data/raw")
                 if accessible is None or requested != accessible or received != accessible:
                     problems.append(f"{label} must request and receive the entire source-accessible subset")
                 if limit.get("source_imposed") is not True or len(reason) < 40:

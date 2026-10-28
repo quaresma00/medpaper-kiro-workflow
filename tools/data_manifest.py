@@ -94,7 +94,8 @@ def main() -> int:
         return 2
 
     if args.command == "sync":
-        raw = dataproof.inventory(project, "02_data/raw")
+        # 1.13.0: declared data sources are inventoried in place (datasource:<name>/<file>)
+        raw = dataproof.raw_inventory(project)
         code = dataproof.inventory(project, "02_data/acquisition")
         manifest["raw_files"] = raw
         manifest["acquisition_files"] = code

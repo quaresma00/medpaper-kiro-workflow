@@ -66,6 +66,9 @@ PY_WRITE_RE = re.compile(r"write_text|write_bytes|\.write\(|open\([^)]*['\"](?:w
                          r"replace|makedirs|mkdir|link|symlink|rmdir)|\.unlink\(|\.rename\(|"
                          r"\.replace\(\s*[\w\"']*[\\/]|\.mkdir\(|\.touch\(")
 PY_ASSIGN_RE = re.compile(r"\b(\w+)\s*=\s*(?:Path\()?r?[\"']([^\"'\r\n]+)[\"']")
+COPY_DATA_RE = re.compile(r"(?i)\b(?:copy-item|cpi|cp|copy|robocopy|xcopy|move-item|mv|move|"
+                          r"expand-archive|unzip|mklink|hardlink)\b|extractall|\.extract\(|"
+                          r"\b7z\s+[xe]\b|\btar\s+-?\w*x|os\.link|shutil\.(?:copy\w*|move)")
 
 
 def _norm(p: Path | str) -> str:
@@ -318,6 +321,14 @@ class Guard:
         hit = self.scan_text(expanded, cwd, "shell command references")
         if hit:
             return hit
+        if COPY_DATA_RE.search(expanded):
+            for tok in self.path_tokens(expanded):
+                p = _resolve(tok, cwd)
+                if p is not None and self.classify(p) == "data":
+                    return (f"shell command copies, links or extracts the declared data source "
+                            f"{p}: never copy the user's dataset into the paper - read it in "
+                            "place (analysis.datasources.source_path / open_member, R "
+                            "medpaper_source_path / medpaper_unz)")
         targets: list[str] = []
         for m in REDIRECT_RE.finditer(expanded):
             tgt = m.group(1).strip("\"'")

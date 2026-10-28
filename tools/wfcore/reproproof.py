@@ -29,20 +29,53 @@ TOL_ABS_MAX = 1e-6
 TOL_REL_MAX = 1e-6
 INPUT_TREES = ("02_data", "03_analysis/code")
 RERUN_DIR = ".wf/repro/rerun"
+# 1.13.0: the sandbox lives inside the paper (same volume, so data can be hard-linked instead of
+# copied), one at a time, and is deleted after the run; leftovers of an interrupted run are
+# removed by the next one.
+SANDBOX_DIR = ".wf/repro/sandboxes"
+LOCK_REL = ".wf/repro/run.lock"
 SNAPSHOT_EXCLUDE = (".wf", "temp", ".kiro", REPORT_REL)
-INPUT_EXCLUDE_DIRS = ("02_data/derived",)
+# 1.13.0: documentation, acquisition code (never re-run), the extraction cache and the S04
+# receipts are not analysis inputs; editing them never invalidates the proof.
+INPUT_EXCLUDE_DIRS = ("02_data/derived", "02_data/acquisition", "02_data/cache")
+INPUT_EXCLUDE_FILES = ("02_data/acquisition_manifest.json", "02_data/variable_crosswalk.json")
+DOC_SUFFIXES = (".md",)
 INPUT_EXCLUDE_NAMES = ("__pycache__", ".Rhistory", ".DS_Store")
 RESULTS_DIR = "03_analysis/results"
+DATASOURCE_PREFIX = "datasource:"
 # 1.11.0 (#2f): reproduction depends only on data, analysis code, manifest, tolerances and the
 # engine helpers. Edits in these trees during a run are manuscript/package work, not inputs.
 NON_ANALYSIS_PREFIXES = ("00_input/", "01_protocol/", "04_tables/", "05_figures/", "06_refs/",
                          "07_manuscript/", "08_submission/")
 
 
+def counts_as_input(rel: str) -> bool:
+    """1.13.0: is this paper path (or datasource label) an analysis input?"""
+    rel = rel.replace("\\", "/")
+    if rel.startswith(DATASOURCE_PREFIX) or rel in (TOLERANCE_REL, MANIFEST_REL):
+        return True
+    if not rel.startswith(tuple(t + "/" for t in INPUT_TREES)):
+        return False
+    if any(rel == d or rel.startswith(d + "/") for d in INPUT_EXCLUDE_DIRS):
+        return False
+    if rel in INPUT_EXCLUDE_FILES or (rel.startswith("02_data/") and rel.endswith(DOC_SUFFIXES)):
+        return False
+    parts = rel.split("/")
+    return not any(p in INPUT_EXCLUDE_NAMES for p in parts) and not rel.endswith((".pyc", ".pyo"))
+
+
 def split_paper_changes(changes: list[str]) -> tuple[list[str], list[str]]:
-    """(changes that invalidate the run, non-analysis edits recorded for information)."""
-    keep = [c for c in changes if not c.startswith(NON_ANALYSIS_PREFIXES)]
-    return keep, [c for c in changes if c.startswith(NON_ANALYSIS_PREFIXES)]
+    """(changes that invalidate the run, other edits recorded for information).
+
+    1.13.0: only analysis inputs and results invalidate a run; notes, documentation and
+    manuscript work in the meantime are recorded, never fatal."""
+    keep = [c for c in changes if counts_as_input(c) or c.startswith(RESULTS_DIR + "/")
+            or not c.startswith(("00_input/", "01_protocol/", "02_data/", "03_analysis/",
+                                 "04_tables/", "05_figures/", "06_refs/", "07_manuscript/",
+                                 "08_submission/"))]
+    return keep, [c for c in changes if c not in keep]
+
+
 _ISO = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
 
 
@@ -66,6 +99,162 @@ def sha256(path: Path) -> str:
         for chunk in iter(lambda: fh.read(1 << 20), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# 1.13.0: sandbox housekeeping - never copy the user's data, never leave GBs behind
+# ---------------------------------------------------------------------------
+class DataCopyRefused(Exception):
+    """Providing an input would copy more data than data_copy_limit_mb allows."""
+
+
+class Budget:
+    def __init__(self, limit: int):
+        self.limit, self.copied, self.linked = int(limit), 0, 0
+        self.links: list[tuple[Path, Path, int]] = []  # (sandbox link, source, source mode)
+
+
+def unlink_links(budget: Budget) -> None:
+    """Remove the sandbox hard links first, restoring a read-only source's attribute."""
+    import os
+    import stat
+    for dst, src, mode in budget.links:
+        try:
+            if not os.access(dst, os.W_OK):
+                os.chmod(dst, stat.S_IWRITE | stat.S_IREAD)
+            os.unlink(dst)
+            if not mode & stat.S_IWRITE:
+                os.chmod(src, mode)
+        except OSError:
+            pass
+    budget.links.clear()
+
+
+def provide(src: Path, dst: Path, budget: Budget, *, prefer_copy: bool = False) -> str:
+    """Make `src` available at `dst` without copying data: a hard link (same volume, zero
+    bytes) or, for small files only, a copy within the budget. Raises DataCopyRefused."""
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    size = src.stat().st_size
+    if prefer_copy and budget.copied + size <= budget.limit:
+        import shutil
+        shutil.copy2(src, dst)
+        budget.copied += size
+        return "copy"
+    try:
+        import os
+        mode = src.stat().st_mode
+        os.link(src, dst)
+        budget.linked += 1
+        budget.links.append((dst, src, mode))
+        return "link"
+    except OSError:
+        pass
+    if budget.copied + size > budget.limit:
+        raise DataCopyRefused(
+            f"{src.name}: providing it would copy {(budget.copied + size) / 1e6:,.0f} MB of input "
+            f"data (limit {budget.limit / 1e6:,.0f} MB, data_copy_limit_mb) because a hard link "
+            "is not possible here. Never copy the user's dataset: declare it in place "
+            "(`wf data add <path>`) and read it with analysis.datasources.source_path(), or put "
+            "the paper on an NTFS volume.")
+    import shutil
+    shutil.copy2(src, dst)
+    budget.copied += size
+    return "copy"
+
+
+def _pid_alive(pid: int) -> bool:
+    import os
+    import sys
+    if pid <= 0:
+        return False
+    if sys.platform == "win32":
+        import ctypes
+        handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)  # QUERY_LIMITED_INFO
+        if not handle:
+            return False
+        code = ctypes.c_ulong()
+        ok = ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+        ctypes.windll.kernel32.CloseHandle(handle)
+        return bool(ok) and code.value == 259  # STILL_ACTIVE
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def acquire_lock(project: Path) -> str | None:
+    """Take the per-paper run lock -> None, or the reason another run holds it."""
+    import os
+    lock = Path(project) / LOCK_REL
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    if lock.is_file():
+        try:
+            info = json.loads(lock.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            info = {}
+        if _pid_alive(int(info.get("pid", 0) or 0)) and int(info.get("pid", 0)) != os.getpid():
+            return (f"another reproduce.py run is active for this paper (pid {info.get('pid')}, "
+                    f"since {info.get('started_at')}); wait for its REPRODUCE DONE line - never "
+                    "start a second run or kill the first")
+    from datetime import datetime, timezone
+    lock.write_text(json.dumps({"pid": os.getpid(), "started_at": datetime.now(timezone.utc)
+                                .strftime("%Y-%m-%dT%H:%M:%SZ")}), encoding="utf-8")
+    return None
+
+
+def release_lock(project: Path) -> None:
+    (Path(project) / LOCK_REL).unlink(missing_ok=True)
+
+
+def _rmtree(path: Path) -> None:
+    import os
+    import shutil
+    import stat
+
+    def onerror(func, p, _exc):
+        try:
+            os.chmod(p, stat.S_IWRITE)
+            func(p)
+        except OSError:
+            pass
+    shutil.rmtree(path, onerror=onerror)
+
+
+def cleanup_stale(project: Path, legacy_age_hours: float = 6.0) -> list[tuple[str, int]]:
+    """Remove sandboxes left by interrupted runs: this paper's .wf/repro/sandboxes/* and
+    engine-managed medpaper_repro_* folders (<= 1.12) in the system temp older than
+    `legacy_age_hours`. -> [(path, bytes freed)]."""
+    import tempfile
+    import time
+    out: list[tuple[str, int]] = []
+
+    def size(d: Path) -> int:
+        total = 0
+        for p in d.rglob("*"):
+            try:
+                if p.is_file() and not p.is_symlink():
+                    total += p.stat().st_size
+            except OSError:
+                pass
+        return total
+    root = Path(project) / SANDBOX_DIR
+    for d in sorted(root.glob("run_*")) if root.is_dir() else []:
+        if d.is_dir():
+            n = size(d)
+            _rmtree(d)
+            out.append((str(d), n))
+    tmp = Path(tempfile.gettempdir())
+    for d in sorted(tmp.glob("medpaper_repro_*")):
+        try:
+            old = d.is_dir() and time.time() - d.stat().st_mtime > legacy_age_hours * 3600
+        except OSError:
+            old = False
+        if old:
+            n = size(d)
+            _rmtree(d)
+            out.append((str(d), n))
+    return out
 
 
 def analysis_scripts(project: Path) -> list[Path]:
@@ -120,7 +309,9 @@ def load_manifest(project: Path) -> tuple[list[dict] | None, list[str]]:
         if path in seen:
             problems.append(f"{MANIFEST_REL}: {path} listed twice")
         seen.add(path)
-        entries.append({"path": path, **lists})
+        # 1.13.0: an entry that declares "inputs" (even []) is scoped precisely on a data change;
+        # one without the key may read any data and is re-run whenever data change.
+        entries.append({"path": path, **lists, "declares_inputs": "inputs" in e})
     for missing in sorted(top - seen):
         problems.append(f"{MANIFEST_REL}: {missing} is not listed (every top-level script must "
                         "be, so nothing runs in an undeclared order)")
@@ -174,73 +365,143 @@ def affected_scripts(project: Path, previous: dict) -> tuple[set[str] | None, li
     if (sha256(tp) if tp.is_file() else None) != previous.get("tolerance_sha256"):
         return None, [], "the tolerance file changed"
     rec_engine = previous.get("engine_inputs")
-    if isinstance(rec_engine, dict) and rec_engine != engine_inputs():
-        return None, [], "engine analysis helpers changed"
-    prev_inputs = {i.get("path"): i.get("sha256") for i in previous.get("inputs", [])
-                   if isinstance(i, dict)}
-    cur_inputs = {rel: sha256(project / rel) for rel in sandbox_inputs(project)}
-    changed = sorted(r for r in set(prev_inputs) | set(cur_inputs)
-                     if prev_inputs.get(r) != cur_inputs.get(r))
+    if isinstance(rec_engine, dict) and not helpers_match(rec_engine, engine_inputs(project)):
+        return None, [], "an engine helper this paper's analysis uses changed"
+    changed = changed_inputs(project, previous)
     prev_scripts = {s.get("path") for s in previous.get("scripts", []) if isinstance(s, dict)}
-    if prev_scripts != {e["path"] for e in entries}:
-        return None, changed, "the analysis script set changed"
+    cur_scripts = {e["path"] for e in entries}
+    if not prev_scripts <= cur_scripts:
+        return None, changed, "an analysis script was removed"
+    added = cur_scripts - prev_scripts  # 1.13.0: a new script runs alone (plus its consumers)
     declared = {o for e in entries for o in e["outputs"]}
     results = {f"{RESULTS_DIR}/{p.name}" for p in (project / RESULTS_DIR).glob("*.json")} \
         if (project / RESULTS_DIR).is_dir() else set()
     undeclared = sorted(results - declared - {ACQ_RESULT})
     if undeclared:
         return None, changed, f"results not declared as any script's output: {undeclared[:3]}"
-    if any(c == MANIFEST_REL or c.startswith("02_data/") for c in changed):
-        return set(e["path"] for e in entries), changed, "data or manifest changed"
-    reach = set(dependencies.closure(project, changed))
-    hit = {e["path"] for e in entries
-           if e["path"] in reach or set(e["outputs"]) & reach}
+    if MANIFEST_REL in changed:
+        old = previous.get("manifest_entries")
+        if not isinstance(old, list):
+            return set(cur_scripts), changed, "the manifest changed (older proof without entries)"
+        old_by = {e.get("path"): e for e in old if isinstance(e, dict)}
+        moved = {e["path"] for e in entries if e["path"] in old_by and
+                 {k: e[k] for k in ("inputs", "outputs", "after")}
+                 != {k: old_by[e["path"]].get(k, []) for k in ("inputs", "outputs", "after")}}
+        added |= moved
+    hit = set(added)
+    data = [c for c in changed if c.startswith(("02_data/", DATASOURCE_PREFIX))]
+    for c in data:
+        for e in entries:
+            if not e.get("declares_inputs", True) or any(
+                    c == i or c.startswith(i.rstrip("/") + "/") for i in e["inputs"]):
+                hit.add(e["path"])
+    code = [c for c in changed if c.startswith("03_analysis/code/")]
+    top = {e["path"] for e in entries}
+    hit |= {c for c in code if c in top}
+    for helper in (c for c in code if c not in top):
+        users = helper_users(project, helper, sorted(top))
+        if not users:
+            reach = set(dependencies.closure(project, [helper]))
+            users = {e["path"] for e in entries if e["path"] in reach or set(e["outputs"]) & reach}
+        hit |= users
     grew = True
     while grew:
         produced = {o for e in entries if e["path"] in hit for o in e["outputs"]}
         more = {e["path"] for e in entries if e["path"] not in hit and set(e["inputs"]) & produced}
         grew = bool(more)
         hit |= more
-    return hit, changed, "scoped by the dependency closure"
+    return hit, changed, ("scoped: new/changed scripts, the helpers' users, the scripts that "
+                          "declare the changed data, and their consumers")
 
 
-ENGINE_INPUT_GLOBS = ("tools/R/*.R", "tools/analysis/**/*.py")
+def helper_users(project: Path, helper: str, scripts: list[str]) -> set[str]:
+    """1.13.0: top-level scripts that use a changed helper (by file name or module name),
+    followed through helpers that use it in turn. Empty = unknown (caller widens)."""
+    project = Path(project)
+    code_dir = project / "03_analysis/code"
+    helpers = [p.relative_to(project).as_posix() for p in code_dir.rglob("*")
+               if p.is_file() and p.suffix.casefold() in (".py", ".r")
+               and p.relative_to(project).as_posix() not in scripts] if code_dir.is_dir() else []
+
+    def mentions(rel: str, target: str) -> bool:
+        try:
+            text = (project / rel).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return False
+        name, stem = Path(target).name, Path(target).stem
+        return name in text or re.search(rf"(?<![\w-]){re.escape(stem)}(?![\w-])", text) is not None
+    chain, frontier = {helper}, {helper}
+    while frontier:
+        nxt = {h for h in helpers if h not in chain and any(mentions(h, t) for t in frontier)}
+        chain |= nxt
+        frontier = nxt
+    return {s for s in scripts if any(mentions(s, t) for t in chain)}
 
 
-def engine_inputs() -> dict[str, str]:
-    """SHA-256 of the engine helpers analysis scripts execute (results writers, R helpers).
+ENGINE_HELPERS_PY = "tools/analysis"
+ENGINE_HELPERS_R = "tools/R"
+_PY_HELPER_RE = re.compile(r"^\s*(?:from\s+analysis(?:\.(\w+))?\s+import\s+([\w\s,()*]+)|"
+                           r"import\s+analysis\.(\w+))", re.M)
+_R_HELPER_RE = re.compile(r"tools/R/([\w.-]+\.[Rr])\b")
 
-    Recorded in the proof (1.9.1) so an unchanged paper can reuse it and a helper change
-    forces a full re-run."""
+
+def engine_inputs(project: Path | None = None) -> dict[str, str]:
+    """SHA-256 of the engine helpers the paper's analysis scripts actually use (1.13.0).
+
+    Python `from analysis.<m> import ...` / `import analysis.<m>` and R
+    `source(.../tools/R/<f>.R)` in 03_analysis/code. Figure helpers (medfig.R, recipes.R) are
+    never part of the analysis proof, and an engine release that leaves the used helpers
+    byte-identical keeps the proof valid. Without a project: every analysis helper (legacy)."""
     from . import paths
     root = paths.repo_root()
-    out: dict[str, str] = {}
-    for g in ENGINE_INPUT_GLOBS:
-        for p in sorted(root.glob(g)):
-            if p.is_file() and "__pycache__" not in p.parts:
-                out[p.relative_to(root).as_posix()] = sha256(p)
-    return out
+    if project is None:
+        files = sorted(list((root / ENGINE_HELPERS_R).glob("*.R"))
+                       + [p for p in (root / ENGINE_HELPERS_PY).rglob("*.py")
+                          if "__pycache__" not in p.parts])
+    else:
+        used: set[str] = set()
+        code_dir = Path(project) / "03_analysis/code"
+        for p in sorted(code_dir.rglob("*")) if code_dir.is_dir() else []:
+            if not p.is_file() or p.suffix.casefold() not in (".py", ".r"):
+                continue
+            text = p.read_text(encoding="utf-8", errors="replace")
+            if p.suffix.casefold() == ".py":
+                for mod, names, mod2 in _PY_HELPER_RE.findall(text):
+                    cands = [mod or mod2] if (mod or mod2) else re.findall(r"\w+", names)
+                    used |= {f"{ENGINE_HELPERS_PY}/{c}.py" for c in cands if c}
+            else:
+                used |= {f"{ENGINE_HELPERS_R}/{f}" for f in _R_HELPER_RE.findall(text)}
+        files = [root / u for u in sorted(used) if (root / u).is_file()]
+    return {p.relative_to(root).as_posix(): sha256(p) for p in files if p.is_file()}
+
+
+def helpers_match(recorded: dict, current: dict) -> bool:
+    """The helpers the paper uses now are byte-identical to the recorded ones (extra recorded
+    helpers from an older, wider record are ignored)."""
+    return all(recorded.get(k) == v for k, v in current.items())
 
 
 def reuse_reason(project: Path, previous) -> tuple[bool, str]:
     """(True, why) when the previous passing proof still covers the paper exactly: the gate's
     own recomputation passes (scripts, manifest, data, tolerance, results and retained re-run
-    hashes) and the engine analysis helpers are byte-identical to the recorded ones."""
+    hashes) and the engine helpers the paper uses are byte-identical to the recorded ones."""
     if not isinstance(previous, dict) or not previous.get("all_match"):
         return False, "no previous passing proof"
     rec = previous.get("engine_inputs")
     if not isinstance(rec, dict):
         return False, "the previous proof predates engine-helper hashes (1.9.1)"
-    if rec != engine_inputs():
-        return False, "engine analysis helpers changed since the proof"
+    if not helpers_match(rec, engine_inputs(project)):
+        return False, "an engine helper this paper's analysis uses changed since the proof"
     out = validate(project)
     if not out.ok:
         return False, out.problems[0] if out.problems else out.detail
-    return True, ("scripts, manifest, data, tolerance, results and engine helpers are "
+    return True, ("scripts, manifest, data, tolerance, results and the engine helpers used are "
                   "identical to the passing proof of " + str(previous.get("generated_at", "?")))
 
 
 def sandbox_inputs(project: Path) -> list[str]:
+    """Analysis inputs: paper-relative paths plus `datasource:<name>/<file>` labels (1.13.0)."""
+    from . import datasources
     project = Path(project)
     out: list[str] = []
     for tree in INPUT_TREES:
@@ -248,21 +509,70 @@ def sandbox_inputs(project: Path) -> list[str]:
         if not base.is_dir():
             continue
         for p in base.rglob("*"):
-            if not p.is_file():
-                continue
-            rel = p.relative_to(project).as_posix()
-            if any(rel == d or rel.startswith(d + "/") for d in INPUT_EXCLUDE_DIRS):
-                continue
-            if any(part in INPUT_EXCLUDE_NAMES for part in p.relative_to(project).parts):
-                continue
-            if p.suffix in (".pyc", ".pyo"):
-                continue
-            out.append(rel)
+            if p.is_file():
+                rel = p.relative_to(project).as_posix()
+                if counts_as_input(rel):
+                    out.append(rel)
     if (project / TOLERANCE_REL).is_file():
         out.append(TOLERANCE_REL)
     if (project / MANIFEST_REL).is_file():
         out.append(MANIFEST_REL)
+    out += [label for label, _p in datasources.files(project)]
     return sorted(set(out))
+
+
+def input_path(project: Path, label: str) -> Path | None:
+    from . import datasources
+    if label.startswith(DATASOURCE_PREFIX):
+        return datasources.resolve(project, label)
+    return Path(project) / label
+
+
+def input_sha(project: Path, label: str) -> str | None:
+    """Hash of one input; data files use the size+mtime cache (never re-read GBs per gate)."""
+    from . import datasources
+    p = input_path(project, label)
+    if p is None or not p.is_file():
+        return None
+    if label.startswith(("02_data/", DATASOURCE_PREFIX)):
+        return datasources.cached_sha256(project, p)
+    return sha256(p)
+
+
+def input_hashes(project: Path) -> dict[str, str | None]:
+    return {rel: input_sha(project, rel) for rel in sandbox_inputs(project)}
+
+
+def changed_inputs(project: Path, report: dict) -> list[str]:
+    """Inputs whose hash differs from the proof. Paths an older proof listed that are no
+    longer inputs (documentation, acquisition code) are ignored."""
+    rec = {i.get("path"): i.get("sha256") for i in report.get("inputs", []) if isinstance(i, dict)}
+    cur = input_hashes(project)
+    return sorted(r for r in set(rec) | set(cur) if r and r != TOLERANCE_REL
+                  and (r in cur or counts_as_input(r)) and rec.get(r) != cur.get(r))
+
+
+def next_step(project: Path) -> str:
+    """1.13.0: the cheapest legal next command for the reproducibility proof (one line)."""
+    project = Path(project)
+    rp = project / REPORT_REL
+    report = _load_json(rp) if rp.is_file() else None
+    if not isinstance(report, dict) or not report.get("all_match"):
+        return ("no passing proof yet: run `reproduce.py run --wait` once (full run); give the "
+                "shell tool a long timeout, never kill it")
+    ok, why = reuse_reason(project, report)
+    if ok:
+        return "the proof is valid by hash: nothing to run (never re-run reproduce.py to be safe)"
+    scoped, changed, why2 = affected_scripts(project, report)
+    entries = load_manifest(project)[0] or []
+    if scoped is None:
+        return f"re-run needed ({why2 or why}): `reproduce.py run --wait` (full)"
+    if not scoped:
+        return (f"{why}; no script is affected: `reproduce.py run --wait` only re-checks and "
+                "records the proof")
+    return (f"{len(changed)} analysis input(s) changed ({', '.join(changed[:3])}): "
+            f"`reproduce.py run --wait` re-runs {len(scoped)} of {len(entries)} script(s) "
+            "(affected only)")
 
 
 def canonical(obj):
@@ -450,14 +760,8 @@ def validate(project: Path) -> Outcome:
     if (sha256(tp) if tp.is_file() else None) != report.get("tolerance_sha256"):
         problems.append(f"input changed since the proof: {TOLERANCE_REL}")
 
-    reported_inputs = {i.get("path"): i.get("sha256") for i in report.get("inputs", [])
-                       if isinstance(i, dict)}
-    current_inputs = {rel: sha256(project / rel) for rel in sandbox_inputs(project)}
-    for rel in sorted(set(reported_inputs) | set(current_inputs)):
-        if rel == TOLERANCE_REL:
-            continue
-        if reported_inputs.get(rel) != current_inputs.get(rel):
-            problems.append(f"input changed since the proof: {rel}")
+    for rel in changed_inputs(project, report):
+        problems.append(f"input changed since the proof: {rel}")
 
     problems.extend(ordered_scripts(project)[2])
     reported_scripts = {s.get("path"): s for s in report.get("scripts", []) if isinstance(s, dict)}

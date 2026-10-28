@@ -228,7 +228,7 @@ def _python_script_scope(text: str) -> tuple[bool, list[str]]:
 
 _R_HELPER_SOURCE = re.compile(
     r"source\s*\(\s*file\.path\s*\(\s*Sys\.getenv\s*\(\s*['\"]MEDPAPER_ROOT['\"]\s*\)\s*,\s*"
-    r"['\"]tools/(?:figures/R/(?:medfig|recipes)|R/medresults)\.R['\"]")
+    r"['\"]tools/(?:figures/R/(?:medfig|recipes)|R/medresults|R/medsources)\.R['\"]")
 _R_JSON_WRITE = re.compile(
     r"(?<![\w.])(?:jsonlite::|RJSONIO::|rjson::)?(?:toJSON|write_json)\s*\(")
 _ABS_PATH = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\[^\\\s]|~[\\/]|/(?:[^/\s\"']+/)+)")
@@ -314,7 +314,9 @@ def paper_scripts_scoped(ctx: Ctx) -> Result:
             if absolute:
                 problems.append(f"{rel}: absolute path literal(s) are forbidden: "
                                 + ", ".join(repr(x) for x in absolute[:3])
-                                + "; build paths from MEDPAPER_PROJECT / project_dir()")
+                                + "; build paths from MEDPAPER_PROJECT / project_dir(), and read "
+                                "the user's dataset in place with source_path('<name>') "
+                                "(`wf data add <path>`; never copy it into the paper)")
     if problems:
         hints = ["Run paper code with: .venv/Scripts/python.exe tools/wf.py run-script "
                  "<paper-relative-script.py|.R>",

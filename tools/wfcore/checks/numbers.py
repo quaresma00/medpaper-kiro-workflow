@@ -37,6 +37,8 @@ NUM_RE = re.compile(r"(?<![\w.])([+\-\u2212]?\d+(?:\.\d+)?)(?![\w])")
 # P value must actually be below 0.001.
 P_RE = re.compile(r"\b[Pp]\s*([<>=\u2264\u2265])\s*(0?\.\d+(?:[eE][+-]?\d+)?)\b")
 P_STATED_RE = re.compile(r"([<>\u2264\u2265])\s*(0?\.\d+)")
+# Comma, thin space, narrow no-break space or no-break space between digit groups of three.
+THOUSANDS_RE = re.compile(r"(?<=\d)[,\u2009\u202f\u00a0](?=\d{3}(?!\d))")
 
 
 def _plain(token: str) -> str:
@@ -53,7 +55,7 @@ def _walk(obj, sink: set[str]) -> None:
         sink.add(_norm(obj))
         return
     if isinstance(obj, str):
-        for m in NUM_RE.finditer(obj):
+        for m in NUM_RE.finditer(THOUSANDS_RE.sub("", obj)):
             sink.add(_norm(m.group(1)))
         return
     if isinstance(obj, dict):
@@ -251,6 +253,9 @@ def _offenders(text: str, floats, strings, allowed, stated=frozenset(),
                 bad.append((_lineno, "P" + op + token))
             return " "
         raw = P_RE.sub(pvalue, raw)
+        # 1.13.0: a thousands separator is display style, not a number boundary - "20,586,612"
+        # is one value (the journal number style adds separators at build, wfcore/numfmt.py).
+        raw = THOUSANDS_RE.sub("", raw)
         # A formatted table cell carries the threshold without the P label.
         if re.fullmatch(r"\s*[<\u2264]\s*0?\.\d+\s*", raw):
             raw = P_RE.sub(pvalue, "P" + raw.strip())

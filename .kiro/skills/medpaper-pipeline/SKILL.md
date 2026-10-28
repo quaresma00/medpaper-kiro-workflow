@@ -37,9 +37,10 @@ declared in place, read-only, never copied: `wf data add <absolute path>`.
 - Long commands: `--wait` (one blocking call, heartbeat <= 30 s, failures + one summary line)
   for `wf check`, `rework.py check`, `reproduce.py run`, `build_docx.py`; `wf check --summary`
   for one line. Logs live in `.wf/logs/` (or `temp/logs/`), never in external temp folders.
-- Batch all analysis edits of a review round into one plan, re-run the chain once and
-  reproduce once per round (`reproduce.py run` re-runs only affected scripts; `REUSED` when
-  nothing changed; manuscript edits never invalidate it).
+- Reproduce once at S06; later stages accept the proof by hash. Batch a review round's
+  analysis edits into one plan and reproduce once per round (affected scripts only; `REUSED`
+  when nothing changed; notes, docs and manuscript edits never invalidate it). Never run it
+  "to be safe" - `wf check` names the cheapest next command. Never copy the user's data.
 - Stage cards are short; their `reference/stage_details/` files are read only when needed.
   `wf archetype <name>` prints one figure archetype.
 - Prefer a cheaper model for mechanical steps (building tables/figures, checks, DOCX builds)

@@ -10,6 +10,14 @@
 > writes only its own `report.md` in the review bundle; declaration and section heading
 > names come from `target_journal.json` (defaults otherwise).
 
+> 1.13.0: a dataset the user already has is never copied into the paper. Register it in
+> place (`wf data add <absolute path> --name <name>`; `.wf/data_sources.json`, hashes cached
+> by size + mtime), read it with `analysis.datasources.source_path()` / `open_member()` (R:
+> `tools/R/medsources.R`), and point evidence at `datasource:<name>/<file>` (archives:
+> `zip_member_rows` / `zip_member_lines` stream one member). Only downloaded payloads live in
+> `02_data/raw/`. `data_not_copied` fails on a copy or hard link of a declared dataset;
+> copying more than `data_copy_limit_mb` (200 MB) of input data is refused by the engine.
+
 ## Purpose
 Get the real data in place with an auditable trail, and describe it before analysing it.
 

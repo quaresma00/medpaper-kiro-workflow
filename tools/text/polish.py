@@ -144,8 +144,10 @@ SPELLING_PAIRS = [
     (r"\bmodel(ed|ing)\b", r"\bmodell(ed|ing)\b", "modeling/modelling"),
     (r"\bag(e)?ing\b", r"\bageing\b", "aging/ageing"),
     (r"\brandomi[z]\w+\b", r"\brandomi[s]\w+\b", "randomize/randomise"),
-    (r"\banaly[z]\w+\b", r"\banaly[s]e\w*\b", "analyze/analyse"),
-    (r"\bcharacteri[z]\w+\b", r"\bcharacteri[s]\w+\b", "characterize/characterise"),
+    # 1.13.0: "analyses" (plural noun) and "characteristic(s)" are US spellings too.
+    (r"\banaly[z]\w+\b", r"\banaly[s](?:e|ed|ing)\b", "analyze/analyse"),
+    (r"\bcharacteri[z]\w+\b", r"\bcharacteri[s](?:e|ed|es|ing|ations?)\b",
+     "characterize/characterise"),
     (r"\bhospitali[z]\w+\b", r"\bhospitali[s]\w+\b", "hospitalize/hospitalise"),
     (r"\bfavor(able|ably)?\b", r"\bfavour(able|ably)?\b", "favor/favour"),
     (r"\bbehavior(al)?\b", r"\bbehaviour(al)?\b", "behavior/behaviour"),
@@ -298,15 +300,19 @@ def lint_structure(rel: str, text: str) -> list[dict]:
         out.append({"file": rel, "kind": kind, "detail": detail, "severity": severity})
 
     try:
-        from wfcore.checks.text import backstage_hits
-        leaks = backstage_hits(text)
+        from wfcore.checks.text import backstage_hits, deviation_hits
+        try:
+            proj = project_root()
+        except (Exception, SystemExit):  # noqa: BLE001 - linting a file outside a paper
+            proj = None
+        leaks = backstage_hits(text) + deviation_hits(text, proj)
     except ImportError:  # pragma: no cover - engine layout broken
         leaks = []
     if leaks:
         flag("backstage_language",
-             "mentions the pipeline's review/draft history: " + "; ".join(leaks[:4]) +
-             " - report real changes as protocol deviations or post hoc analyses ('added after "
-             "the data were examined')", "blocking")
+             "mentions the pipeline's review/draft/plan history: " + "; ".join(leaks[:4]) +
+             " - delete it and simply describe the analysis performed (no initial plan, no "
+             "protocol deviations)", "blocking")
 
     em = len(re.findall(r"\u2014|\s--\s", b))
     if em / nwords * 1000 > 4:

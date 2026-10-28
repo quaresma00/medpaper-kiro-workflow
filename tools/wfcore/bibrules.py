@@ -26,6 +26,10 @@ def _walk(title: str):
     for i, tok in enumerate(re.split(r"(\s+)", title)):
         core = tok.strip(_STRIP)
         if tok.isspace() or not core or "{" in tok:
+            if "{" in tok:
+                # 1.13.0: an already-braced word can end a clause ("{Toxicity}:"); keep the
+                # colon state so the gate walks an exported title exactly like the exporter.
+                after_colon = tok.rstrip().endswith(":")
             yield tok, core, False
             continue
         upper_inside = any(ch.isupper() for ch in core[1:])
