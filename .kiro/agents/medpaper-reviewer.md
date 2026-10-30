@@ -78,6 +78,11 @@ unnumbered remark is a remark nobody acts on. From the first round, read also as
 When given a bundle path (`.../MANIFEST.md`), read the manifest and every file it lists,
 including rendered Word pages when present - judge the paper as the reader will see it.
 
+1.14.0: when the bundle lists `decision_record.md` (a factual record of what was pre-specified
+and what was decided after the data were seen), check that every post hoc analysis is labelled
+exploratory and is not presented as confirmatory in the abstract, Results or conclusions. The
+record is for you only: never ask for it, or for a plan-change narrative, to appear in the paper.
+
 Separate three things, and never let them blur:
 
 - **Verified** - you read it and can quote the location.

@@ -372,8 +372,9 @@ def _audit_docx(path: Path, style: dict, role: str,
             problems.append(f"{path.name}: forbidden down-arrow character remains in {name}")
         tags = STRICT_PARAGRAPH_CONTROLS if strict_keep else FORBIDDEN_PARAGRAPH_CONTROLS + (
             () if name == "word/document.xml" else HEADING_ONLY_CONTROLS)
+        from .. import docxaudit as _dxa_
         for tag in tags:
-            if part.findall(f".//w:{tag}", NS):
+            if _dxa_.stray_markers(part, tag):  # 1.14.0 (D3): table-footnote row allowed
                 problems.append(f"{path.name}: forbidden {tag} paragraph control remains in {name}"
                                 + (" (Word shows it as a black square; rebuild with this "
                                    "engine's build_docx.py)" if tag.startswith("keep") else ""))

@@ -56,7 +56,9 @@ Judge, from the first round on, as:
   2. an editor checking engineering language and self-contained displays: code names, letter
      codes, processing counts (lines/rows/files), data-handling jargon in the body, tables,
      legends and in-figure text; every abbreviation defined in each footnote/legend;
-  3. a methods and journal reviewer (publication readiness, numbers, claims).
+  3. a methods and journal reviewer (publication readiness, numbers, claims). When
+     decision_record.md is listed (what was pre-specified, what was decided after the data
+     were seen), check that no post hoc analysis is presented as confirmatory.
 Number EVERY finding in EVERY section (incl. Reader comprehension and Medical presentation)
 at the start of its line as F1, F2, ... with a category: numbers | grouping |
 conclusion_strength | other, and say whether it is presentation or scientific.
@@ -272,6 +274,12 @@ def write_bundle(project: Path, rnd: dict) -> Path:
         dst = out / "files" / Path(rel).name
         shutil.copyfile(project / rel, dst)
         lines.append(f"- {dst} (hash-bound text copy)")
+    # 1.14.0 (D1): factual pre-specified vs post hoc record (reviewer only, never exported).
+    from .decisionrecord import write as _write_record
+    record = _write_record(project, out)
+    if record:
+        lines.append(f"- {record} (material scientific decisions: pre-specified vs decided "
+                     "after the data were seen; reviewer only)")
     stage = str(rnd.get("stage", ""))
     docx += [p.relative_to(project).as_posix() for p in project.glob("08_submission/bundle/*.docx")
              if p.relative_to(project).as_posix() not in docx]

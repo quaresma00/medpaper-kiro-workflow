@@ -314,7 +314,8 @@ def scope_problems(project: Path, revision: dict, files: dict | None = None) -> 
         if renewable(rel):
             return True
         # S11 QC scratch (contact sheet, crops, qc report); figure renders are never exempt.
-        return (bool(stages & {"S11_figures", "S23_package"}) and rel.startswith("05_figures/qc/")
+        return (bool(stages & {"S11_figures", "S23_package", "S09_results"})
+                and rel.startswith("05_figures/qc/")
                 and not rel.endswith(".artist.json"))
     return [f"unplanned change: {rel}" for rel in sorted(changed - allowed) if not maintenance(rel)]
 

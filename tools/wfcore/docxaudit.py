@@ -60,6 +60,33 @@ def heading_keep_problems(root) -> list[str]:
 
 
 KEEP_MARKERS = ("keepNext", "keepLines", "pageBreakBefore")
+
+
+def table_footnote_rows(root) -> set[int]:
+    """1.14.0 (D3): ids of the paragraphs in the last row of each table - the only place a
+    keepNext may stand (it keeps the table footnote on the table's page)."""
+    out: set[int] = set()
+    for tbl in root.iter(f"{{{W}}}tbl"):
+        rows = tbl.findall("w:tr", NS)
+        if rows:
+            out.update(id(p) for p in rows[-1].iter(f"{{{W}}}p"))
+    return out
+
+
+def _allowed_keep(p, allowed: set[int]) -> bool:
+    """A last-table-row paragraph carrying keepNext and no other keep marker."""
+    return id(p) in allowed and _has(p, "keepNext") and not any(
+        _has(p, t) for t in KEEP_MARKERS if t != "keepNext")
+
+
+def stray_markers(part, tag: str) -> int:
+    """How many `tag` markers in an XML part stand anywhere but the D3 table-footnote row."""
+    nodes = part.findall(f".//w:{tag}", NS)
+    if tag != "keepNext" or not nodes:
+        return len(nodes)
+    allowed = table_footnote_rows(part)
+    ok = sum(1 for p in part.iter(f"{{{W}}}p") if _allowed_keep(p, allowed))
+    return max(0, len(nodes) - ok)
 # An embedded figure keeps at least this share of the usable page height (or its natural size
 # if smaller); a legend too long to share that page continues on the next page by design.
 # build_docx.figure_size and keep_problems share this value.
@@ -107,7 +134,8 @@ def _usable_height_in(body) -> float:
 def keep_problems(root, styles_root=None) -> list[str]:
     """1.13.0 (#10): the Word layout audit (replaces the 1.11 keep-with-next audit).
 
-    Zero keepNext/keepLines/pageBreakBefore in document.xml and in the effective styles, plus
+    Zero keepNext/keepLines/pageBreakBefore in document.xml and in the effective styles (1.14.0
+    D3: except keepNext on the last row of each table, which keeps its footnote with it), plus
     structure: every table row cantSplit; each embedded figure starts after an explicit page
     break, is followed by its legend, and image + estimated legend fit the usable page
     height. (Tables starting their own section are checked by table_layout_problems.)"""
@@ -115,8 +143,9 @@ def keep_problems(root, styles_root=None) -> list[str]:
     if body is None:
         return ["no document body"]
     out = []
+    allowed = table_footnote_rows(root)  # 1.14.0 (D3): keepNext on each table's last row only
     marked = [(_ptext(p)[:30] or "(empty)") for p in root.iter(f"{{{W}}}p")
-              if any(_has(p, t) for t in KEEP_MARKERS)]
+              if any(_has(p, t) for t in KEEP_MARKERS) and not _allowed_keep(p, allowed)]
     if marked:
         out.append(f"{len(marked)} paragraph(s) carry keepNext/keepLines/pageBreakBefore (black "
                    f"squares in Word): {marked[:3]}")

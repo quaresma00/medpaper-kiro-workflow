@@ -30,7 +30,8 @@ Details (R/Python templates, skill arbitration, QC list, manifest JSON): `refere
    each PNG, then
    `.\.venv\Scripts\python.exe tools/figures/qc.py --confirm "Figure 1" --note "<what you saw>"` and
    `.\.venv\Scripts\python.exe tools/wf.py decide figures_visually_confirmed YES --why "<per figure>"`.
-   Never confirm a figure you did not load.
+   Never confirm a figure you did not load. 1.14.0: the single look at all tables and
+   figures together happens once at the start of S09.
 
 ## Outputs
 - `05_figures/manifest.json`

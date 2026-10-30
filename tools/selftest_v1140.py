@@ -488,14 +488,14 @@ def run_d(tmp: Path, record, section) -> None:
     dead = P / rp.SANDBOX_DIR / "run_dead"
     _w(dead, "x.bin", "x")
     _w(dead, rp.MARKER, {"paper": str(P.resolve()), "pid": 0, "host": __import__("socket").gethostname()})
-    active = tmpdir / "medpaper_repro_st1140_active"
+    active = tmpdir / f"medpaper_repro_st1140_active_{os.getpid()}"
     _w(active, rp.MARKER, {"paper": str(P.resolve()), "pid": os.getpid(),
                            "host": __import__("socket").gethostname()})
-    foreign = tmpdir / "medpaper_repro_st1140_foreign"
+    foreign = tmpdir / f"medpaper_repro_st1140_foreign_{os.getpid()}"
     _w(foreign, rp.MARKER, {"paper": str(tmp / "other_paper"), "pid": 0, "host": "x"})
-    old_unused = tmpdir / "medpaper_repro_st1140_old"
-    old_used = tmpdir / "medpaper_repro_st1140_used"
-    young = tmpdir / "medpaper_repro_st1140_young"
+    old_unused = tmpdir / f"medpaper_repro_st1140_old_{os.getpid()}"
+    old_used = tmpdir / f"medpaper_repro_st1140_used_{os.getpid()}"
+    young = tmpdir / f"medpaper_repro_st1140_young_{os.getpid()}"
     for d in (old_unused, old_used, young):
         _w(d, "y.bin", "y")
     t13 = time.time() - 13 * 3600
@@ -507,10 +507,13 @@ def run_d(tmp: Path, record, section) -> None:
         removed, kept = rp.cleanup_stale(P)
     finally:
         holder.kill()
-    gone = {Path(x).name for x, _ in removed}
+    # only this run's folders count (a concurrent selftest may clean the shared temp dir too)
+    mine = {dead.name, active.name, foreign.name, old_unused.name, old_used.name, young.name}
+    gone = {Path(x).name for x, _ in removed} & mine
     record("D cleanup removes only this paper's dead sandboxes and old unreferenced legacy "
            "folders; an active, a foreign, a young or a process-referenced folder is kept and listed",
-           gone == {"run_dead", "medpaper_repro_st1140_old"} and active.exists() and foreign.exists()
+           "run_dead" in gone and gone <= {"run_dead", old_unused.name}
+           and not old_unused.exists() and active.exists() and foreign.exists()
            and old_used.exists() and young.exists() and len(kept) >= 4, f"{gone} | {kept}")
     for d in (active, foreign, old_used, young):
         shutil.rmtree(d, ignore_errors=True)
@@ -744,4 +747,166 @@ def run_h(tmp: Path, record, section) -> None:
            str({k[-30:]: bool(v) for k, v in {**blocked, **allowed}.items()}))
 
 
-GROUPS = [("A", run_a), ("B", run_b), ("C", run_c), ("D", run_d), ("E", run_e), ("F", run_f), ("H", run_h)]
+# ------------------------------------------------------------------------------ I (D1-D3)
+def run_i(tmp: Path, record, section) -> None:
+    from xml.etree import ElementTree as ET
+    from wfcore import decisionrecord, docxaudit, meaning, registry, reviewrounds
+    section("1.14.0 D1-D3: decision record for reviewers, one look before Results, table "
+            "footnote stays with its table")
+    # D1 ----------------------------------------------------------------------------------
+    p = _paper(tmp / "d1", "S18_independent_review")
+    _w(p, "01_protocol/protocol_v1.md", "# Protocol\n\n## Variables\n\n- Primary outcome: 30-day "
+       "mortality\n- Exposure: drug A\n- Comparator: drug B\n\n## Statistical analysis plan\n\n"
+       "Main model: Cox regression adjusted for age\n\n## Design precedent\n\n- Primary outcome: "
+       "precedent yes - PMID 12345678\n")
+    _w(p, "01_protocol/protocol_final.md", "# Protocol\n\n- **Primary outcome:** 90-day "
+       "mortality\n- Exposure: drug A\n- Comparator: drug B\n- Main model: Cox regression "
+       "adjusted for age\n")
+    _w(p, ".wf/protocol_changes.md", "# Plan changes\n\n- primary outcome 30-day -> 90-day "
+       "mortality (data-driven: few early events)\n")
+    _w(p, "03_analysis/analysis_manifest.json", {"schema": 1, "scripts": [
+        {"path": "03_analysis/code/a.R", "role": "primary"},
+        {"path": "03_analysis/code/b.R", "role": "additional",
+         "decision": "whether the effect holds in women only"}]})
+    _w(p, "01_protocol/artifact_plan.json", {"main_figures": [], "supp_figures": [],
+                                             "main_tables": [], "supp_tables": []})
+    text = decisionrecord.build(p)
+    rows = {ln.split("|")[1].strip(): ln for ln in text.splitlines() if ln.startswith("| ")}
+    record("D1 the decision record states, from the protocol records only, what was "
+           "pre-specified and what was decided after the data were seen",
+           "changed after the data were seen" in rows.get("Primary outcome", "")
+           and "as pre-specified" in rows.get("Exposure", "")
+           and "as pre-specified" in rows.get("Main model", "")
+           and "few early events" in text and "b.R: whether the effect holds" in text
+           and "never presented as confirmatory" in text
+           and "precedent" not in rows.get("Primary outcome", ""), text[:600])
+    rnd = {"id": "M001", "scope": "manuscript", "mode": "full", "reviewed": [], "stage": "S10"}
+    bundle = reviewrounds.write_bundle(p, rnd)
+    man = (bundle / "MANIFEST.md").read_text(encoding="utf-8")
+    pairs = [{"file": "07_manuscript/results.md", "old": "An exploratory analysis showed x.",
+              "new": "The analysis confirmed x.", "hash": "h1"}]
+    mb = meaning.write_bundle(p, "test", pairs)
+    mman = (mb / "MANIFEST.md").read_text(encoding="utf-8")
+    exported = [rel for rel in ("tools/manuscript/writer_bundle.py", "tools/manuscript/build_docx.py",
+                                "tools/final_copy.py", "tools/wfcore/packagecontent.py",
+                                "tools/wfcore/finalcopy.py")
+                if "decisionrecord" in (ROOT / rel).read_text(encoding="utf-8")
+                or "decision_record" in (ROOT / rel).read_text(encoding="utf-8")]
+    agent = (ROOT / ".kiro/agents/medpaper-reviewer.md").read_text(encoding="utf-8")
+    writer = (ROOT / ".kiro/agents/medpaper-clinical-writer.md").read_text(encoding="utf-8")
+    record("D1 review and meaning bundles carry the record (reviewer only); the brief and the "
+           "reviewer agent ask that post hoc analyses are not presented as confirmatory; it is "
+           "never exported and the writer keeps labelling post hoc analyses exploratory",
+           (bundle / "decision_record.md").is_file() and "decision_record.md" in man
+           and "confirmatory" in man and (mb / "decision_record.md").is_file()
+           and "decision_record.md" in mman and not exported
+           and "not presented as confirmatory" in agent and "exploratory" in writer
+           and str(bundle).replace("\\", "/").count("/.wf/") == 1, str(exported))
+    # D2 ----------------------------------------------------------------------------------
+    pipe = registry.load()
+    s09 = pipe.stage("S09_results")
+    gate = [g for g in s09.gate if g.get("name") == "displays_seen_before_results"]
+    card = (ROOT / "pipeline/stages/S09_results.md").read_text(encoding="utf-8")
+    q = _paper(tmp / "d2", "S09_results")
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    (q / "05_figures/out").mkdir(parents=True)
+    fig = plt.figure(figsize=(3, 2))
+    plt.plot([0, 1], [0, 1])
+    fig.savefig(q / "05_figures/out/Figure1.png", dpi=60)
+    plt.close(fig)
+    _w(q, "01_protocol/artifact_plan.json", {
+        "main_figures": [{"id": "Figure 1", "file": "05_figures/out/Figure1.png"}],
+        "supp_figures": [], "main_tables": [{"id": "Table 1", "file": "04_tables/main/T1.xlsx"}],
+        "supp_tables": []})
+    sheet = _run(q, "tools/figures/qc.py", "--contact-sheet", "--with-tables")
+    before = _decision_gate(q, "S09_results", "displays_seen_before_results", ["YES"])
+    dec = _run(q, "tools/wf.py", "decide", "displays_seen_before_results", "YES", "--why",
+               "one sheet of Figure 1 and Table 1; axis labels readable, fixed nothing")
+    after = _decision_gate(q, "S09_results", "displays_seen_before_results", ["YES"])
+    record("D2 one contact-sheet image of all final tables and figures before Results "
+           "(a table that cannot be rendered is named), recorded once as a S09 gate; the "
+           "card stays short and the other visual checks stay at S23",
+           len(gate) == 1 and gate[0].get("since") == "1.14.0" and "--with-tables" in card
+           and len(card) <= registry.CARD_MAX_CHARS and sheet.returncode == 0
+           and (q / "05_figures/qc/displays_sheet.png").is_file() and "Table 1" in _out(sheet)
+           and "deferred to S23" in _out(sheet) and not before.ok and dec.returncode == 0
+           and after.ok, _out(sheet)[-300:] + _out(dec)[-200:])
+    # D3 ----------------------------------------------------------------------------------
+    from manuscript import build_docx as bd
+    W = docxaudit.W
+
+    def row(t):
+        return (f'<w:tr><w:trPr><w:cantSplit/></w:trPr><w:tc><w:p><w:pPr><w:jc w:val="left"/>'
+                f'</w:pPr><w:r><w:t>{t}</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>{t}2</w:t>'
+                "</w:r></w:p></w:tc></w:tr>")
+    xml = (f'<w:document xmlns:w="{W}"><w:body><w:p><w:pPr><w:pStyle w:val="SectionHeading"/>'
+           "</w:pPr><w:r><w:t>Results</w:t></w:r></w:p><w:tbl>" + row("a") + row("b") + row("c")
+           + "</w:tbl><w:p><w:r><w:t>Data are n (%).</w:t></w:r></w:p><w:tbl>" + row("x")
+           + row("y") + '</w:tbl><w:p><w:pPr><w:sectPr><w:type w:val="nextPage"/></w:sectPr>'
+           "</w:pPr></w:p><w:sectPr/></w:body></w:document>").encode()
+    kept = bd.keep_table_footnotes(xml)
+    root = ET.fromstring(kept)
+    tbls = root.findall(f".//{{{W}}}tbl")
+    per_row = [[len(r.findall(f".//{{{W}}}keepNext")) for r in t.findall(f"{{{W}}}tr")] for t in tbls]
+
+    def flagged(mutate) -> bool:
+        r2 = ET.fromstring(kept)
+        mutate(r2)
+        return any("black squares" in x for x in docxaudit.keep_problems(r2))
+
+    def add(where, tag="keepNext"):
+        def f(r2):
+            p_ = where(r2)
+            ppr = p_.find(f"{{{W}}}pPr")
+            if ppr is None:
+                ppr = ET.SubElement(p_, f"{{{W}}}pPr")
+            ET.SubElement(ppr, f"{{{W}}}{tag}")
+        return f
+    first_row_p = lambda r2: r2.find(f".//{{{W}}}tbl/{{{W}}}tr/{{{W}}}tc/{{{W}}}p")  # noqa: E731
+    heading_p = lambda r2: r2.find(f"{{{W}}}body/{{{W}}}p")  # noqa: E731
+    last_row_p = lambda r2: r2.findall(f".//{{{W}}}tbl")[0].findall(  # noqa: E731
+        f"{{{W}}}tr")[-1].find(f".//{{{W}}}p")
+    record("D3 keepNext only on the last data row of a table followed by its footnote; the "
+           "audit allows exactly that row and flags a keep marker anywhere else",
+           per_row == [[0, 0, 2], [0, 0]] and b"<w:pPr><w:keepNext/><w:jc" in kept
+           and not docxaudit.keep_problems(root) and docxaudit.stray_markers(root, "keepNext") == 0
+           and flagged(add(first_row_p)) and flagged(add(heading_p))
+           and flagged(add(last_row_p, "keepLines")), str(per_row))
+    st = bd.modern_layout(b'<w:settings xmlns:w="x"><w:zoom/><w:rsids/></w:settings>')
+    record("D3 Word layout mode 15 is set (legacy mode ignores keepNext on table rows; checked "
+           "with a Word render of a long table), placed before rsids",
+           st.find(b'w:val="15"') != -1 and st.find(b"<w:compat>") < st.find(b"<w:rsids")
+           and bd.modern_layout(st) == st, st.decode())
+    st_ = (f'<w:settings xmlns:w="{W}"><w:zoom w:percent="100"/><w:rsids/></w:settings>').encode()
+    lay = bd.modern_layout(st_)
+    record("D3 the builder sets Word layout mode 15 (the legacy mode Pandoc implies ignores "
+           "keepNext on table rows; confirmed with Word: footnote no longer alone on a page)",
+           b'w:val="15"' in lay and lay.index(b"<w:compat>") < lay.index(b"<w:rsids")
+           and bd.modern_layout(lay) == lay, lay.decode()[:200])
+
+
+def run_r(tmp: Path, record, section) -> None:
+    from wfcore import registry
+    from wfcore.state import State
+    section("1.14.0 release: version, one migration event, card length")
+    q = tmp / "old"
+    q.mkdir(parents=True, exist_ok=True)
+    st = State(q, ".wf").create("medpaper", "1.13.0", "S10_tables")
+    before = sorted(x.name for x in q.rglob("*") if x.is_file() and ".wf" not in x.parts)
+    st.migrate_pipeline("1.14.0", ["S10_tables"])
+    st.migrate_pipeline("1.14.0", ["S10_tables"])
+    notes = [e for e in st.data["events"] if e["kind"] == "requirements_changed"
+             and str(e.get("detail", "")).startswith("1.14.0")]
+    after = sorted(x.name for x in q.rglob("*") if x.is_file() and ".wf" not in x.parts)
+    pipe = registry.load()
+    sizes = {s.id: len((ROOT / "pipeline" / s.card).read_text(encoding="utf-8")) for s in pipe.stages}
+    record("R pipeline 1.14.0; a 1.13 paper gets exactly one 1.14.0 migration event and no paper "
+           "file changes; every card <= the card limit",
+           pipe.meta.get("version") == "1.14.0" and len(notes) == 1 and before == after
+           and max(sizes.values()) <= registry.CARD_MAX_CHARS, f"{len(notes)} {max(sizes.values())}")
+
+
+GROUPS = [("A", run_a), ("B", run_b), ("C", run_c), ("D", run_d), ("E", run_e), ("F", run_f),
+          ("H", run_h), ("I", run_i)]

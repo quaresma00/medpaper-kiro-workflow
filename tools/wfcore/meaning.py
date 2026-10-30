@@ -343,7 +343,8 @@ BRIEF = """Meaning check ({context}). This is NOT a full review. Read pairs.md a
 results_in_words.md in this folder only. For each numbered pair decide whether the new wording
 states the same scientific meaning as the old wording (direction, association or causation,
 certainty, significance, comparison, limitations, population, exposure, comparator, outcome
-and time window), judged against the results. Do not judge style.
+and time window), judged against the results. Do not judge style. When decision_record.md is
+listed, a post hoc analysis newly worded as confirmatory is a meaning change.
 Write {report} - the only file you may write - with exactly one line per pair:
   P01: meaning unchanged
   P02: meaning changed - <one-line reason>"""
@@ -379,6 +380,10 @@ def write_bundle(project: Path, context: str, pairs: list[dict]) -> Path:
     manifest = [f"# Meaning-check bundle {out.name}", "",
                 BRIEF.format(context=context, report=out / "report.md"), "", "## Files", "",
                 f"- {out / 'pairs.md'}", f"- {out / 'results_in_words.md'}"]
+    from .decisionrecord import write as _write_record  # 1.14.0 (D1): reviewer only
+    record = _write_record(project, out)
+    if record:
+        manifest.append(f"- {record}")
     (out / "MANIFEST.md").write_text("\n".join(manifest) + "\n", encoding="utf-8")
     return out
 

@@ -11,6 +11,12 @@ Write the Results from the final tables and figures (1.10.0: S09 runs after S10/
 - `05_figures/legends.md`, `04_tables/table_captions.md` - so the prose does not repeat them
 
 ## Procedure
+0. 1.14.0: ONE look at all final tables and figures (one image); fix what you see first,
+   record it once (all other visual checks stay at S23):
+```
+.\.venv\Scripts\python.exe tools/figures/qc.py --contact-sheet --with-tables
+.\.venv\Scripts\python.exe tools/wf.py decide displays_seen_before_results YES --why "<what you saw; what you fixed>"
+```
 1. Order the Results the way the artifact plan is ordered: cohort/flow, baseline
    characteristics, primary analysis, secondary analyses, sensitivity analyses.
    1.12.0: build the writer bundle (results rendered as sentences with clinical labels, table

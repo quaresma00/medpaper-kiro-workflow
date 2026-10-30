@@ -60,6 +60,8 @@ their names are the programmer's vocabulary, not the reader's.
 - Results: lead with the primary comparison; denominators with every percentage; effect
   estimates with 95% CI; refer to tables and figures by number, in first-citation order.
 - Continuous paragraphs, no bullet lists, no review/round/re-run history in the text.
+- An analysis the material calls post hoc or additional is written as exploratory ("In an
+  exploratory analysis, ..."), never as confirmatory; do not narrate plan changes.
 - Match the register of the exemplar paragraphs, not their content.
 - Keep within the soft word budget in `MANIFEST.md`; say in your reply if the content needs
   more.

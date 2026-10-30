@@ -27,7 +27,11 @@ the effect size and the data's limits are known. This is the last cheap exit.
    actually performed.
 2. Record every change of plan in `.wf/protocol_changes.md` (internal; one line each: what
    changed and why - data-driven or method-driven). It keeps the protocol honest without
-   ever reaching the manuscript, the writer bundle or the reviewer.
+   ever reaching the manuscript or the writer bundle. 1.14.0 (D1): the reviewer bundles
+   carry a short factual record built from protocol_v1/protocol_final ("Primary outcome:",
+   "Exposure:", "Comparator:", "Main model:" lines), this log and the `additional` analyses,
+   so the reviewer can check that post hoc analyses are labelled exploratory, not
+   confirmatory. It is never exported; the manuscript describes the analysis performed.
 3. Confirm the analysis is finished:
 ```
 .\.venv\Scripts\python.exe tools/wf.py decide analysis_converged YES --why "<primary, secondary and declared validity analyses done; additional ones and the decision each could change>"

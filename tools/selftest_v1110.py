@@ -250,7 +250,7 @@ def run_keep(tmp: Path, record, section) -> None:
     record("keep markers in paragraphs, cells and styles are detected; the builder removes them "
            "all and holds table rows with cantSplit instead",
            any("black squares" in b for b in before) and any("style(s)" in b for b in before)
-           and not after and b"keepNext" not in styles and b"keepNext" not in ET.tostring(root)
+           and not after and b"keepNext" not in styles and not da.stray_markers(root, "keepNext")
            and b"cantSplit" in ET.tostring(root), f"{before} | {after}")
     record("headings carry no keepNext/keepLines collapse markers", not da.heading_keep_problems(root))
     record("FORBIDDEN controls now include keepNext/keepLines everywhere (1.13.0)",

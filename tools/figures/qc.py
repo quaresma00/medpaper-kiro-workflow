@@ -553,17 +553,46 @@ def crop(fid: str, rows: int, cols: int, cell: str) -> int:
     return 0
 
 
-def contact_sheet(max_px: int = 1400) -> int:
+DISPLAYS_SHEET = "05_figures/qc/displays_sheet.png"
+DISPLAYS_DECISION = "displays_seen_before_results"
+
+
+def _table_tiles(plan: dict, missing: list[str]) -> list[tuple[str, np.ndarray]]:
+    """1.14.0 (D2): page 1 of every planned table workbook as an image (Word/Excel COM or
+    LibreOffice through tools/manuscript/preview.py); a table that cannot be rendered is
+    listed as missing, never silently dropped."""
+    import tempfile
+    sys.path.insert(0, str(_TOOLS / "manuscript"))
+    import preview  # tools/manuscript/preview.py
+    out = []
+    for e in list(plan.get("main_tables", [])) + list(plan.get("supp_tables", [])):
+        src = project_root() / str(e.get("file", ""))
+        if not src.is_file():
+            missing.append(str(e.get("id")))
+            continue
+        try:
+            with tempfile.TemporaryDirectory(prefix="medpaper_tables_") as tmp:
+                pages = preview.rasterise(preview.to_pdf(src, Path(tmp)), Path(tmp), "1", 110)
+                out.append((str(e.get("id")), read_png(pages[0])))
+        except Exception as exc:  # noqa: BLE001 - reported, the figures still tile
+            missing.append(f"{e.get('id')} ({type(exc).__name__}: {str(exc)[:80]})")
+    return out
+
+
+def contact_sheet(max_px: int = 1400, with_tables: bool = False) -> int:
     """Tile every planned figure into one PNG so the visual pass costs one image, not N.
 
     Reviewing 6 figures one at a time means 6 images in context. The sheet is a single load
     at a resolution that still shows overlap, clipping, colour and clutter. Anything the
     sheet makes you suspicious of gets a full-resolution --crop follow-up; that is the point
     of the two-step, not a shortcut around it.
+
+    1.14.0 (D2) `--with-tables`: the final tables join the figures in ONE image
+    (05_figures/qc/displays_sheet.png) for the single look before S09 Results.
     """
     plan = load_plan()
     entries = plan_figures(plan)
-    if not entries:
+    if not entries and not with_tables:
         raise SystemExit("the artifact plan declares no figures")
 
     tiles: list[tuple[str, np.ndarray]] = []
@@ -574,6 +603,8 @@ def contact_sheet(max_px: int = 1400) -> int:
             missing.append(str(e.get("id")))
             continue
         tiles.append((str(e.get("id")), read_png(png)))
+    if with_tables:
+        tiles += _table_tiles(plan, missing)
     if not tiles:
         raise SystemExit("no rendered PNGs found - render the figures first")
 
@@ -599,7 +630,7 @@ def contact_sheet(max_px: int = 1400) -> int:
         sheet[y:y + tile.shape[0], x:x + tile.shape[1]] = tile
         placed.append((fid, r, c))
 
-    out = project_root() / "05_figures" / "qc" / "contact_sheet.png"
+    out = project_root() / (DISPLAYS_SHEET if with_tables else "05_figures/qc/contact_sheet.png")
     out.parent.mkdir(parents=True, exist_ok=True)
     # Draw the id labels with matplotlib so the sheet is self-describing without a font blit.
     import matplotlib.pyplot as plt
@@ -613,10 +644,17 @@ def contact_sheet(max_px: int = 1400) -> int:
     plt.close(fig)
 
     rel = out.relative_to(project_root()).as_posix()
-    _say(f"contact sheet: {len(tiles)} figure(s) in a {rows}x{cols} grid -> project/{rel}")
+    _say(f"contact sheet: {len(tiles)} display item(s) in a {rows}x{cols} grid -> project/{rel}")
     if missing:
         print(f"  NOT RENDERED (absent from the sheet): {', '.join(missing)}")
     print(f"\nlook at it in one load:  read_file {out}")
+    if with_tables:
+        print("fix what you see (tables S10, figures S11) BEFORE writing Results, then record "
+              "the look once:")
+        _say(f'  tools/wf.py decide {DISPLAYS_DECISION} YES --why "<what you saw; what you '
+             'fixed>"')
+        print("All other visual checks stay deferred to S23 (no --confirm needed here).")
+        return 0
     print("then, per figure you inspected:")
     _say('  tools/figures/qc.py --confirm "Figure 1" --note "<what you saw / what you changed>"')
     print("crop in at full resolution on anything the sheet makes you doubt:")
@@ -676,13 +714,15 @@ def main() -> int:
     ap.add_argument("--cell", default="A")
     ap.add_argument("--contact-sheet", action="store_true",
                     help="tile every rendered figure into one PNG for a single-load visual pass")
+    ap.add_argument("--with-tables", action="store_true",
+                    help="1.14.0: add the final tables (one image of all displays, before S09)")
     ap.add_argument("--confirm", metavar="FIGURE_ID",
                     help="record that this figure's render was visually inspected")
     ap.add_argument("--note", default="", help="what you saw (required with --confirm)")
     args = ap.parse_args()
 
     if args.contact_sheet:
-        return contact_sheet()
+        return contact_sheet(with_tables=args.with_tables)
     if args.confirm:
         return confirm(args.confirm, args.note)
     if args.crop:

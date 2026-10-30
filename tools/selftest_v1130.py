@@ -775,7 +775,8 @@ def run_g4(tmp: Path, record, section) -> None:
     record("G4 the built DOCX has zero keepNext/keepLines/pageBreakBefore (document and styles), "
            "cantSplit rows with a repeated header, the table on its own section, and the figure "
            "on a new page without a blank page, sized to fit with its long legend",
-           not probs and not tbl and b"keepNext" not in raw and b"keepLines" not in raw
+           not probs and not tbl and not docxaudit.stray_markers(root, "keepNext")
+           and b"keepNext" not in ET.tostring(styles) and b"keepLines" not in raw
            and b"pageBreakBefore" not in raw and b"cantSplit" in raw and b"tblHeader" in raw
            and new_page and not blank and ext is not None
            and int(ext.get("cy")) / 914400 < 9.0, f"{probs} | {tbl} | blank={blank} new={new_page}")

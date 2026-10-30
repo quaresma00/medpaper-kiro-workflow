@@ -45,6 +45,8 @@ TEXT_ROLES = {"manuscript", "title_page", "cover_letter", "supplementary",
 # on purpose). Layout is kept by structure instead: each table starts its own section (rows
 # cantSplit, header rows repeat, footnote right after the table); each embedded figure starts
 # after an explicit page-break run and is sized so the image and its legend fit one page.
+# 1.14.0 (D3): the one exception - keepNext on the last row of each table followed by its
+# footnote (keep_table_footnotes), so the footnote never ends alone on the next page.
 FORBIDDEN_PARAGRAPH_CONTROLS = (
     "outlineLvl", "pageBreakBefore", "keepNext", "keepLines",
 )
@@ -599,6 +601,66 @@ def _set_line_numbers(sect_pr, mode: str) -> None:
         sect_pr.append(ln)
 
 
+_NOTE_AFTER_TABLE_RE = re.compile(
+    rb"\s*(?:<w:bookmark(?:Start|End)\b[^>]*/>\s*)*<w:p(?=[ >])[^>]*>(.*?)</w:p>", re.S)
+_ROW_PARA_RE = re.compile(rb"<w:p(?=[ >])([^>]*)>(\s*<w:pPr/>|\s*<w:pPr>(?:\s*<w:pStyle\b[^>]*/>)?)?")
+
+
+def _keep_row(row: bytes) -> bytes:
+    def add(m: re.Match) -> bytes:
+        head, ppr = b"<w:p" + m.group(1) + b">", m.group(2)
+        if ppr is None or ppr.strip() == b"<w:pPr/>":
+            return head + b"<w:pPr><w:keepNext/></w:pPr>"
+        return head + ppr + b"<w:keepNext/>"
+    return _ROW_PARA_RE.sub(add, row) if b"<w:keepNext" not in row else row
+
+
+def keep_table_footnotes(blob: bytes) -> bytes:
+    """1.14.0 (D3): keepNext on the paragraphs of each table's LAST row when a note paragraph
+    (the table footnote) follows the table, so Word never leaves the footnote alone on the next
+    page. Nowhere else: headings, captions, legends and styles carry no keep marker."""
+    out, pos = [], 0
+    for m in re.finditer(rb"</w:tbl>", blob):
+        note = _NOTE_AFTER_TABLE_RE.match(blob, m.end())
+        body = note.group(1) if note else b""
+        if not note or not re.search(rb"<w:t[ >]", body) or b"<w:sectPr" in body or b"<w:tbl" in body \
+                or b'w:type="page"' in body or b"<w:drawing" in body:
+            continue
+        start = max(blob.rfind(b"<w:tr>", pos, m.start()), blob.rfind(b"<w:tr ", pos, m.start()))
+        if start < 0:
+            continue
+        out += [blob[pos:start], _keep_row(blob[start:m.start()])]
+        pos = m.start()
+    out.append(blob[pos:])
+    return b"".join(out)
+
+
+_COMPAT15 = (b'<w:compatSetting w:name="compatibilityMode" '
+             b'w:uri="http://schemas.microsoft.com/office/word" w:val="15"/>')
+
+
+def modern_layout(blob: bytes) -> bytes:
+    """1.14.0 (D3): Word layout mode 15. Pandoc writes no compatibilityMode, so Word lays the
+    document out in a legacy mode that ignores keepNext on table rows (verified with Word COM:
+    the footnote of a long table still ended alone on the next page); mode 15 honours it."""
+    if b'w:name="compatibilityMode"' in blob:
+        return re.sub(rb'(w:name="compatibilityMode"[^>]*w:val=")\d+(")', rb"\g<1>15\2", blob)
+    if re.search(rb"<w:compat\s*/>", blob):
+        return re.sub(rb"<w:compat\s*/>", b"<w:compat>" + _COMPAT15 + b"</w:compat>", blob, count=1)
+    if b"<w:compat>" in blob:
+        return blob.replace(b"<w:compat>", b"<w:compat>" + _COMPAT15, 1)
+    compat = b"<w:compat>" + _COMPAT15 + b"</w:compat>"
+    # schema order: compat precedes docVars, rsids, mathPr, ... listSeparator
+    m = re.search(rb"<(?:w:docVars|w:rsids|m:mathPr|w:attachedSchema|w:themeFontLang|"
+                  rb"w:clrSchemeMapping|w:doNotIncludeSubdocsInStats|w:doNotAutoCompressPictures|"
+                  rb"w:forceUpgrade|w:captions|w:readModeInkLockDown|w:smartTagType|sl:schemaLibrary|"
+                  rb"w:shapeDefaults|w:doNotEmbedSmartTags|w:decimalSymbol|w:listSeparator)\b", blob)
+    if m:
+        return blob[:m.start()] + compat + blob[m.start():]
+    return blob.replace(b"</w:settings>", compat + b"</w:settings>", 1)
+
+
+
 def _sanitize_package_xml(path: Path, font: str) -> None:
     """Remove theme residue and every Word paragraph control the user prohibited."""
     with zipfile.ZipFile(path, "r") as src:
@@ -620,6 +682,10 @@ def _sanitize_package_xml(path: Path, font: str) -> None:
                     blob = re.sub(rb"<w:" + name + rb"\b[^>]*/>", b"", blob)
                     blob = re.sub(rb"<w:" + name + rb"\b[^>]*>.*?</w:" + name + rb">",
                                   b"", blob, flags=re.S)
+                if item.filename == "word/document.xml":
+                    blob = keep_table_footnotes(blob)
+                if item.filename == "word/settings.xml":
+                    blob = modern_layout(blob)
             out.writestr(item, blob)
     tmp.replace(path)
 
@@ -686,7 +752,7 @@ def audit_docx(path: Path, style: dict, kind: str = "",
             problems.append(f"{path.name}: forbidden down-arrow character remains in {name}")
         for tag in FORBIDDEN_PARAGRAPH_CONTROLS + (
                 () if name == "word/document.xml" else HEADING_ONLY_CONTROLS):
-            if part.findall(f".//w:{tag}", NS):
+            if docxaudit.stray_markers(part, tag):  # 1.14.0 (D3): table-footnote row allowed
                 problems.append(f"{path.name}: forbidden {tag} paragraph control remains in {name}")
         if part.findall(".//w:pBdr", NS):
             problems.append(f"{path.name}: paragraph border/horizontal-rule residue remains in {name}")

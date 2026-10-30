@@ -3076,8 +3076,10 @@ def run_manuscript_docx(proj: Path) -> None:
     # 1.13.0 (#10): keepNext/keepLines remain nowhere - not in the body, not in styles.
     record("all Word XML parts remove black-square and folding controls (keep markers too)",
            builds_ok and not any(tag in blob for tag in forbidden_controls for _, blob in word_xmls)
-           and not any(t in blob for _n, blob in word_xmls
-                       for t in (b"<w:keepNext", b"<w:keepLines")) and not heading_keep,
+           and not any(b"<w:keepLines" in blob for _n, blob in word_xmls)
+           # 1.14.0 (D3): keepNext only on the last row of a table (its footnote follows)
+           and not any(_dxa.stray_markers(ET.fromstring(blob), "keepNext")
+                       for _n, blob in word_xmls) and not heading_keep,
            str(heading_keep[:2]))
     with zipfile.ZipFile(bundle / "manuscript.docx") as zf:
         manuscript_xml = zf.read("word/document.xml")
