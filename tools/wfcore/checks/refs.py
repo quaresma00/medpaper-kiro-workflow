@@ -509,7 +509,7 @@ def pubmed_cache_fresh(ctx: Ctx) -> Result:
     except json.JSONDecodeError as exc:
         return Result(False, "pubmed_cache_fresh", f"{rel} invalid JSON: {exc}")
     queries = man.get("queries", [])
-    min_q = ctx.spec.get("min_queries", 3)
+    min_q = ctx.spec.get("min_queries", 1)  # 1.14.0 (G): proof of a search, not a count
     min_hits = ctx.spec.get("min_hits", 20)
 
     uniq_q = {q.get("query", "").strip().lower() for q in queries if q.get("query")}

@@ -21,8 +21,9 @@ half-finish it and move on.
 1. **Method scan.** Search for how comparable papers analysed this design - the model
    family, the confounder strategy, the sensitivity analyses, the standard reported
    metrics. Discovery tools may suggest candidates, but method claims and citations must
-   resolve to records retrieved by the bundled client. Run at least 5 distinct formal
-   queries through the client (the gate counts them):
+   resolve to records retrieved by the bundled client. Run the formal queries the design
+   needs through the client (1.14.0: no minimum count - the scan is judged by the methods and
+   argument it covers; the gate only needs proof that a search ran):
 ```
 .\.venv\Scripts\python.exe tools/pubmed/client.py search --query "<design> <outcome> statistical analysis" --retmax 100
 .\.venv\Scripts\python.exe tools/pubmed/client.py fetch --ids <...> --with-abstract
@@ -42,9 +43,12 @@ half-finish it and move on.
 from analysis.results import set_seed, write_results
 set_seed(20240917)
 # ... analysis reading project_dir() / "02_data/..." ...
-write_results("primary", {"analysis": "primary_model", "n_analysed": 1284,
-                          "estimates": [{"term": "exposure", "estimate": 1.87, "ci_low": 1.34,
+write_results("primary", {"analysis": "primary_model", "n_analysed": 1284, "ci_level": 0.95,
+                          "estimates": [{"term": "exposure", "reference": "unexposed",
+                                         "outcome": "death", "estimate": 1.87, "ci_low": 1.34,
                                          "ci_high": 2.61, "p": 0.00021, "scale": "HR"}]})
+# 1.14.0: the writer bundle reads lists and the recorded ci_level (environment default 0.95);
+# name terms/outcomes in the display dictionary so every estimate reaches the writer.
 ```
 ```r
 source(file.path(Sys.getenv("MEDPAPER_ROOT"), "tools/R/medresults.R"))
@@ -67,8 +71,17 @@ write_results(list(analysis = "primary_model", hr = unname(exp(coef(fit))[1]),
    sensitivity analyses a reviewer asks for.
 5. **Keep the notes.** Update `03_analysis/notes.md` under all four headings. This is the
    only sanctioned input to Introduction and Discussion framing, so it must be substantive.
-6. Delete scratch scripts and abandoned outputs from `project/temp/`. Also delete result
-   JSONs from analyses you abandoned - a stale file becomes a fake provenance source.
+6. Delete scratch scripts and abandoned outputs from `project/temp/`. 1.14.0: a superseded
+   or erroneous result JSON (and the script that wrote it) is RETIRED, not deleted -
+   `tools/retire_result.py --file <path> --why "<reason>"` moves it to
+   `03_analysis/retired/` with the reason in `RETIRED.md`, so it is never number provenance
+   and never re-run. A valid negative or contradictory result is not retired: it stays and
+   is reported.
+7. When to stop (1.14.0): the analysis is complete when the primary and secondary outcomes
+   and the validity checks declared in the protocol's statistical reporting plan are done.
+   Each further analysis is marked `"role": "additional"` in
+   `03_analysis/analysis_manifest.json` with one line `"decision"`: which scientific decision
+   it could change (`additional_analyses_justified`). If it could change none, do not run it.
 
 ## Outputs
 - `03_analysis/method_scan.md`
@@ -77,18 +90,23 @@ write_results(list(analysis = "primary_model", hr = unname(exp(coef(fit))[1]),
 
 ## Hard rules
 - Baseline tables (1.9.0): count every level of a categorical variable - both categories of a binary one (women AND men) - overall and per group, with `baseline_counts()` (tools/R/medresults.R or tools/analysis/results.py) inside the results JSON, so any journal layout (M/F) has provenance.
+- 1.14.0: internal diagnostic plots (residuals, proportional hazards, distributions) are
+  allowed in scripts and images under `03_analysis/diagnostics/` (run with `wf run-script`);
+  they are never submission figures, never re-run by reproduce.py, ignored by the figure
+  gates and never cited in the manuscript. The rule below applies to `03_analysis/code/`.
 - **No plotting.** Python: no matplotlib/seaborn/plotly imports, `plt.`, `.plot()`, `.hist()`,
   `.savefig()`. R: no `plot()`, `hist()`, `ggplot()`, `ggsave()`, `png()`/`pdf()`, `dev.off()`,
   `ggsurvplot()`, `forest()`, `love.plot()`, `densityplot()` and friends. The gate scans the code
   (comments and strings excluded). Figures are S11, built from an approved plan.
 - No p-value computed in prose. If it is not in a JSON file, it does not exist.
-- Do not silently switch the primary analysis. If it changes, that is a protocol
-  deviation and it gets recorded at S06.
+- Do not silently switch the primary analysis. If it changes, record it at S06 (internal
+  log; 1.14.0 D1: the reviewer gets a factual pre-specified vs final record).
 - Analytical skills may help implement the approved analysis, but cannot change the
   protocol, create manuscript prose, bypass results JSON, or advance the stage.
 
 ## Close
-When the analysis has converged (no further analysis would change the conclusions):
+When the primary and secondary outcomes and the declared validity checks are done (1.14.0;
+additional analyses only with the decision they could change):
 ```
 .\.venv\Scripts\python.exe tools/wf.py check
 .\.venv\Scripts\python.exe tools/wf.py advance --note "primary result: <effect, CI, p>; K result files; open: <...>"

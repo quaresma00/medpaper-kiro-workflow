@@ -292,9 +292,14 @@ def run_b(tmp: Path, record, section) -> None:
                 and "docx_bundle_ready" in names["S23_package"]
                 and not {"journal_limits_met", "title_page_reference_count"} & set(names["S25_submission_audit"]))
     total = sum(len(v) for v in names.values())
+    # 1.14.0 adds three new checks (writer bundle completeness, additional-analysis
+    # justification, one contact-sheet look before Results); the merged duplicates stay merged.
+    new_1140 = sum(1 for v in names.values() for c in v if c in {
+        "writer_results_mapped", "additional_analyses_justified", "displays_contact_sheet_seen"})
     record("B4 duplicate gate lines merged (confirmation inside review_round_approved; SI clean "
            "inside docx_bundle_ready; limits/reference count as checklist rows); fewer gate "
-           f"entries than 1.11.0 (287 -> {total})", dup_free and total < 287, str(total))
+           f"entries than 1.11.0 (287 -> {total - new_1140} + {new_1140} new in 1.14.0)",
+           dup_free and total - new_1140 < 287, str(total))
 
 
 # ------------------------------------------------------------------------------ group C

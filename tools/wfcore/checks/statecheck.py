@@ -75,6 +75,20 @@ def decision_recorded(ctx: Ctx) -> Result:
             f"decision '{name}'={value} has a {len(why)}-char rationale",
             ["Record why, in enough detail that a reviewer could challenge it. At least 40 characters."],
         )
+    from ..state import SCIENTIFIC_DECISIONS, scientific_inputs_sha256
+    if name in SCIENTIFIC_DECISIONS and rec.get("inputs_sha256") and \
+            rec["inputs_sha256"] != scientific_inputs_sha256(ctx.project, name):
+        # 1.14.0 (E): a decision about results that changed afterwards is stale.
+        return Result(
+            False,
+            "decision_recorded",
+            f"decision '{name}'={value} is stale: the results, protocol or analysis manifest it "
+            "judged changed after it was recorded",
+            [f"Re-judge it on the current results and record it again with the reason: "
+             f".venv/Scripts/python.exe tools/wf.py decide {name} <VALUE> --why \"<what changed, "
+             "why the verdict holds or changes>\"",
+             "This is the agent's own judgement - ask the user only if it was the user's decision."],
+        )
     return Result(True, "decision_recorded", f"{name} = {value} (rationale on record)")
 
 

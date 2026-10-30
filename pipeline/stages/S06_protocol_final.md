@@ -12,7 +12,7 @@ Details (sandbox, manifest, tolerances, spot-check script): `reference/stage_det
    2020 item 24c only).
 2. Converged?
 ```
-.\.venv\Scripts\python.exe tools/wf.py decide analysis_converged YES --why "<what was the last analysis, why nothing further would change the conclusion>"
+.\.venv\Scripts\python.exe tools/wf.py decide analysis_converged YES --why "<primary, secondary and declared validity analyses done; additional ones and the decision each could change>"
 ```
    If not: `.\.venv\Scripts\python.exe tools/wf.py loop --to S05_analysis --why "..."`.
 3. Reproduce ONCE (one blocking call with a heartbeat; give the shell tool >= 1800 s and

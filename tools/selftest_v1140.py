@@ -70,6 +70,18 @@ def _gate(p: Path, name: str, stage: str, **spec):
     return v180._gate(p, name, stage, **spec)
 
 
+def _decision_gate(p: Path, stage: str, decision: str, allowed: list[str]):
+    from wfcore import registry
+    from wfcore.checks import Ctx, get, load_all
+    from wfcore.state import State
+    load_all()
+    pipe = registry.load()
+    return get("decision_recorded")(Ctx(pipeline=pipe, state=State(p, ".wf").load(), project=p,
+                                        stage=pipe.stage(stage),
+                                        spec={"check": "decision_recorded", "name": decision,
+                                              "allowed": allowed}))
+
+
 @contextmanager
 def _envset(**kv):
     old = {k: os.environ.get(k) for k in kv}
@@ -413,4 +425,171 @@ def run_c(tmp: Path, record, section) -> None:
            f"{kept} {dropped} {refproof.fulltext_verified(q)}")
 
 
-GROUPS = [("A", run_a), ("B", run_b), ("C", run_c)]
+# ------------------------------------------------------------------------------ D
+def run_d(tmp: Path, record, section) -> None:
+    import tempfile
+    import time
+    from unittest.mock import patch
+    from wfcore import reproproof as rp
+    section("1.14.0 D: reproduction never links or alters data; integrity; safe cleanup")
+    src = _w(tmp, "u/a.csv", "x\n1\n")
+    with patch("os.link", side_effect=AssertionError("hard link attempted")):
+        how = rp.provide(src, tmp / "sb/a.csv", rp.Budget(10_000))
+        try:
+            rp.provide(src, tmp / "sb/b.csv", rp.Budget(2))
+            refused = ""
+        except rp.DataCopyRefused as exc:
+            refused = str(exc)
+    record("D provide copies within data_copy_limit_mb and never hard-links; beyond it refuses "
+           "with the in-place path", how == "copy" and os.stat(tmp / "sb/a.csv").st_nlink == 1
+           and "source_path" in refused and not (tmp / "sb/b.csv").exists(), refused[:120])
+    P = _paper(tmp / "paper", "S06_protocol_final")
+    D = tmp / "datasrc"
+    _w(D, "big.csv", "x,y\n1,2\n2,3\n")
+    _w(P, "02_data/raw/small.csv", "a\n1\n")
+    env = _env(P)
+    add = _run(None, "tools/wf.py", "data", "add", D, "--name", "src", env=env, cwd=P)
+    C = "03_analysis/code/"
+    _w(P, C + "01_load.py",
+       "import os\nfrom wfcore.paths import project_dir\nfrom analysis.datasources import source_path\n"
+       "from analysis.results import write_results\nP = project_dir()\n"
+       "rows = source_path('src', 'big.csv').read_text().splitlines()\n"
+       "small = (P / '02_data/raw/small.csv').read_text()\n"
+       "if 'sandboxes' in str(P) and os.environ.get('MP_TAMPER') == 'copy':\n"
+       "    (P / '02_data/raw/small.csv').write_text('tampered in sandbox\\n')\n"
+       "if 'sandboxes' in str(P) and os.environ.get('MP_TAMPER') == 'source':\n"
+       "    source_path('src', 'big.csv').write_text('x,y\\n9,9\\n')\n"
+       "write_results('primary', {'n': len(rows)})\n")
+    r0 = _run(None, "tools/wf.py", "run-script", C + "01_load.py", env=env, cwd=P)
+    rep = P / "03_analysis/reproducibility_report.json"
+
+    def run(**extra):
+        r = _run(None, "tools/reproduce.py", "run", "--full", "--project", P, env=_env(P, **extra))
+        return r, (json.loads(rep.read_text(encoding="utf-8")) if rep.is_file() else {})
+    r1, j1 = run()
+    sb = j1.get("sandbox", {})
+    record("D a reproduction copies paper inputs (no hard links) and checks every data source "
+           "before and after the run", add.returncode == 0 and r0.returncode == 0
+           and r1.returncode == 0 and j1.get("all_match") and sb.get("data_files_linked") == 0
+           and sb.get("data_bytes_copied", 0) > 0 and j1.get("data_integrity", {}).get("ok")
+           and j1["data_integrity"]["checked"] >= 2, (_out(add) + _out(r0) + _out(r1))[-400:])
+    r2, j2 = run(MP_TAMPER="copy")
+    record("D a script writing to its sandbox copy of an input leaves the original unchanged",
+           (P / "02_data/raw/small.csv").read_text(encoding="utf-8") == "a\n1\n"
+           and j2.get("data_integrity", {}).get("ok") is True, _out(r2)[-300:])
+    r3, j3 = run(MP_TAMPER="source")
+    record("D a data source changed during the run is CRITICAL: the run is invalid and the file "
+           "is named", "CRITICAL" in r3.stdout and "datasource:src/big.csv" in r3.stdout
+           and j3.get("all_match") is False
+           and "datasource:src/big.csv" in j3.get("data_integrity", {}).get("changed", []),
+           _out(r3)[-300:])
+    # cleanup: only this paper's dead sandboxes and old, unreferenced legacy folders
+    tmpdir = Path(tempfile.gettempdir())
+    dead = P / rp.SANDBOX_DIR / "run_dead"
+    _w(dead, "x.bin", "x")
+    _w(dead, rp.MARKER, {"paper": str(P.resolve()), "pid": 0, "host": __import__("socket").gethostname()})
+    active = tmpdir / "medpaper_repro_st1140_active"
+    _w(active, rp.MARKER, {"paper": str(P.resolve()), "pid": os.getpid(),
+                           "host": __import__("socket").gethostname()})
+    foreign = tmpdir / "medpaper_repro_st1140_foreign"
+    _w(foreign, rp.MARKER, {"paper": str(tmp / "other_paper"), "pid": 0, "host": "x"})
+    old_unused = tmpdir / "medpaper_repro_st1140_old"
+    old_used = tmpdir / "medpaper_repro_st1140_used"
+    young = tmpdir / "medpaper_repro_st1140_young"
+    for d in (old_unused, old_used, young):
+        _w(d, "y.bin", "y")
+    t13 = time.time() - 13 * 3600
+    for d in (old_unused, old_used):
+        os.utime(d, (t13, t13))
+    holder = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)", str(old_used)])
+    try:
+        time.sleep(1)
+        removed, kept = rp.cleanup_stale(P)
+    finally:
+        holder.kill()
+    gone = {Path(x).name for x, _ in removed}
+    record("D cleanup removes only this paper's dead sandboxes and old unreferenced legacy "
+           "folders; an active, a foreign, a young or a process-referenced folder is kept and listed",
+           gone == {"run_dead", "medpaper_repro_st1140_old"} and active.exists() and foreign.exists()
+           and old_used.exists() and young.exists() and len(kept) >= 4, f"{gone} | {kept}")
+    for d in (active, foreign, old_used, young):
+        shutil.rmtree(d, ignore_errors=True)
+
+
+# ------------------------------------------------------------------------------ E + G
+def run_e(tmp: Path, record, section) -> None:
+    from wfcore.state import State
+    section("1.14.0 E: analysis stop rule, retired results, diagnostics, stale decisions")
+    p = _paper(tmp / "e", "S05_analysis")
+    man = {"schema": 1, "scripts": [
+        {"path": "03_analysis/code/01_primary.py", "inputs": [], "outputs": [], "role": "primary"},
+        {"path": "03_analysis/code/02_extra.py", "inputs": [], "outputs": [], "role": "additional"}]}
+    _w(p, "03_analysis/analysis_manifest.json", man)
+    bad = _gate(p, "additional_analyses_justified", "S05_analysis")
+    man["scripts"][1]["decision"] = "whether the primary estimate is robust to the exposure window"
+    _w(p, "03_analysis/analysis_manifest.json", man)
+    good = _gate(p, "additional_analyses_justified", "S05_analysis")
+    record("E an additional analysis must state the scientific decision it could change",
+           not bad.ok and "decision" in bad.detail and good.ok, bad.detail + " | " + good.detail)
+    _w(p, "03_analysis/results/primary.json", {"hr": 1.87})
+    _w(p, "03_analysis/results/old_model.json", {"hr": 2.95})
+    _w(p, "07_manuscript/results.md", "The HR was 2.95.\n")
+    before = _gate(p, "numbers_have_provenance", "S09_results", path="07_manuscript/results.md")
+    r = _run(p, "tools/retire_result.py", "--file", "03_analysis/results/old_model.json", "--why",
+             "superseded by the corrected exclusion criteria", "--project", p)
+    after = _gate(p, "numbers_have_provenance", "S09_results", path="07_manuscript/results.md")
+    log = p / "03_analysis/retired/RETIRED.md"
+    record("E a superseded result is retired (moved with its reason), never deleted, and is no "
+           "longer number provenance", r.returncode == 0 and before.ok and not after.ok
+           and (p / "03_analysis/retired/results/old_model.json").is_file()
+           and "corrected exclusion" in log.read_text(encoding="utf-8"), _out(r)[-200:] + after.detail)
+    _w(p, "03_analysis/diagnostics/residuals.py", "import matplotlib.pyplot as plt\nplt.plot([1])\n")
+    _w(p, "03_analysis/diagnostics/residuals.png", "png")
+    plots = _gate(p, "no_plot_calls", "S05_analysis", glob="03_analysis/code/*.*")
+    orphans = _gate(p, "no_orphans", "S05_analysis")
+    record("E internal diagnostic plots under 03_analysis/diagnostics/ are allowed (no plot-call "
+           "or orphan failure there)", plots.ok and not any(
+               x in orphans.detail for x in ("diagnostics", "retired")), plots.detail + " | " + orphans.detail[:200])
+    q = _paper(tmp / "go", "S06_protocol_final")
+    _w(q, "03_analysis/results/primary.json", {"hr": 1.87, "environment": {"written_at": "a"}})
+    _w(q, "01_protocol/protocol_final.md", "# Protocol\n")
+    st = State(q, ".wf").load()
+    st.record_decision("go_nogo_2", "GO", "The primary estimate is precise and clinically relevant.")
+    fresh = _decision_gate(q, "S06_protocol_final", "go_nogo_2", ["GO"])
+    _w(q, "03_analysis/results/primary.json", {"hr": 1.87, "environment": {"written_at": "b"}})
+    rerun_only = _decision_gate(q, "S06_protocol_final", "go_nogo_2", ["GO"])
+    _w(q, "03_analysis/results/primary.json", {"hr": 1.42})
+    stale = _decision_gate(q, "S06_protocol_final", "go_nogo_2", ["GO"])
+    st = State(q, ".wf").load()
+    st.record_decision("go_nogo_2", "GO", "Re-judged on the corrected estimate: still precise and relevant.")
+    again = _decision_gate(q, "S06_protocol_final", "go_nogo_2", ["GO"])
+    st = State(q, ".wf").load()
+    st.data["decisions"]["go_nogo_2"].pop("inputs_sha256")
+    st.save()
+    legacy = _decision_gate(q, "S06_protocol_final", "go_nogo_2", ["GO"])
+    record("E GO stores a hash of its scientific inputs: a re-run with identical results keeps "
+           "it, changed results make it stale until the agent re-records it with a reason; a "
+           "pre-1.14 decision is accepted", fresh.ok and rerun_only.ok and not stale.ok
+           and "stale" in stale.detail and "ask the user only if" in " ".join(stale.hints)
+           and again.ok and legacy.ok, stale.detail)
+    src = (ROOT / "pipeline/stages/S05_analysis.md").read_text(encoding="utf-8")
+    record("E the S05 card states the stop rule, retirement and diagnostics; no deletion of "
+           "result JSONs", "validity checks" in src and "retire_result.py" in src
+           and "03_analysis/diagnostics/" in src and "delete abandoned" not in src)
+    section("1.14.0 G: no query-count minimums at S02/S05/S07")
+    from wfcore import registry
+    pipe = registry.load()
+    mins = [g.get("min_queries") for sid in ("S02_feasibility", "S05_analysis", "S07_artifacts")
+            for g in pipe.stage(sid).gate if g.get("check") == "pubmed_cache_fresh"]
+    g = _paper(tmp / "g", "S05_analysis")
+    _w(g, "06_refs/cache/q.json", "{}")
+    _w(g, "06_refs/cache/scan_manifest.json", {"queries": [
+        {"query": "statin mortality cohort", "ids": [str(i) for i in range(40)],
+         "cache_file": "06_refs/cache/q.json"}]})
+    one = _gate(g, "pubmed_cache_fresh", "S05_analysis", manifest="06_refs/cache/scan_manifest.json",
+                min_queries=1, min_hits=30)
+    record("G one well-aimed search passes; S02/S05/S07 carry no query minimum and the cards no "
+           "query counts", mins == [1, 1, 1] and one.ok and ">= 5" not in src, f"{mins} {one.detail}")
+
+
+GROUPS = [("A", run_a), ("B", run_b), ("C", run_c), ("D", run_d), ("E", run_e)]

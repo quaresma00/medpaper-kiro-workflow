@@ -17,8 +17,10 @@ the effect size and the data's limits are known. This is the last cheap exit.
 > 1.13.0 supersedes the wording below where they differ: changes of plan are an internal log
 > in `.wf/protocol_changes.md` (never a protocol section, never exported, never in the
 > manuscript - a medical paper describes the analysis performed); the sandbox lives in
-> `.wf/repro/sandboxes/`, copies only scripts and configs, hard-links data inside the paper,
-> reads declared data sources in place and is deleted after the run; logs only in `.wf/logs/`.
+> `.wf/repro/sandboxes/`, copies scripts, configs and in-paper inputs (1.14.0: never hard links,
+> within data_copy_limit_mb), reads declared data sources in place, checks every data source
+> and in-place input before and after the run (a change is CRITICAL and invalidates it) and is
+> deleted after the run; logs only in `.wf/logs/`.
 
 ## Procedure
 1. Write `project/01_protocol/protocol_final.md` - the v1 headings, updated to the analysis
@@ -28,7 +30,7 @@ the effect size and the data's limits are known. This is the last cheap exit.
    ever reaching the manuscript, the writer bundle or the reviewer.
 3. Confirm the analysis is finished:
 ```
-.\.venv\Scripts\python.exe tools/wf.py decide analysis_converged YES --why "<what was the last analysis, why nothing further would change the conclusion>"
+.\.venv\Scripts\python.exe tools/wf.py decide analysis_converged YES --why "<primary, secondary and declared validity analyses done; additional ones and the decision each could change>"
 ```
    If it is not converged: `.\.venv\Scripts\python.exe tools/wf.py loop --to S05_analysis --why "..."`.
    Then prove the analysis re-executes. Do not run other work on the paper meanwhile (only
@@ -43,8 +45,10 @@ the effect size and the data's limits are known. This is the last cheap exit.
    tolerance, result and engine helper, it ends at once with `REUSED` (typical when only
    presentation changed); `--force` re-runs anyway. After a change it re-runs only the
    affected scripts by default; `--full` re-runs all.
-   It copies `03_analysis/code/` and the configs into a paper-local sandbox, hard-links the
-   data inputs under `02_data/` (documentation, acquisition code and `derived/` excluded),
+   It copies `03_analysis/code/`, the configs and the data inputs under `02_data/`
+   (documentation, acquisition code and `derived/` excluded; 1.14.0: copies within
+   data_copy_limit_mb, never hard links - a large dataset is declared in place) into a
+   paper-local sandbox,
    reads declared data sources in place, re-runs every top-level analysis script in the order declared by
    `03_analysis/analysis_manifest.json` (`{"schema": 1, "scripts": [{"path", "inputs",
    "outputs", "after"}]}`, every top-level script listed once; without it, filename order with

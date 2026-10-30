@@ -27,6 +27,37 @@ def version_tuple(value: str) -> tuple[int, ...]:
     return tuple(out) or (0,)
 
 
+# 1.14.0 (E): decisions that judge the results; each stores a hash of what it judged.
+SCIENTIFIC_DECISIONS = {
+    "analysis_converged": ("results", "03_analysis/analysis_manifest.json"),
+    "go_nogo_2": ("results", "01_protocol/protocol_final.md", "03_analysis/analysis_manifest.json"),
+}
+
+
+def scientific_inputs_sha256(project, name: str) -> str:
+    """Hash of the results set (every 03_analysis/results/*.json without its environment
+    receipt), the protocol and the analysis manifest a scientific decision judged."""
+    import hashlib
+    from pathlib import Path as _P
+    project = _P(project)
+    h = hashlib.sha256()
+    for part in SCIENTIFIC_DECISIONS.get(name, ()):
+        if part == "results":
+            for p in sorted((project / "03_analysis/results").glob("*.json")):
+                try:
+                    data = json.loads(p.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    data = None
+                if isinstance(data, dict):
+                    data = {k: v for k, v in data.items() if k != "environment"}
+                h.update(p.name.encode() + b"\0" + json.dumps(data, sort_keys=True).encode())
+        else:
+            p = project / part
+            blob = p.read_bytes().replace(b"\r\n", b"\n") if p.is_file() else b"<absent>"
+            h.update(part.encode() + b"\0" + blob)
+    return h.hexdigest()
+
+
 class State:
     def __init__(self, root: Path, state_dir: str = ".wf"):
         self.project = root
@@ -381,6 +412,10 @@ class State:
             "at": _now(),
             "stage": self.current,
         }
+        if name in SCIENTIFIC_DECISIONS:
+            # 1.14.0 (E): bound to the scientific inputs it judged; stale when they change.
+            self.data["decisions"][name]["inputs_sha256"] = scientific_inputs_sha256(
+                self.project, name)
         self.event("decision", f"{name}={value}")
         self.save()
 

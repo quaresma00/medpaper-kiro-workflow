@@ -72,6 +72,9 @@ always_allowed = [
   "temp/**",
   ".wf/**",
   ".kiro/**",
+  # 1.14.0 (E): internal diagnostic plots (never submission figures) and retired results.
+  "03_analysis/diagnostics/**",
+  "03_analysis/retired/**",
   # Previous journals' variants and packages, moved aside (never deleted) on a journal switch.
   "08_submission/journal_archives/**",
   # The agent's own plans and check records (never deliverables, never round scope).
@@ -175,10 +178,11 @@ card = "stages/S02_feasibility.md"
 outputs = ["01_protocol/feasibility.md", "06_refs/cache/scan_manifest.json"]
 [[stage.gate]]
 check = "outputs_exist"
+# 1.14.0 (G): no query-count minimum; the scan is judged by the argument it supports.
 [[stage.gate]]
 check = "pubmed_cache_fresh"
 manifest = "06_refs/cache/scan_manifest.json"
-min_queries = 3
+min_queries = 1
 min_hits = 20
 [[stage.gate]]
 check = "md_sections"
@@ -262,7 +266,7 @@ check = "data_acquisition_complete"
 [[stage.gate]]
 check = "pubmed_cache_fresh"
 manifest = "06_refs/cache/scan_manifest.json"
-min_queries = 5
+min_queries = 1
 min_hits = 30
 [[stage.gate]]
 check = "file_count"
@@ -275,6 +279,10 @@ min = 2
 [[stage.gate]]
 check = "no_plot_calls"
 glob = "03_analysis/code/*.*"
+# 1.14.0 (E): extra analyses state the scientific decision they could change.
+[[stage.gate]]
+check = "additional_analyses_justified"
+since = "1.14.0"
 [[stage.gate]]
 check = "notes_populated"
 path = "03_analysis/notes.md"
@@ -346,7 +354,7 @@ path = "01_protocol/artifact_plan.json"
 [[stage.gate]]
 check = "pubmed_cache_fresh"
 manifest = "06_refs/cache/scan_manifest.json"
-min_queries = 6
+min_queries = 1
 min_hits = 30
 [[stage.gate]]
 check = "md_sections"
