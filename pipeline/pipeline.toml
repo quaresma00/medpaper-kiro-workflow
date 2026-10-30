@@ -547,6 +547,10 @@ check = "outputs_exist"
 [[stage.gate]]
 check = "displays_final_for_results"
 since = "1.10.0"
+# 1.14.0 (B): the writer gets every result - clinical label, comparison, measure, CI level.
+[[stage.gate]]
+check = "writer_results_mapped"
+since = "1.14.0"
 [[stage.gate]]
 check = "single_section_written"
 [[stage.gate]]

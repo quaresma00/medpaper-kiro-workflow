@@ -28,6 +28,7 @@ NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,80}$")
 ENGINE_PACKAGES = {"wfcore", "analysis", "figures", "tables", "pubmed", "manuscript", "text",
                    "hooks"}
 WRITER = "tools/analysis/results.py"
+CI_LEVEL_DEFAULT = 0.95  # medpaper-compat 1.14.0: the declared CI level (set payload 'ci_level' for another)
 _SEED: int | None = None
 
 
@@ -157,6 +158,7 @@ def write_results(name: str, payload: dict, seed: int | None = None) -> Path:
         "written_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "writer": WRITER,
     }
+    env["ci_level"] = payload.get("ci_level", CI_LEVEL_DEFAULT)  # medpaper-compat 1.14.0: writer bundle reads it
     text = json.dumps({**payload, "environment": env}, indent=2, ensure_ascii=False,
                       allow_nan=False, default=_jsonable)
     out = paths.paper_output_path(f"project/03_analysis/results/{name}.json")

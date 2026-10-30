@@ -20,10 +20,13 @@ Write the Results from the final tables and figures (1.10.0: S09 runs after S10/
 ```
 .\.venv\Scripts\python.exe tools/manuscript/writer_bundle.py build --stage S09_results
 ```
+   1.14.0: build exits 2 while a result lacks a clinical label or its CI level
+   (`.wf/writer_bundle/S09_results_GAPS.md`, gate `writer_results_mapped`); fix the display
+   dictionary or the results first, never let the writer guess.
 2. Write `project/07_manuscript/results.md`. Every display item in the plan must be cited
    at least once, in order, as `(Figure 1)`, `(Table 2)`, `(Figure S1)`, `(Table S1)`.
    The gate rejects citations to items not in the plan, and items never cited.
-3. Report effects the way the design demands: point estimate, 95% CI, then the p-value -
+3. Report effects the way the design demands: point estimate, CI (at its recorded level), then the p-value -
    never a bare p. Copy the values from the result JSONs; do not re-round to look tidier
    than the analysis was.
 4. Do not interpret. No "importantly", no "consistent with prior work", no mechanism.

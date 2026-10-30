@@ -201,6 +201,7 @@ write_results <- function(payload, name, seed = NULL) {
   if (.mr_in_engine(out)) stop("write_results: output inside the engine is refused", call. = FALSE)
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
   obj <- c(payload, list(environment = .mr_environment(script, rel, seed)))
+  obj$environment$ci_level <- if (!is.null(payload[["ci_level"]])) payload[["ci_level"]] else getOption("medpaper.ci_level", 0.95)  # medpaper-compat 1.14.0: declared CI level
   .mr_write_json(obj, out)
   invisible(out)
 }
