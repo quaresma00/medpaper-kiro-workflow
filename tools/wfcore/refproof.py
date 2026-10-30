@@ -22,6 +22,9 @@ GENERATOR = "tools/pubmed/verify.py"
 SOURCE = "ncbi_pubmed_efetch"
 TITLE_THRESHOLD = 0.92
 JOURNAL_THRESHOLD = 0.85
+# 1.14.0 (C): the stored abstract must be the source's abstract (normalised similarity).
+ABSTRACT_THRESHOLD = 0.9
+FULLTEXT_MANIFEST = "06_refs/fulltext/retrieval_manifest.json"
 SHA_RE = re.compile(r"^[0-9a-f]{64}$")
 CACHE_RE = re.compile(r"^06_refs/cache/verify_efetch_pubmed_[A-Za-z0-9_.-]+\.xml$")
 
@@ -160,7 +163,47 @@ def record_sha256(record: dict) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def compare_entry_to_source(entry: dict, source: dict) -> list[str]:
+def fulltext_verified(project: Path | None) -> dict[str, Path]:
+    """1.14.0 (C): citekey -> local full text whose identity was verified (front matter /
+    structured metadata / a human-read title) and whose bytes still match the receipt."""
+    if project is None:
+        return {}
+    project = Path(project)
+    try:
+        data = json.loads((project / FULLTEXT_MANIFEST).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    out: dict[str, Path] = {}
+    for rec in data.get("retrievals", []) if isinstance(data, dict) else []:
+        rel = str(rec.get("fulltext", ""))
+        if rec.get("identity") != "match" or not rel or rel.startswith("http"):
+            continue
+        path = project / rel
+        try:
+            if path.is_file() and file_sha256(path) == str(rec.get("sha256", "")):
+                out[str(rec.get("citekey"))] = path
+        except OSError:
+            continue
+    return out
+
+
+def abstract_problem(entry: dict, source_abstract: str, fulltext_ok: bool) -> str | None:
+    """1.14.0 (C): compare the stored abstract with the source's; a record without one is
+    citable only through an identity-verified full text (library source 'fulltext')."""
+    stored = str(entry.get("abstract", "") or "").strip()
+    if not source_abstract:
+        if fulltext_ok and entry.get("source") == "fulltext" and not stored:
+            return None
+        return ("PubMed payload contains no abstract (citable only with source 'fulltext' and "
+                "an identity-verified full text: fulltext.py fetch/register + verify)")
+    if not stored:
+        return "library abstract missing although PubMed has one"
+    if ratio(stored, source_abstract) < ABSTRACT_THRESHOLD:
+        return "abstract differs from PubMed payload"
+    return None
+
+
+def compare_entry_to_source(entry: dict, source: dict, fulltext_ok: bool = False) -> list[str]:
     """Recompute all checks that determine whether a library entry is real."""
     # Read before canonicalising: PMCID is deliberately not part of canonical_source(), so it
     # has to come off the raw payload record.
@@ -180,8 +223,9 @@ def compare_entry_to_source(entry: dict, source: dict) -> list[str]:
     first_author = ((entry.get("authors") or [{}])[0].get("last", ""))
     if norm(first_author) != norm(source["first_author"]):
         problems.append("first author differs from PubMed payload")
-    if not source["abstract"]:
-        problems.append("PubMed payload contains no abstract")
+    issue = abstract_problem(entry, source["abstract"], fulltext_ok)
+    if issue:
+        problems.append(issue)
     entry_doi = str(entry.get("doi", "")).strip().casefold()
     if entry_doi != source["doi"]:
         problems.append("DOI differs from PubMed payload")
@@ -246,6 +290,7 @@ def validate_local_proof(project: Path, required_keys: set[str] | None = None,
     if not isinstance(records, dict):
         records = {}
     problems: list[str] = []
+    fulltext_keys = fulltext_verified(project)
     generator = verified.get("generator", {})
     if verified.get("schema") != SCHEMA:
         problems.append(f"verified.json schema must be {SCHEMA}; a boolean-only file is not evidence")
@@ -319,7 +364,7 @@ def validate_local_proof(project: Path, required_keys: set[str] | None = None,
         source_hash = record_sha256(source)
         if evidence.get("record_sha256") != source_hash:
             problems.append(f"{key}: parsed PubMed record fingerprint mismatch")
-        for issue in compare_entry_to_source(entries[key], source):
+        for issue in compare_entry_to_source(entries[key], source, key in fulltext_keys):
             problems.append(f"{key}: {issue}")
         if str(receipt.get("pmid", "")) != source["pmid"]:
             problems.append(f"{key}: receipt PMID differs from its PubMed payload")

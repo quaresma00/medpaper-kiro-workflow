@@ -212,10 +212,14 @@ def _discussion_lines(text: str, whole: bool) -> set[int]:
     return out
 
 
-def cite_external_numbers(text: str, lines: set[int], verified: set[str]) -> str:
+def cite_external_numbers(text: str, lines: set[int], verified: set[str], locator=None,
+                          rel: str = "") -> str:
     """1.10.0 (#7): in the Discussion, a prior study's number is allowed only in the same
     sentence as a citation of that study, every key of which is in the verified library.
-    Those numbers are blanked; any other number still needs results-JSON provenance."""
+    1.14.0 (C): and only when the number is found in that study's verified text (abstract,
+    deep-read notes, identity-verified full text; wfcore/citeproof.py) - those numbers are
+    blanked and their location recorded; any other number still needs results-JSON
+    provenance (and fails in the Discussion). Without a locator: the 1.10 rule."""
     out = text.splitlines()
     for i in lines:
         if i - 1 >= len(out):
@@ -226,7 +230,18 @@ def cite_external_numbers(text: str, lines: set[int], verified: set[str]) -> str
                     for k in re.findall(r"@([A-Za-z][\w:.#$%&+?<>~/-]*)", g)]
             if keys and all(k in verified for k in keys):
                 parts[j] = CITE_RE.sub(" ", sent)
-                parts[j] = NUM_RE.sub(" ", P_RE.sub(" ", parts[j]))
+                if locator is None:
+                    parts[j] = NUM_RE.sub(" ", P_RE.sub(" ", parts[j]))
+                    continue
+                parts[j] = P_RE.sub(lambda m: " " + m.group(2) + " ", parts[j])
+
+                def keep_or_blank(m, _keys=keys, _line=i):
+                    where = locator.locate(m.group(1), _keys)
+                    if where is None:
+                        return m.group(0)
+                    locator.note(rel, _line, m.group(1), where)
+                    return " "
+                parts[j] = NUM_RE.sub(keep_or_blank, THOUSANDS_RE.sub("", parts[j]))
         out[i - 1] = " ".join(parts)
     return "\n".join(out)
 
@@ -362,7 +377,10 @@ def numbers_have_provenance(ctx: Ctx) -> Result:
     text = FENCE_RE.sub(" ", ctx.read(rel))
     disc = _discussion_lines(text, whole=rel.replace("\\", "/").endswith("discussion.md"))
     if disc:
-        text = cite_external_numbers(text, disc, _verified_keys(ctx))
+        from ..citeproof import Locator
+        locator = Locator(ctx.project)
+        text = cite_external_numbers(text, disc, _verified_keys(ctx), locator, rel)
+        locator.save(rel)
     bad = _offenders(text, floats, strings, allowed, stated, explicit, disc)
     if bad:
         shown = "; ".join(f"line {ln}: {tok}" for ln, tok in bad[:10])
@@ -373,7 +391,7 @@ def numbers_have_provenance(ctx: Ctx) -> Result:
             [
                 "Every statistic must already exist in 03_analysis/results/*.json, written by executed code.",
                 f"For genuine constants (thresholds, conventions), add them to {ALLOWLIST} as 'value<TAB>reason' (never applies in the Discussion).",
-                "Discussion: a prior study's number must sit in the same sentence as [@key] of that study (verified library).",
+                "Discussion: a prior study's number must sit in the same sentence as [@key] of that study (verified library) AND appear in that study's verified text (library abstract, 06_refs/deepread/<key>.md, or the identity-verified full text): quote the passage in the deep-read notes or remove the number.",
                 "A 'P<0.001' needs a reported P value below 0.001; a sign must match the result's sign.",
                 "Do not fix this by rounding differently. Re-run the analysis and dump the value.",
             ],

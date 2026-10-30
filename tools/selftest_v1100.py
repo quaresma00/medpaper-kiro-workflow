@@ -303,6 +303,9 @@ def run_discussion_numbers(tmp: Path, record, section) -> None:
     _w(p, "06_refs/refs.bib", "@article{smith2020, title={A}}\n@article{fake2021, title={B}}\n")
     _w(p, "06_refs/verified.json", {"records": {"smith2020": {"verified": True}}})
     _w(p, "03_analysis/results/number_allowlist.tsv", "3.4\tprior study value\n")
+    # 1.14.0 (C): the cited number must also be in the cited study's verified text.
+    _w(p, "06_refs/library.json", {"entries": [{"citekey": "smith2020", "abstract":
+                                               "The adjusted HR was 2.31 in the cohort."}]})
     rel = "07_manuscript/discussion.md"
     _w(p, rel, "Our HR was 1.87. A cohort reported an HR of 2.31 [@smith2020].\n")
     cited = _gate(p, "numbers_have_provenance", "S16_discussion", path=rel)

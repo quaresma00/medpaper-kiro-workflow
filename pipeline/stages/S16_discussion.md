@@ -28,7 +28,9 @@ Details (move-by-move structure, inputs): `reference/stage_details/S16_discussio
 
 ## Gate
 citekeys resolve and are live-verified, deep reads cited, numbers traceable (a prior
-study's number only in the same sentence as its verified citation), engineering language,
+study's number only in the same sentence as its verified citation, and 1.14.0: only when
+that number is in the cited source's abstract, `06_refs/deepread/<key>.md` or its
+identity-verified full text - quote the passage in the notes or remove it), engineering language,
 continuous prose; word/reference counts are soft upper budgets until S20. No causal
 language for observational designs, no pipeline history, no stock closers, no unsupported
 "first".

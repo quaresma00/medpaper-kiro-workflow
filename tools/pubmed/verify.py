@@ -42,6 +42,9 @@ def ratio(a: str, b: str) -> float:
     return difflib.SequenceMatcher(None, a, b).ratio()
 
 
+_FT: dict = {}
+
+
 def verify_entry(entry: dict, live: dict | None, strict: bool) -> dict:
     checks: list[dict] = []
     if live is None:
@@ -72,8 +75,17 @@ def verify_entry(entry: dict, live: dict | None, strict: bool) -> dict:
     a_ok = norm(ea) == norm(la)
     checks.append({"field": "first_author", "ok": a_ok, "expected": la})
 
-    abs_ok = bool((live.get("abstract") or "").strip())
-    checks.append({"field": "abstract_present", "ok": abs_ok})
+    # 1.14.0 (C): the stored abstract must BE the source's abstract; a record without one is
+    # citable through an identity-verified full text only (library source 'fulltext').
+    if "fulltext" not in _FT:
+        try:
+            _FT["fulltext"] = refproof.fulltext_verified(eu.project_root())
+        except (Exception, SystemExit):  # noqa: BLE001 - no paper selected: no full texts
+            _FT["fulltext"] = {}
+    issue = refproof.abstract_problem(entry, (live.get("abstract") or "").strip(),
+                                      str(entry.get("citekey")) in _FT["fulltext"])
+    checks.append({"field": "abstract_present", "ok": issue is None,
+                   **({"expected": issue} if issue else {})})
     flags_ok = not live.get("flags")
     checks.append({"field": "citable_status", "ok": flags_ok,
                    "expected": "no retraction, expression-of-concern or preprint flag"})

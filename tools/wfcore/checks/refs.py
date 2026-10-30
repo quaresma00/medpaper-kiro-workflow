@@ -293,10 +293,13 @@ def refs_library(ctx: Ctx) -> Result:
             problems.append(f"{len(entries)} entries, allowed <= {hi}")
 
     if ctx.spec.get("require_abstract", True):
-        no_abs = [e.get("citekey", "?") for e in entries if not (e.get("abstract") or "").strip()]
+        ft = refproof.fulltext_verified(ctx.project)  # 1.14.0 (C): the full-text route
+        no_abs = [e.get("citekey", "?") for e in entries if not (e.get("abstract") or "").strip()
+                  and not (e.get("source") == "fulltext" and e.get("citekey") in ft)]
         if no_abs:
             problems.append(
-                f"{len(no_abs)} entry/entries without an abstract (must be removed): " + ", ".join(no_abs[:6])
+                f"{len(no_abs)} entry/entries without an abstract (remove them, or keep one with "
+                "source 'fulltext' once its full text is identity-verified): " + ", ".join(no_abs[:6])
             )
     missing_id = [e.get("citekey", "?") for e in entries if not (e.get("pmid") or e.get("doi"))]
     if missing_id:
@@ -386,6 +389,7 @@ def reference_provenance(ctx: Ctx) -> Result:
             ["Restore NCBI access and rerun the gate; do not replace it with a local boolean."],
         )
     live_problems = []
+    fulltext_keys = refproof.fulltext_verified(ctx.project)
     for entry in entries:
         key, pmid = str(entry.get("citekey", "?")), str(entry.get("pmid", ""))
         source = live.get(pmid)
@@ -394,7 +398,7 @@ def reference_provenance(ctx: Ctx) -> Result:
             continue
         live_problems.extend(
             f"{key}: {problem}" for problem in
-            refproof.compare_entry_to_source(entry, source)
+            refproof.compare_entry_to_source(entry, source, key in fulltext_keys)
         )
     if set(live) != set(pmids):
         live_problems.append("the independent PubMed response PMID set differs from the library")

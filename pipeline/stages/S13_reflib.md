@@ -35,7 +35,8 @@ Details (coverage plan, verification proof, export rules): `reference/stage_deta
 
 ## Gate
 reference provenance (live, non-overridable), library/bib/ris agree, bib format clean,
-argument roles covered. No abstract, no entry. `verified: true` by itself has no authority;
+argument roles covered. No abstract, no entry (1.14.0: unless `--allow-fulltext` and an
+identity-verified full text). `verified: true` by itself has no authority;
 never invent or hand-edit a citekey, PMID, DOI or bibliographic field. Flag retracted records.
 
 ## Close

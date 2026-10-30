@@ -89,15 +89,19 @@ def _entry_from_record(rec: dict, taken: set[str]) -> dict:
     }
 
 
-def add_records(lib: dict, records: list[dict]) -> tuple[int, int, int]:
+def add_records(lib: dict, records: list[dict], allow_fulltext: bool = False) -> tuple[int, int, int]:
+    """1.14.0 (C): with allow_fulltext a record without an abstract is kept as source
+    'fulltext'; the gates accept it only once its full text is identity-verified."""
     by_pmid = {e.get("pmid"): e for e in lib["entries"] if e.get("pmid")}
     by_doi = {e.get("doi"): e for e in lib["entries"] if e.get("doi")}
     taken = {e["citekey"] for e in lib["entries"]}
     added = dropped = dup = 0
     for rec in records:
         if not (rec.get("abstract") or "").strip():
-            dropped += 1
-            continue
+            if not allow_fulltext:
+                dropped += 1
+                continue
+            rec = {**rec, "source": "fulltext", "abstract": ""}
         if rec.get("pmid") and rec["pmid"] in by_pmid:
             dup += 1
             continue
@@ -256,6 +260,9 @@ def main() -> int:
     ap.add_argument("--topic", help="primary topic; runs a small family of queries")
     ap.add_argument("--add-query", action="append", default=[], help="one extra query (repeatable)")
     ap.add_argument("--add-ids", help="comma-separated PMIDs to add directly")
+    ap.add_argument("--allow-fulltext", action="store_true",
+                    help="--add-ids: keep a record without an abstract as source 'fulltext'; it "
+                         "is citable once fulltext.py fetch/register + verify proves its identity")
     ap.add_argument("--target", type=int, default=50, help="stop searching once this many entries exist")
     ap.add_argument("--retmax", type=int, default=60, help="records to pull per query")
     ap.add_argument("--years", type=int, help="restrict searches to the last N years")
@@ -300,7 +307,7 @@ def main() -> int:
     if args.add_ids:
         ids = [x for x in args.add_ids.replace(" ", "").split(",") if x]
         recs = eu.efetch(ids)
-        added, dropped, dup = add_records(lib, recs)
+        added, dropped, dup = add_records(lib, recs, allow_fulltext=args.allow_fulltext)
         print(f"[--add-ids] +{added} added, {dropped} without abstract dropped, {dup} already present")
 
     missing = used_citekeys() - {e["citekey"] for e in lib["entries"]}

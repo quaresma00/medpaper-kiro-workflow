@@ -472,7 +472,20 @@ def engine_inputs(project: Path | None = None) -> dict[str, str]:
             else:
                 used |= {f"{ENGINE_HELPERS_R}/{f}" for f in _R_HELPER_RE.findall(text)}
         files = [root / u for u in sorted(used) if (root / u).is_file()]
-    return {p.relative_to(root).as_posix(): sha256(p) for p in files if p.is_file()}
+    return {p.relative_to(root).as_posix(): helper_sha256(p) for p in files if p.is_file()}
+
+
+COMPAT_MARK = b"medpaper-compat"
+
+
+def helper_sha256(path: Path) -> str:
+    """1.14.0: the hash of a helper without its lines marked `medpaper-compat` - additions
+    declared output-compatible (they only add environment.ci_level, which comparisons ignore),
+    so a proof made with the previous helper stays valid and no paper re-runs for them."""
+    data = Path(path).read_bytes()
+    if COMPAT_MARK in data:
+        data = b"".join(ln for ln in data.splitlines(keepends=True) if COMPAT_MARK not in ln)
+    return hashlib.sha256(data).hexdigest()
 
 
 def helpers_match(recorded: dict, current: dict) -> bool:
@@ -582,7 +595,8 @@ def canonical(obj):
     out = {k: v for k, v in obj.items() if k not in VOLATILE_KEYS}
     env = out.get("environment")
     if isinstance(env, dict):
-        out["environment"] = {k: v for k, v in env.items() if k != "written_at"}
+        # 1.14.0: environment.ci_level is a declaration the writer reads, not a result.
+        out["environment"] = {k: v for k, v in env.items() if k not in ("written_at", "ci_level")}
     return out
 
 

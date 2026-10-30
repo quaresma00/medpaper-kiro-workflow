@@ -252,4 +252,165 @@ def run_a(tmp: Path, record, section) -> None:
            and dec.returncode == 0 and ok2, (str(probs) + g.detail + _out(dec))[:400])
 
 
-GROUPS = [("A", run_a)]
+# ------------------------------------------------------------------------------ B
+def run_b(tmp: Path, record, section) -> None:
+    sys.path.insert(0, str(ROOT / "tools/manuscript"))
+    import writer_bundle as wb
+    from wfcore import reproproof as rp
+    section("1.14.0 B: the writer bundle keeps every result (lists, comparison, CI level)")
+    dic = {"terms": [
+        {"internal": "exposed", "label": "Exposed group", "definition": "reports naming the drug"},
+        {"internal": "unexposed", "label": "Unexposed group", "definition": "all other reports"},
+        {"internal": "death_30d", "label": "Death within 30 days", "definition": "any death"}]}
+
+    def lines(name: str, payload) -> tuple[list[str], list[str]]:
+        p = _paper(tmp / name, "S09_results")
+        _w(p, "01_protocol/display_dictionary.json", dic)
+        _w(p, "03_analysis/results/primary.json", payload)
+        out, gaps = wb.results_in_words(p, wb.clinical.dictionary(p))
+        return [x for x in out if x.startswith("- ")], gaps
+    est = {"hr": 1.5, "hr_low": 1.1, "hr_high": 2.0, "p": 0.01, "n": 420}
+    as_dict, g1 = lines("dict", {"ci_level": 0.95, "exposed": est})
+    as_list, g2 = lines("list", {"ci_level": 0.95, "estimates": [{"term": "exposed", **est}]})
+    record("B a list of estimates gives the same sentences as the dict form (nothing dropped)",
+           as_dict == as_list and as_dict and not g1 and not g2
+           and "95% CI 1.1 to 2.0" in as_dict[0] and "P = 0.01" in as_dict[0], f"{as_dict} | {as_list} | {g1 + g2}")
+    comp, _ = lines("comp", {"environment": {"ci_level": 0.9}, "estimates": [
+        {"exposure": "exposed", "reference": "unexposed", "outcome": "death_30d",
+         "measure": "or", "estimate": 2.1, "lower": 1.4, "upper": 3.0}]})
+    record("B comparison, outcome, measure type and the ACTUAL 90% level reach the writer",
+           comp and "Odds ratio" in comp[0] and "Exposed group vs Unexposed group" in comp[0]
+           and "Death within 30 days" in comp[0] and "90% CI 1.4 to 3.0" in comp[0]
+           and "95%" not in comp[0], str(comp))
+    nolevel, g3 = lines("nolevel", {"exposed": {"hr": 1.5, "ci_low": 1.1, "ci_high": 2.0}})
+    record("B an interval without a recorded level says 'CI level not recorded' and is a gap "
+           "(never assumed 95%)", nolevel and "CI level not recorded" in nolevel[0]
+           and "95%" not in nolevel[0] and any("CI level not recorded" in g for g in g3), f"{nolevel} {g3}")
+    p = _paper(tmp / "gap", "S09_results")
+    _w(p, "01_protocol/display_dictionary.json", dic)
+    _w(p, "03_analysis/results/primary.json", {"ci_level": 0.95, "exposed": est,
+                                               "strict_contrast_x": {"hr": 3.1, "p": 0.2}})
+    _w(p, "01_protocol/protocol_final.md", "# Protocol\n\nWe compared `exposed` with `weird_code` "
+                                           "in each stratum.\n")
+    r = _run(p, "tools/manuscript/writer_bundle.py", "build", "--stage", "S09_results",
+             "--project", p)
+    g = _gate(p, "writer_results_mapped", "S09_results")
+    gaps_md = wb.gaps_path(p, "S09_results")
+    proto = (p / ".wf/writer_bundle/S09_results/protocol_summary.md").read_text(encoding="utf-8")
+    record("B an unmapped required result is a counted gap: build exits non-zero, the S09 gate "
+           "fails, GAPS.md lists it outside the writer's folder",
+           r.returncode == 2 and "INCOMPLETE" in r.stdout and not g.ok
+           and "strict_contrast_x" in gaps_md.read_text(encoding="utf-8")
+           and "strict_contrast_x" not in "".join(
+               f.read_text(encoding="utf-8") for f in (p / ".wf/writer_bundle/S09_results").glob("*.md")),
+           _out(r)[-300:] + " | " + g.detail[:160])
+    record("B inline code is mapped through the dictionary, never silently deleted: a label "
+           "replaces a known name, a visible placeholder and a listed gap mark an unknown one",
+           "Exposed group" in proto and wb.UNMAPPED in proto and "weird_code" not in proto
+           and "weird_code" in gaps_md.read_text(encoding="utf-8"), proto[:200])
+    ok_gate = _gate(_paper(tmp / "fine", "S09_results"), "writer_results_mapped", "S09_results")
+    record("B the gate passes when every result maps (or there are none yet)", ok_gate.ok, ok_gate.detail)
+    old = {}
+    for rel in ("tools/analysis/results.py", "tools/R/medresults.R"):
+        try:
+            old[rel] = subprocess.run(["git", "-C", str(ROOT), "show", f"6d4a0af:{rel}"],
+                                      capture_output=True, timeout=30).stdout
+        except (OSError, subprocess.SubprocessError):
+            old[rel] = b""
+    import hashlib
+    same = all(not o or hashlib.sha256(o.replace(b"\r\n", b"\n")).hexdigest() == hashlib.sha256(
+        b"".join(ln for ln in (ROOT / rel).read_bytes().replace(b"\r\n", b"\n").splitlines(True)
+                 if rp.COMPAT_MARK not in ln)).hexdigest() for rel, o in old.items())
+    src = (ROOT / "tools/analysis/results.py").read_text(encoding="utf-8")
+    rsrc = (ROOT / "tools/R/medresults.R").read_text(encoding="utf-8")
+    record("B the analysis helpers record ci_level by default (environment), as output-compatible "
+           "lines: the 1.13 helper hash still holds, so no paper re-runs, and the comparison "
+           "ignores it", same and 'env["ci_level"]' in src and "ci_level" in rsrc
+           and rp.canonical({"environment": {"ci_level": 0.95, "x": 1}}) == {"environment": {"x": 1}},
+           str({k: len(v) for k, v in old.items()}))
+
+
+# ------------------------------------------------------------------------------ C
+def run_c(tmp: Path, record, section) -> None:
+    import hashlib
+    from wfcore import refproof
+    section("1.14.0 C: a cited number must be in the cited source; abstracts really compared")
+    p = _paper(tmp / "disc", "S16_discussion")
+    _w(p, "03_analysis/results/primary.json", {"hr": 1.87})
+    _w(p, "06_refs/refs.bib", "@article{smith2020, title={A}}\n@article{lee2021, title={B}}\n"
+                              "@article{kim2022, title={C}}\n")
+    _w(p, "06_refs/verified.json", {"records": {k: {"verified": True}
+                                                for k in ("smith2020", "lee2021", "kim2022")}})
+    _w(p, "06_refs/library.json", {"entries": [
+        {"citekey": "smith2020", "abstract": "Among 1,204 patients the adjusted HR was 2.31."},
+        {"citekey": "lee2021", "abstract": "A registry study."},
+        {"citekey": "kim2022", "abstract": "A trial."}]})
+    _w(p, "06_refs/deepread/lee2021.md", "# lee2021\n\nTable 2 reports a 12.5% event rate "
+                                        "(\u22120.4 change).\n")
+    xml = _w(p, "06_refs/fulltext/kim2022.xml", "<article><body><p>Primary result.</p>"
+                                                "<table-wrap><table><tr><td>0.77</td></tr></table>"
+                                                "</table-wrap></body></article>")
+    _w(p, "06_refs/fulltext/retrieval_manifest.json", {"schema": 1, "retrievals": [
+        {"citekey": "kim2022", "fulltext": "06_refs/fulltext/kim2022.xml", "identity": "match",
+         "sha256": hashlib.sha256(xml.read_bytes()).hexdigest()}]})
+    rel = "07_manuscript/discussion.md"
+    _w(p, rel, "Smith found an HR of 2.31 in 1204 patients [@smith2020]. Lee reported 12.5% "
+               "and a change of -0.4 [@lee2021]. Kim reported 0.77 [@kim2022].\n")
+    ok = _gate(p, "numbers_have_provenance", "S16_discussion", path=rel)
+    rec = json.loads((p / ".wf/citation_numbers.json").read_text(encoding="utf-8")).get(rel, [])
+    where = {r["number"]: r["source"] for r in rec}
+    record("C a cited number found in the abstract, the deep-read notes or the verified full "
+           "text passes (thousands separator, unicode minus, %), its location is recorded",
+           ok.ok and "abstract" in where.get("2.31", "") and "notes" in where.get("12.5", "")
+           and "full text table" in where.get("0.77", ""), ok.detail + " | " + str(where))
+    _w(p, rel, "Smith found an HR of 2.45 [@smith2020].\n")
+    bad = _gate(p, "numbers_have_provenance", "S16_discussion", path=rel)
+    record("C a cited number absent from that source fails with 'quote the passage in the "
+           "deep-read notes or remove the number'",
+           not bad.ok and "2.45" in bad.detail
+           and any("quote the passage in the deep-read notes or remove the number" in h
+                   for h in bad.hints), bad.detail)
+    (p / "06_refs/fulltext/kim2022.xml").write_text("<article>other</article>", encoding="utf-8")
+    _w(p, rel, "Kim reported 0.77 [@kim2022].\n")
+    tamper = _gate(p, "numbers_have_provenance", "S16_discussion", path=rel)
+    record("C a full text whose bytes no longer match its identity receipt is no source",
+           not tamper.ok and "0.77" in tamper.detail, tamper.detail)
+    src = {"pmid": "1", "doi": "10.1/x", "title": "T", "journal": "J", "year": "2020",
+           "first_author": "Smith", "abstract": "Background: statins. Results: HR 2.31."}
+    entry = {"pmid": "1", "doi": "10.1/x", "title": "T", "journal": "J", "year": "2020",
+             "authors": [{"last": "Smith"}], "abstract": "Background: statins.  Results: HR 2.31"}
+    same = refproof.compare_entry_to_source(entry, src)
+    diff = refproof.compare_entry_to_source(dict(entry, abstract="A completely different study of "
+                                                 "knee surgery outcomes in athletes."), src)
+    record("C the stored abstract is really compared with the source abstract (whitespace and "
+           "punctuation tolerated; a different abstract fails)",
+           not same and any("abstract differs" in x for x in diff), f"{same} | {diff}")
+    nosrc = dict(src, abstract="")
+    noabs = dict(entry, abstract="", source="fulltext")
+    record("C a record without an abstract is citable only through an identity-verified full "
+           "text (source 'fulltext'); otherwise it still fails",
+           not refproof.compare_entry_to_source(noabs, nosrc, True)
+           and refproof.compare_entry_to_source(noabs, nosrc, False)
+           and refproof.compare_entry_to_source(dict(noabs, source="pubmed"), nosrc, True),
+           str(refproof.compare_entry_to_source(noabs, nosrc, False)))
+    q = _paper(tmp / "lib", "S13_reflib")
+    x2 = _w(q, "06_refs/fulltext/a.xml", "<article>A</article>")
+    _w(q, "06_refs/fulltext/retrieval_manifest.json", {"schema": 1, "retrievals": [
+        {"citekey": "a2020", "fulltext": "06_refs/fulltext/a.xml", "identity": "match",
+         "sha256": hashlib.sha256(x2.read_bytes()).hexdigest()},
+        {"citekey": "b2020", "fulltext": "06_refs/fulltext/a.xml", "identity": "indeterminate",
+         "sha256": hashlib.sha256(x2.read_bytes()).hexdigest()}]})
+    sys.path.insert(0, str(ROOT / "tools"))
+    from pubmed import build_library as bl
+    lib = {"entries": []}
+    rec_no = {"pmid": "9", "title": "Editorial on statins", "abstract": "", "year": "2020",
+              "authors": [{"last": "Ng", "first": "A"}], "journal": "J", "doi": ""}
+    kept = bl.add_records({"entries": []}, [rec_no], allow_fulltext=True)
+    dropped = bl.add_records(lib, [rec_no])
+    record("C build_library keeps a no-abstract record as source 'fulltext' only on request; "
+           "only an identity-match full text counts as verified",
+           kept[0] == 1 and dropped == (0, 1, 0) and set(refproof.fulltext_verified(q)) == {"a2020"},
+           f"{kept} {dropped} {refproof.fulltext_verified(q)}")
+
+
+GROUPS = [("A", run_a), ("B", run_b), ("C", run_c)]

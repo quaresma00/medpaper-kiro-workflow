@@ -55,7 +55,9 @@ def cached_sources(project: Path, entries: list[dict], max_hours: float = 24) ->
             sources.update(refproof.parse_pubmed_payload(path.read_bytes()))
         if not entries or set(sources) != {str(e.get("pmid", "")) for e in entries}:
             return None
-        if any(refproof.compare_entry_to_source(e, sources[str(e["pmid"])]) for e in entries):
+        ft = refproof.fulltext_verified(project)
+        if any(refproof.compare_entry_to_source(e, sources[str(e["pmid"])],
+                                                str(e.get("citekey")) in ft) for e in entries):
             return None
         return sources
     except (OSError, ValueError, KeyError, TypeError):

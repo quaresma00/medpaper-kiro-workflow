@@ -63,8 +63,13 @@ Everything the Introduction and Discussion say about the literature comes from h
 - `06_refs/refs.ris`
 
 ## Hard rules
-- **No abstract, no entry.** A record without a retrievable abstract is removed from the
-  library. Do not write a summary and call it the abstract.
+- **No abstract, no entry** - unless the full text proves the paper (1.14.0). A record
+  without a retrievable abstract is removed from the library, or, when it is needed, added
+  with `build_library.py --add-ids <PMID> --allow-fulltext` (library source `fulltext`) and
+  then fetched or registered and identity-verified with `fulltext.py` (front matter or
+  structured metadata); only then do the library and verification gates accept it. Do not
+  write a summary and call it the abstract. The stored abstract is compared with the PubMed
+  abstract (normalised similarity >= 0.9); a different abstract fails.
 - Never invent, guess or "reconstruct" a citekey, PMID, DOI, title, journal or year.
 - Never write or modify `library.json`, `verified.json`, `refs.bib` or `refs.ris` with an
   ad-hoc script. Only `tools/pubmed/build_library.py` and `tools/pubmed/verify.py` may produce
