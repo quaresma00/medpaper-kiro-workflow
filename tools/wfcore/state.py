@@ -155,8 +155,28 @@ class State:
             self._note_v1110(old_version, pipeline_version)
             self._note_v1120(old_version, pipeline_version)
             self._note_v1130(old_version, pipeline_version)
+            self._note_v1140(old_version, pipeline_version)
             self.save()
         return changed
+
+    def _note_v1140(self, old_version: str, new_version: str) -> None:
+        """1.14.0: an external review of 1.13.0. Event only; no file or stage is touched."""
+        if (version_tuple(old_version) >= (1, 14, 0) or version_tuple(new_version) < (1, 14, 0)
+                or self.data.get("v1140_migration_noted")):
+            return
+        self.data["v1140_migration_noted"] = True
+        self.event("requirements_changed",
+                   "1.14.0: post-freeze wording changes are classified SAFE / MEANING_CHECK / "
+                   "SCIENCE (a meaning check by the reviewer or the author); the writer bundle "
+                   "carries every result (gaps gate); a number cited from a prior study must "
+                   "appear in that source; reproduction copies within a size limit and never "
+                   "links or alters data; analysis stop rule (additional analyses name the "
+                   "decision they could change); stale GO decisions re-judged; gate cache "
+                   "follows every file a check reads; only a release-tagged engine serves "
+                   "papers; reviewers get a factual pre-specified vs post hoc record; one look "
+                   "at all tables and figures before Results; Word keeps each table footnote "
+                   "with its table. New gates are since=1.14.0: completed stages keep the "
+                   "pinned gate set. Paper files were not modified.")
 
     def _note_v1130(self, old_version: str, new_version: str) -> None:
         """1.13.0: paper isolation and engine protection. Event only; no file or stage is touched."""

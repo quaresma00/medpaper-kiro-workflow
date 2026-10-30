@@ -2149,7 +2149,7 @@ def run_codex_integration() -> None:
                f"card must name `{agent}` so the work is not done in the main context")
 
     record("pipeline and skill versions agree",
-           pipe["meta"]["version"] == "1.13.0" and 'version: "2.6.0"' in skill,
+           pipe["meta"]["version"] == "1.14.0" and 'version: "2.6.0"' in skill,
            f'pipeline={pipe["meta"]["version"]}, skill=2.6.0 (Kiro adapter revision)')
     record("all 25 stage cards exist",
            len(pipe["stage"]) == 25 and
@@ -5184,7 +5184,7 @@ def run_v160(tmp: Path) -> None:
            any(g["check"] == "reader_review_coverage" for g in s18["gate"])
            and "review_round.py start --scope manuscript" in (ROOT / "pipeline/stages/S18_independent_review.md")
            .read_text(encoding="utf-8"))
-    record("pipeline version is 1.13.0", pipe.meta.get("version") == "1.13.0")
+    record("pipeline version is 1.14.0", pipe.meta.get("version") == "1.14.0")
 
 
 def run_v170(tmp: Path) -> None:

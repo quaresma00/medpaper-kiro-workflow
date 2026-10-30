@@ -909,4 +909,4 @@ def run_r(tmp: Path, record, section) -> None:
 
 
 GROUPS = [("A", run_a), ("B", run_b), ("C", run_c), ("D", run_d), ("E", run_e), ("F", run_f),
-          ("H", run_h), ("I", run_i)]
+          ("H", run_h), ("I", run_i), ("R", run_r)]
