@@ -161,6 +161,8 @@ def run_g1(tmp: Path, record, section) -> None:
         _run(["git", "init", "-q", str(g)])
         _run([*git, "add", "-A"])
         _run([*git, "commit", "-q", "-m", "x"])
+        # 1.14.0: a clean checkout counts as clean only at a release tag
+        _run([*git, "-c", "tag.gpgsign=false", "tag", "-a", "v0.0.1", "-m", "v0.0.1"])
         clean = integrity.engine_state(g, use_cache=False)
         (g / "tools/a.py").write_text("x = 2\n", encoding="utf-8")
         modified = integrity.engine_state(g, use_cache=False)

@@ -7,6 +7,10 @@ paths.project_dir()/paper_from_cli(), which calls require_clean(): when the engi
 local modifications the command refuses and names the legal paths (paper overrides first, then a
 project-local engine fork, `wf engine-fork`).
 
+1.14.0: a clean checkout is accepted only when HEAD carries a release tag vX.Y.Z (kind
+"untagged" otherwise): the 1.13 guard saw only uncommitted edits, so local commits that never
+went through a release reached every paper unnoticed.
+
 Exempt: MEDPAPER_ENGINE_DEV=1 (selftest, deliberate engine development), a linked git worktree
 (maintenance happens there), and an engine fork (it exists to be edited; its diff is recorded in
 the paper). A checkout without git is compared with ENGINE_MANIFEST.json when one exists
@@ -17,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -66,8 +71,33 @@ def _git_changes(root: Path) -> list[str] | None:
     return [ln[3:].strip().strip('"') for ln in done.stdout.splitlines() if ln.strip()]
 
 
+TAG_RE = re.compile(r"^v\d+\.\d+\.\d+$")
+
+
+def _git(root: Path, *args: str) -> str | None:
+    try:
+        done = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done.stdout.strip() if done.returncode == 0 else None
+
+
+def release_info(root: Path | str | None = None) -> dict:
+    """{head, tag (release tag on HEAD or None), ahead (commits not on the upstream, None when
+    unknown)} of a git checkout of the engine."""
+    from . import paths
+    root = Path(root or paths._physical_engine()).resolve()
+    head = _git(root, "rev-parse", "--short", "HEAD") or ""
+    tags = (_git(root, "tag", "--points-at", "HEAD") or "").split()
+    ahead = _git(root, "rev-list", "--count", "@{u}..HEAD")
+    return {"head": head, "tag": next((t for t in sorted(tags) if TAG_RE.match(t)), None),
+            "ahead": int(ahead) if ahead and ahead.isdigit() else None}
+
+
 def engine_state(root: Path | str | None = None, *, use_cache: bool = True) -> tuple[str, list[str]]:
-    """-> (kind, changed paths). kind: dev | fork | worktree | clean | modified | unverifiable."""
+    """-> (kind, changed paths). kind: dev | fork | worktree | clean | untagged | modified |
+    unverifiable. 1.14.0: 'untagged' = a clean git checkout whose HEAD is no release tag."""
     from . import paths
     root = Path(root or paths._physical_engine()).resolve()
     if os.environ.get(DEV_ENV) == "1":
@@ -83,8 +113,12 @@ def engine_state(root: Path | str | None = None, *, use_cache: bool = True) -> t
         result = ("worktree", [])
     elif git.is_dir():
         changed = _git_changes(root)
-        if changed is not None:
-            result = ("modified" if changed else "clean", changed)
+        if changed:
+            result = ("modified", changed)
+        elif changed is not None:
+            info = release_info(root)
+            result = (("clean", []) if info["tag"] else
+                      ("untagged", [f"HEAD {info['head'] or '?'} is not a release tag (vX.Y.Z)"]))
     if result is None:
         man = root / MANIFEST_NAME
         if man.is_file():
@@ -118,9 +152,26 @@ def refusal(root: Path, changed: list[str]) -> str:
         "checkout -- <file>`) or moves the change into a maintenance worktree.")
 
 
+def untagged_refusal(root: Path, changed: list[str]) -> str:
+    eng = Path(root).as_posix()
+    return (
+        f"REFUSED: the shared medpaper engine at {eng} is not a release: "
+        f"{'; '.join(changed) or 'HEAD has no vX.Y.Z tag'}.\n"
+        "Unreleased engine commits are never used for papers. Nothing was run.\nLegal paths:\n"
+        "  1. the maintainer releases it (annotated tag vX.Y.Z on the merged commit, pushed) or "
+        "checks out the last release tag;\n"
+        "  2. engine development and its selftests only: a maintenance worktree or "
+        "MEDPAPER_ENGINE_DEV=1;\n"
+        f'  3. a project-local engine fork for this paper only: python "{eng}/tools/wf.py" '
+        "engine-fork create.\nTell the user; do not commit to, tag or check out the engine "
+        "from a paper session.")
+
+
 def require_clean(root: Path | str | None = None) -> None:
     from . import paths
     root = Path(root or paths._physical_engine()).resolve()
     kind, changed = engine_state(root)
     if kind == "modified":
         raise EngineModified(refusal(root, changed))
+    if kind == "untagged":
+        raise EngineModified(untagged_refusal(root, changed))

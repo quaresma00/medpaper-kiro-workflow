@@ -1164,8 +1164,10 @@ def cmd_doctor(args) -> int:
                      else ("current paper", "none selected", msg[:140]))
     from . import integrity
     kind, changed = integrity.engine_state(use_cache=False)
-    rows_integrity = ("engine integrity", "BROKEN" if kind == "modified" else "ok",
-                      {"clean": "committed engine, no local edits",
+    rows_integrity = ("engine integrity", "BROKEN" if kind in ("modified", "untagged") else "ok",
+                      {"clean": "release-tagged engine, no local edits",
+                       "untagged": "; ".join(changed) + " - paper commands refuse (rc 3) until "
+                                   "the maintainer releases it (tag vX.Y.Z) or checks out a release",
                        "dev": "MEDPAPER_ENGINE_DEV=1 (engine development)",
                        "worktree": "maintenance worktree",
                        "fork": "project-local engine fork (edits allowed, diff recorded)",
@@ -1186,6 +1188,15 @@ def cmd_doctor(args) -> int:
     rows.append(("pipeline.toml", "ok" if paths.pipeline_file().exists() else "MISSING",
                  paths.rel(paths.pipeline_file())))
     rows.append(rows_integrity)
+    if (paths.repo_root() / ".git").exists():
+        # 1.14.0 (H): the release state of the engine checkout, also in development mode.
+        info = integrity.release_info(paths.repo_root())
+        rows.append(("engine release", "ok" if info["tag"] else "WARN",
+                     f"HEAD {info['head']} = {info['tag']}" if info["tag"] else
+                     f"HEAD {info['head']} is untagged (not a release)"))
+        if info["ahead"]:
+            rows.append(("engine upstream", "WARN", f"{info['ahead']} commit(s) ahead of origin "
+                         "(not pushed: unreleased engine work)"))
     if rows_integrity_legacy:
         rows.append(rows_integrity_legacy)
 

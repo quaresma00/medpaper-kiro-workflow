@@ -540,14 +540,17 @@ def refresh_evidence(project: Path, pipeline, state, revision: dict) -> None:
     drift or invalidates the input signature - but the refreshed evidence must still pass.
     """
     from . import checks
-    from .gatecache import INPUTS
+    from .gatecache import INPUTS, depends_on
     current = {r: h for r, h in snapshot(project).items() if renewable(r)}
-    if current == revision.get("validation", {}).get("renewable_evidence"):
+    recorded = revision.get("validation", {}).get("renewable_evidence") or {}
+    if current == recorded:
         return
+    drifted = sorted(r for r in set(current) | set(recorded) if current.get(r) != recorded.get(r))
     checks.load_all()
     failures = []
     for row in revision.get("checks", []):
-        if row["spec"].get("check") in INPUTS:
+        # 1.14.0 (F): a pure check is reused only when none of the files it reads drifted.
+        if row["spec"].get("check") in INPUTS and not depends_on(project, row["spec"], drifted):
             continue
         result = _run(pipeline, state, project, row)
         if result.blocking:

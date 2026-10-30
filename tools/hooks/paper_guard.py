@@ -84,6 +84,72 @@ COPY_DATA_RE = re.compile(r"(?i)\b(?:copy-item|cpi|cp|copy|robocopy|xcopy|move-i
                           r"\b7z\s+[xe]\b|\btar\s+-?\w*x|os\.link|shutil\.(?:copy\w*|move)")
 
 
+GIT_WRITE_SUBS = frozenset({
+    "commit", "merge", "checkout", "switch", "reset", "revert", "am", "cherry-pick", "rebase",
+    "push", "apply", "clean", "restore", "rm", "mv", "add", "pull", "init", "clone",
+    "update-index", "update-ref", "filter-branch", "filter-repo", "notes", "replace", "gc",
+    "prune", "submodule", "sparse-checkout"})
+_GIT_OPTS_WITH_ARG = frozenset({"-c", "--git-dir", "--work-tree", "--namespace", "--exec-path",
+                                "--config-env"})
+
+
+def git_parse(args: list[str], cwd: Path) -> tuple[Path, str, list[str]]:
+    """(repository dir, subcommand, its arguments) of a `git ...` command line."""
+    repo = Path(cwd)
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "-C" and i + 1 < len(args):
+            nxt = Path(os.path.expandvars(args[i + 1]))
+            repo = nxt if nxt.is_absolute() else repo / nxt
+            i += 2
+            continue
+        if a.startswith("--git-dir=") or a.startswith("--work-tree="):
+            repo = Path(a.split("=", 1)[1])
+            repo = repo.parent if repo.name == ".git" else repo
+            i += 1
+            continue
+        if a in _GIT_OPTS_WITH_ARG and i + 1 < len(args):
+            if a in ("--git-dir", "--work-tree"):
+                repo = Path(args[i + 1])
+                repo = repo.parent if repo.name == ".git" else repo
+            i += 2
+            continue
+        if a.startswith("-"):
+            i += 1
+            continue
+        return Path(os.path.abspath(str(repo))), a.casefold(), args[i + 1:]
+    return Path(os.path.abspath(str(repo))), "", []
+
+
+def git_writes(sub: str, rest: list[str]) -> bool:
+    """Does this git subcommand change the repository (refs, index, work tree, remote)?"""
+    flags = {r for r in rest if r.startswith("-")}
+    positional = [r for r in rest if not r.startswith("-")]
+    if sub in GIT_WRITE_SUBS:
+        return True
+    if sub == "tag":
+        return bool(rest) and not flags & {"-l", "--list", "--points-at", "--contains",
+                                           "--merged", "--no-merged", "-n"}
+    if sub == "branch":
+        if flags & {"-d", "-D", "--delete", "-m", "-M", "--move", "-c", "-C", "--copy", "-f",
+                    "--force", "-u", "--set-upstream-to", "--unset-upstream", "--edit-description"}:
+            return True
+        return bool(positional) and not flags & {"-l", "--list", "--contains", "--merged",
+                                                 "--no-merged", "--points-at"}
+    if sub == "worktree":
+        return bool(positional) and positional[0] in ("add", "remove", "move", "prune", "lock",
+                                                      "unlock", "repair")
+    if sub == "stash":
+        return not (positional and positional[0] in ("list", "show"))
+    if sub == "remote":
+        return bool(positional) and positional[0] in ("add", "remove", "rm", "rename", "set-url",
+                                                      "set-head", "prune", "update")
+    if sub == "config":
+        return not flags & {"--get", "--get-all", "--list", "-l", "--get-regexp"}
+    return False
+
+
 def _norm(p: Path | str) -> str:
     return os.path.normcase(os.path.abspath(str(p)))
 
@@ -378,11 +444,14 @@ class Guard:
                     targets.extend(args[:-1] if dest is None else args)
             elif verb in WRITE_VERBS:
                 targets.extend(args)
-            elif verb == "git" and GIT_WRITE_RE.search(" ".join(toks[1:])):
-                low = [t.casefold() for t in toks]
-                repo = toks[low.index("-c") + 1] if "-c" in low and low.index("-c") + 1 < len(toks) \
-                    else str(cwd)
-                targets.append(repo)
+            elif verb == "git":
+                # 1.14.0 (H): the repository is the last `-C <dir>` (relative to the one
+                # before), else the working directory; write subcommands aimed at the engine
+                # (commit, merge, checkout, switch, reset, revert, am, cherry-pick, rebase, tag,
+                # push, worktree add/remove, branch -d/-D, stash, ...) are blocked.
+                repo, sub, rest = git_parse(toks[1:], cwd)
+                if sub and git_writes(sub, rest):
+                    targets.append(str(repo))
         # Python one-liners / heredocs: a line that writes names its target or a variable.
         assigned = {m[1]: m[2] for m in PY_ASSIGN_RE.finditer(expanded)}
         for line in expanded.splitlines():

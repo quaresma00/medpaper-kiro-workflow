@@ -39,11 +39,17 @@ _COMMON = ("07_manuscript/scientific_freeze.json", "08_submission/manuscript/ful
 INPUTS: dict[str, tuple[str, ...]] = {
     "md_sections": (),
     "md_wordcount": (),
-    "no_ai_boilerplate": (),
+    "no_ai_boilerplate": ("01_protocol/idea.json",),  # 1.14.0: the study basis it reads
     "supplementary_methods_clean": ("07_manuscript/supplementary_methods.md",
                                     "08_submission/manuscript/supplementary_methods.md"),
+    # 1.14.0 (F): every file the check reads - the Discussion rule reads the reference
+    # verification, the library abstracts, the deep-read notes and verified full texts.
     "numbers_have_provenance": ("03_analysis/results/*", "04_tables/**/*.xlsx",
-                                "01_protocol/display_dictionary.json"),
+                                "01_protocol/display_dictionary.json", "06_refs/refs.bib",
+                                "06_refs/verified.json", "06_refs/library.json",
+                                "06_refs/deepread/*.md", "06_refs/fulltext/*",
+                                "06_refs/fulltext/**/*",
+                                "01_protocol/artifact_plan.json"),
     "manuscript_structure": ("01_protocol/artifact_plan.json", "07_manuscript/title.md",
                              "07_manuscript/full_manuscript.md", "05_figures/legends.md",
                              "04_tables/table_captions.md"),
@@ -67,6 +73,40 @@ def _engine_hashes() -> dict[str, str]:
                     and "__pycache__" not in p.parts):
                 out[p.relative_to(root).as_posix()] = _sha256(p)
     return out
+
+
+def dependencies(project: Path, spec: dict) -> list[str] | None:
+    """Every file pattern a cached check reads (None when the dependency set is unknown)."""
+    name = spec.get("check")
+    if name not in INPUTS:
+        return None
+    patterns = list(_COMMON) + list(INPUTS[name])
+    # Every path the spec names, not only the default locations.
+    for key, value in spec.items():
+        if isinstance(value, str) and (key == "path" or key.endswith("_path")
+                                       or key in {"manifest", "style", "title_page",
+                                                  "manuscript"}):
+            patterns.append(value)
+        elif key == "paths" and isinstance(value, list):
+            patterns.extend(v for v in value if isinstance(v, str))
+    if name == "docx_bundle_ready":
+        manifest = Path(project) / "08_submission/bundle/manifest.json"
+        if manifest.is_file():
+            try:
+                items = json.loads(manifest.read_text(encoding="utf-8")).get("items", [])
+            except (OSError, ValueError):
+                return None
+            patterns.extend(str(row.get("file", "")) for row in items if row.get("file"))
+    return patterns
+
+
+def depends_on(project: Path, spec: dict, rels) -> bool:
+    """Does a cached check read any of `rels`? (unknown dependencies -> True)"""
+    import fnmatch
+    patterns = dependencies(project, spec)
+    if patterns is None:
+        return True
+    return any(fnmatch.fnmatch(r, pat) or r == pat for r in rels for pat in patterns)
 
 
 class Receipts:
@@ -96,23 +136,9 @@ class Receipts:
         name = spec.get("check")
         if name not in INPUTS:
             return None
-        patterns = list(_COMMON) + list(INPUTS[name])
-        # Every path the spec names, not only the default locations.
-        for key, value in spec.items():
-            if isinstance(value, str) and (key == "path" or key.endswith("_path")
-                                           or key in {"manifest", "style", "title_page",
-                                                      "manuscript"}):
-                patterns.append(value)
-            elif key == "paths" and isinstance(value, list):
-                patterns.extend(v for v in value if isinstance(v, str))
-        if name == "docx_bundle_ready":
-            manifest = self.project / "08_submission/bundle/manifest.json"
-            if manifest.is_file():
-                try:
-                    items = json.loads(manifest.read_text(encoding="utf-8")).get("items", [])
-                except (OSError, ValueError):
-                    return None
-                patterns.extend(str(row.get("file", "")) for row in items if row.get("file"))
+        patterns = dependencies(self.project, spec)
+        if patterns is None:
+            return None
         files: dict[str, dict] = {}
         for pattern in patterns:
             try:
@@ -154,7 +180,12 @@ class Receipts:
             self.new[identity] = {"at": time.time(), "result": asdict(result)}
 
     def save(self) -> None:
+        # 1.14.0 (F): still-valid receipts of checks not run this time are kept, not dropped.
+        now = time.time()
+        kept = {k: v for k, v in self.old.items() if k not in self.new and isinstance(v, dict)
+                and 0 <= now - float(v.get("at", 0) or 0) < TTL_SECONDS}
+        merged = {**kept, **self.new}
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(self.new, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        tmp.write_text(json.dumps(merged, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         tmp.replace(self.path)

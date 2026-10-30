@@ -592,4 +592,156 @@ def run_e(tmp: Path, record, section) -> None:
            "query counts", mins == [1, 1, 1] and one.ok and ">= 5" not in src, f"{mins} {one.detail}")
 
 
-GROUPS = [("A", run_a), ("B", run_b), ("C", run_c), ("D", run_d), ("E", run_e)]
+# ------------------------------------------------------------------------------ F
+def run_f(tmp: Path, record, section) -> None:
+    import builtins
+    import fnmatch
+    import io
+    import time
+    from unittest.mock import patch
+    from wfcore import gatecache
+    section("1.14.0 F: gate-cache dependencies complete, receipts merged, close re-checks drift")
+    p = _paper(tmp / "f", "S16_discussion")
+    _w(p, "03_analysis/results/primary.json", {"hr": 1.87})
+    _w(p, "06_refs/refs.bib", "@article{smith2020, title={A}}\n")
+    _w(p, "06_refs/verified.json", {"records": {"smith2020": {"verified": True}}})
+    _w(p, "06_refs/library.json", {"entries": [{"citekey": "smith2020", "abstract": "HR 2.31."}]})
+    _w(p, "06_refs/deepread/smith2020.md", "# smith2020\n\nHR 2.31.\n")
+    _w(p, "01_protocol/display_dictionary.json", {"terms": []})
+    _w(p, "07_manuscript/discussion.md", "# Discussion\n\nOur HR was 1.87; Smith found 2.31 "
+                                         "[@smith2020].\n")
+    specs = [("numbers_have_provenance", {"path": "07_manuscript/discussion.md"}),
+             ("md_sections", {"path": "07_manuscript/discussion.md", "headings": ["Discussion"]}),
+             ("no_ai_boilerplate", {"path": "07_manuscript/discussion.md"}),
+             ("md_wordcount", {"path": "07_manuscript/discussion.md", "max": 2000}),
+             ("manuscript_structure", {}),
+             ("supplementary_methods_clean", {})]
+    real_open = io.open
+    root = str(p.resolve()).casefold()
+    missing: dict[str, list[str]] = {}
+    for name, spec in specs:
+        reads: set[str] = set()
+
+        def spy(file, *a, _reads=reads, **k):
+            try:
+                s = os.path.abspath(os.fspath(file))
+                if s.casefold().startswith(root):
+                    _reads.add(Path(s).relative_to(p.resolve()).as_posix())
+            except (TypeError, ValueError):
+                pass
+            return real_open(file, *a, **k)
+        with patch.object(io, "open", spy), patch.object(builtins, "open", spy):
+            try:
+                _gate(p, name, "S16_discussion", **spec)
+            except Exception:  # noqa: BLE001 - a failing check still shows what it reads
+                pass
+        pats = gatecache.dependencies(p, {"check": name, **spec}) or []
+        bad = sorted(r for r in reads if not r.startswith(".wf/")
+                     and not any(fnmatch.fnmatch(r, pat) or r == pat for pat in pats))
+        if bad:
+            missing[name] = bad
+    record("F every file a cached check actually reads is one of its declared dependencies "
+           "(numbers_have_provenance now includes the reference files)", not missing
+           and "06_refs/verified.json" in gatecache.INPUTS["numbers_have_provenance"], str(missing))
+    from wfcore import registry
+    from wfcore.state import State
+    st = State(p, ".wf").load()
+    path = st.dir / gatecache.REL
+    now = time.time()
+    _w(p, f".wf/{gatecache.REL}", {"keep": {"at": now, "result": {"ok": True, "check": "x",
+                                                                  "detail": "", "hints": [],
+                                                                  "severity": "fail"}},
+                                    "old": {"at": now - 10 * gatecache.TTL_SECONDS, "result": {}}})
+    rc = gatecache.Receipts(p, registry.load(), st)
+    from wfcore.checks import Result
+    rc.put("new", Result(True, "y", "fine"))
+    rc.save()
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    record("F saving receipts keeps still-valid receipts of checks not run this time and drops "
+           "expired ones", set(saved) == {"keep", "new"}, str(sorted(saved)))
+    record("F rework close re-runs a pure check whose inputs drifted (renewed reference "
+           "evidence) and reuses the others",
+           gatecache.depends_on(p, {"check": "numbers_have_provenance",
+                                    "path": "07_manuscript/discussion.md"}, ["06_refs/verified.json"])
+           and not gatecache.depends_on(p, {"check": "md_sections", "path": "07_manuscript/x.md"},
+                                        ["06_refs/verified.json"])
+           and "depends_on(project" in (ROOT / "tools/wfcore/revision.py").read_text(encoding="utf-8"))
+
+
+# ------------------------------------------------------------------------------ H
+def run_h(tmp: Path, record, section) -> None:
+    from contextlib import redirect_stdout
+    from io import StringIO
+    from unittest.mock import patch
+    from wfcore import cli, integrity
+    sys.path.insert(0, str(ROOT / "tools/hooks"))
+    import paper_guard
+    section("1.14.0 H: only release-tagged engines serve papers; the guard blocks engine git writes")
+    with _envset(MEDPAPER_ENGINE_DEV=None):
+        g = tmp / "eng"
+        (g / "tools").mkdir(parents=True)
+        (g / "tools/a.py").write_text("x = 1\n", encoding="utf-8")
+        git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+               "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", "-C", str(g)]
+        subprocess.run(["git", "init", "-q", str(g)], capture_output=True)
+        subprocess.run([*git, "add", "-A"], capture_output=True)
+        subprocess.run([*git, "commit", "-q", "-m", "x"], capture_output=True)
+        untagged = integrity.engine_state(g, use_cache=False)
+        info0 = integrity.release_info(g)
+        subprocess.run([*git, "tag", "-a", "v9.9.9", "-m", "v9.9.9"], capture_output=True)
+        tagged = integrity.engine_state(g, use_cache=False)
+        info1 = integrity.release_info(g)
+        (g / "tools/b.py").write_text("y = 1\n", encoding="utf-8")
+        subprocess.run([*git, "add", "-A"], capture_output=True)
+        subprocess.run([*git, "commit", "-q", "-m", "local"], capture_output=True)
+        after_local = integrity.engine_state(g, use_cache=False)
+    record("H a clean checkout serves papers only at a release tag: a local commit after the "
+           "tag is 'untagged' (the 1.13 guard missed it)",
+           untagged[0] == "untagged" and tagged == ("clean", []) and after_local[0] == "untagged"
+           and info0["tag"] is None and info1["tag"] == "v9.9.9", str([untagged, tagged, after_local]))
+    ws = _paper(tmp / "ws")
+    buf = StringIO()
+    with patch.object(integrity, "engine_state", return_value=("untagged", ["HEAD abc1234 is "
+                                                                           "not a release tag (vX.Y.Z)"])), \
+            _envset(MEDPAPER_PROJECT=ws):
+        with redirect_stdout(buf):
+            rc = cli.main(["check"])
+    out = buf.getvalue()
+    record("H paper commands refuse an untagged global engine (rc 3) and name the legal paths",
+           rc == 3 and "REFUSED" in out and "release" in out and "engine-fork" in out
+           and "MEDPAPER_ENGINE_DEV" in out, out[-300:])
+    with _envset(MEDPAPER_ENGINE_DEV=None):
+        doc = _run(None, "tools/wf.py", "doctor", env=_env(None, MEDPAPER_ENGINE_DEV=None), cwd=tmp)
+    record("H wf doctor shows the engine release state (tag or untagged; commits ahead of origin)",
+           "engine release" in _out(doc), _out(doc)[-400:])
+    eng = str(ROOT)
+    blocked_cmds = [f"git -C {eng} commit -m x", f"git -C \"{eng}\" merge v1140",
+                    f"git -c user.name=t -C {eng} commit -am x", f"git -C {eng} switch main",
+                    f"git -C {eng} reset --hard HEAD~1", f"git -C {eng} revert HEAD",
+                    f"git -C {eng} am patch.mbox", f"git -C {eng} cherry-pick abc",
+                    f"git -C {eng} rebase main", f"git -C {eng} tag -a v9.9.9 -m x",
+                    f"git -C {eng} push origin main", f"git -C {eng} worktree add {ws / 'wt'}",
+                    f"git -C {eng} worktree remove x", f"git -C {eng} branch -d x",
+                    f"git -C {eng} branch -D x", f"git -C {eng} stash",
+                    f"git -C {eng} checkout -- tools/wf.py"]
+    allowed_cmds = [f"git -C {eng} status", f"git -C {eng} log --oneline -3",
+                    f"git -C {eng} tag --points-at HEAD", f"git -C {eng} branch --show-current",
+                    f"git -C {eng} worktree list", f"git -C {eng} stash list",
+                    f"git -C {eng} diff", f"git -C {ws} commit -m paper"]
+    guard = paper_guard.Guard(ws)
+
+    def decide(cmd, cwd=None):
+        payload = {"tool_name": "execute_pwsh", "tool_input": {"command": cmd}}
+        if cwd:
+            payload["tool_input"]["cwd"] = str(cwd)
+        return guard.decide(payload)
+    blocked = {c: decide(c) for c in blocked_cmds}
+    cwd_blocked = decide("git commit -m x", ROOT) and decide("git tag -a v1.0.0 -m x", ROOT)
+    allowed = {c: decide(c) for c in allowed_cmds}
+    record("H the paper guard blocks git write commands aimed at the engine (via -C or cwd) and "
+           "allows read-only git and the paper's own repository",
+           all(blocked.values()) and cwd_blocked and not any(allowed.values()),
+           str({k[-30:]: bool(v) for k, v in {**blocked, **allowed}.items()}))
+
+
+GROUPS = [("A", run_a), ("B", run_b), ("C", run_c), ("D", run_d), ("E", run_e), ("F", run_f), ("H", run_h)]
