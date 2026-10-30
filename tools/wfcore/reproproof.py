@@ -29,9 +29,9 @@ TOL_ABS_MAX = 1e-6
 TOL_REL_MAX = 1e-6
 INPUT_TREES = ("02_data", "03_analysis/code")
 RERUN_DIR = ".wf/repro/rerun"
-# 1.13.0: the sandbox lives inside the paper (same volume, so data can be hard-linked instead of
-# copied), one at a time, and is deleted after the run; leftovers of an interrupted run are
-# removed by the next one.
+# 1.13.0: the sandbox lives inside the paper, one at a time, and is deleted after the run;
+# 1.14.0: inputs are copied (never hard-linked) and leftovers are removed only with an owner
+# marker whose process is gone (cleanup_stale).
 SANDBOX_DIR = ".wf/repro/sandboxes"
 LOCK_REL = ".wf/repro/run.lock"
 SNAPSHOT_EXCLUDE = (".wf", "temp", ".kiro", REPORT_REL)
@@ -104,64 +104,6 @@ def sha256(path: Path) -> str:
 # ---------------------------------------------------------------------------
 # 1.13.0: sandbox housekeeping - never copy the user's data, never leave GBs behind
 # ---------------------------------------------------------------------------
-class DataCopyRefused(Exception):
-    """Providing an input would copy more data than data_copy_limit_mb allows."""
-
-
-class Budget:
-    def __init__(self, limit: int):
-        self.limit, self.copied, self.linked = int(limit), 0, 0
-        self.links: list[tuple[Path, Path, int]] = []  # (sandbox link, source, source mode)
-
-
-def unlink_links(budget: Budget) -> None:
-    """Remove the sandbox hard links first, restoring a read-only source's attribute."""
-    import os
-    import stat
-    for dst, src, mode in budget.links:
-        try:
-            if not os.access(dst, os.W_OK):
-                os.chmod(dst, stat.S_IWRITE | stat.S_IREAD)
-            os.unlink(dst)
-            if not mode & stat.S_IWRITE:
-                os.chmod(src, mode)
-        except OSError:
-            pass
-    budget.links.clear()
-
-
-def provide(src: Path, dst: Path, budget: Budget, *, prefer_copy: bool = False) -> str:
-    """Make `src` available at `dst` without copying data: a hard link (same volume, zero
-    bytes) or, for small files only, a copy within the budget. Raises DataCopyRefused."""
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    size = src.stat().st_size
-    if prefer_copy and budget.copied + size <= budget.limit:
-        import shutil
-        shutil.copy2(src, dst)
-        budget.copied += size
-        return "copy"
-    try:
-        import os
-        mode = src.stat().st_mode
-        os.link(src, dst)
-        budget.linked += 1
-        budget.links.append((dst, src, mode))
-        return "link"
-    except OSError:
-        pass
-    if budget.copied + size > budget.limit:
-        raise DataCopyRefused(
-            f"{src.name}: providing it would copy {(budget.copied + size) / 1e6:,.0f} MB of input "
-            f"data (limit {budget.limit / 1e6:,.0f} MB, data_copy_limit_mb) because a hard link "
-            "is not possible here. Never copy the user's dataset: declare it in place "
-            "(`wf data add <path>`) and read it with analysis.datasources.source_path(), or put "
-            "the paper on an NTFS volume.")
-    import shutil
-    shutil.copy2(src, dst)
-    budget.copied += size
-    return "copy"
-
-
 def _pid_alive(pid: int) -> bool:
     import os
     import sys
@@ -221,13 +163,177 @@ def _rmtree(path: Path) -> None:
     shutil.rmtree(path, onerror=onerror)
 
 
-def cleanup_stale(project: Path, legacy_age_hours: float = 6.0) -> list[tuple[str, int]]:
-    """Remove sandboxes left by interrupted runs: this paper's .wf/repro/sandboxes/* and
-    engine-managed medpaper_repro_* folders (<= 1.12) in the system temp older than
-    `legacy_age_hours`. -> [(path, bytes freed)]."""
+class DataCopyRefused(Exception):
+    """Providing an input would copy more data than data_copy_limit_mb allows."""
+
+
+class Budget:
+    """1.14.0 (D): inputs reach the sandbox as copies within data_copy_limit_mb, never as hard
+    links (a hard link is the same file: a script writing the sandbox path would change the
+    original). Raw data is read in place through analysis.datasources.source_path()."""
+
+    def __init__(self, limit: int):
+        self.limit, self.copied, self.linked = int(limit), 0, 0
+
+
+def unlink_links(budget: Budget) -> None:
+    """Kept for callers of 1.13: there are no links to remove any more."""
+    return None
+
+
+def provide(src: Path, dst: Path, budget: Budget, *, prefer_copy: bool = False) -> str:
+    """Copy `src` to `dst` within the budget, else raise DataCopyRefused (never a link)."""
+    import shutil
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    size = src.stat().st_size
+    if budget.copied + size > budget.limit:
+        raise DataCopyRefused(
+            f"{src.name}: providing it to the sandbox would copy "
+            f"{(budget.copied + size) / 1e6:,.0f} MB of input data (limit "
+            f"{budget.limit / 1e6:,.0f} MB, data_copy_limit_mb). Never copy the user's dataset "
+            "and never link it: declare it in place (`wf data add <path>`) and read it with "
+            "analysis.datasources.source_path() (R: medpaper_source_path()); derived products "
+            "that large belong in a declared source too.")
+    shutil.copyfile(src, dst)  # contents only: the original's attributes/ACLs are never touched
+    budget.copied += size
+    return "copy"
+
+
+# ---------------------------------------------------------------------------
+# 1.14.0 (D): data integrity around a run - every data source and every in-place input
+# ---------------------------------------------------------------------------
+def integrity_snapshot(project: Path, extra: list[Path] | None = None) -> dict[str, dict]:
+    """{label: {path, size, mtime_ns, sha256}} of every declared data-source file plus the
+    paper inputs given in `extra` (size + mtime + cached sha256)."""
+    from . import datasources
+    project = Path(project)
+    out: dict[str, dict] = {}
+    items = list(datasources.files(project))
+    items += [(Path(p).relative_to(project).as_posix() if _inside(p, project) else str(p), Path(p))
+              for p in (extra or [])]
+    for label, path in items:
+        try:
+            st = path.stat()
+            out[label] = {"path": str(path), "size": st.st_size, "mtime_ns": st.st_mtime_ns,
+                          "sha256": datasources.cached_sha256(project, path)}
+        except OSError:
+            out[label] = {"path": str(path), "missing": True}
+    return out
+
+
+def _inside(p, root) -> bool:
+    try:
+        Path(p).resolve().relative_to(Path(root).resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def integrity_changes(before: dict[str, dict]) -> list[str]:
+    """Labels whose content changed (or that vanished/appeared) since `before`; a full hash
+    only when size or mtime differ."""
+    from . import datasources
+    changed = []
+    for label, rec in sorted(before.items()):
+        path = Path(rec["path"])
+        try:
+            st = path.stat()
+        except OSError:
+            if not rec.get("missing"):
+                changed.append(f"{label} (deleted)")
+            continue
+        if rec.get("missing"):
+            changed.append(f"{label} (created)")
+            continue
+        if st.st_size == rec["size"] and st.st_mtime_ns == rec["mtime_ns"]:
+            continue
+        if datasources._raw_sha(path) != rec["sha256"]:
+            changed.append(label)
+    return changed
+
+
+# ---------------------------------------------------------------------------
+# 1.14.0 (D): sandbox ownership and cleanup
+# ---------------------------------------------------------------------------
+MARKER = ".medpaper_sandbox.json"
+LEGACY_AGE_HOURS = 12.0
+
+
+def write_marker(sandbox: Path, project: Path) -> None:
+    import os
+    import socket
+    from datetime import datetime, timezone
+    (Path(sandbox) / MARKER).write_text(json.dumps({
+        "paper": str(Path(project).resolve()), "pid": os.getpid(), "host": socket.gethostname(),
+        "started_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}),
+        encoding="utf-8")
+
+
+def _process_texts() -> list[str] | None:
+    """Command lines (and cwd where readable) of running processes; None when unknown."""
+    import os
+    import subprocess
+    import sys
+    if sys.platform == "win32":
+        try:
+            done = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                 "Get-CimInstance Win32_Process | ForEach-Object { $_.CommandLine }"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return [ln for ln in done.stdout.splitlines() if ln.strip()] if done.returncode == 0 else None
+    out = []
+    proc = Path("/proc")
+    if not proc.is_dir():
+        return None
+    for d in proc.iterdir():
+        if not d.name.isdigit():
+            continue
+        try:
+            out.append((d / "cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", "replace"))
+            out.append(os.readlink(d / "cwd"))
+        except OSError:
+            continue
+    return out
+
+
+def _referenced(d: Path, texts: list[str] | None) -> bool:
+    if texts is None:
+        return True  # cannot tell: keep it
+    key = str(d).casefold()
+    return any(key in t.casefold() for t in texts)
+
+
+def _fresh_lock(d: Path, hours: float) -> bool:
+    import time
+    for p in d.glob("*.lock"):
+        try:
+            if time.time() - p.stat().st_mtime < hours * 3600:
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def cleanup_stale(project: Path, legacy_age_hours: float = LEGACY_AGE_HOURS
+                  ) -> tuple[list[tuple[str, int]], list[str]]:
+    """Remove sandboxes of interrupted runs -> (removed [(path, bytes)], kept [reason]).
+
+    A sandbox with an owner marker is removed only when it belongs to this paper, its process
+    (same host) is no longer alive and this paper's run lock is not held by it. A folder
+    without a marker (<= 1.13) is removed only when older than `legacy_age_hours`, no running
+    process references it (command line / cwd) and it holds no fresh lock; otherwise it is
+    listed for the user. Another paper's sandbox is never touched. This paper's own unmarked
+    1.13 sandboxes (.wf/repro/sandboxes/run_*) are removed: the caller holds the paper's lock."""
+    import socket
     import tempfile
     import time
-    out: list[tuple[str, int]] = []
+    project = Path(project).resolve()
+    removed: list[tuple[str, int]] = []
+    kept: list[str] = []
+    texts: list[str] | None = None
+    texts_read = False
 
     def size(d: Path) -> int:
         total = 0
@@ -238,23 +344,46 @@ def cleanup_stale(project: Path, legacy_age_hours: float = 6.0) -> list[tuple[st
             except OSError:
                 pass
         return total
-    root = Path(project) / SANDBOX_DIR
+
+    def consider(d: Path, local: bool) -> None:
+        nonlocal texts, texts_read
+        marker = d / MARKER
+        if local and not marker.is_file():
+            pass  # a 1.13 sandbox of this paper; this run holds the paper's lock
+        elif marker.is_file():
+            try:
+                info = json.loads(marker.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                info = {}
+            if str(info.get("paper", "")).casefold() != str(project).casefold():
+                kept.append(f"{d} (another paper's sandbox; left alone)")
+                return
+            if info.get("host") != socket.gethostname() or _pid_alive(int(info.get("pid", 0) or 0)):
+                kept.append(f"{d} (its run may still be active)")
+                return
+        else:
+            try:
+                old = time.time() - d.stat().st_mtime > legacy_age_hours * 3600
+            except OSError:
+                return
+            if not texts_read:
+                texts, texts_read = _process_texts(), True
+            if not old or _fresh_lock(d, legacy_age_hours) or _referenced(d, texts):
+                kept.append(f"{d} (no owner marker; younger than {legacy_age_hours:g} h, locked "
+                            "or used by a running process - delete it yourself when sure)")
+                return
+        n = size(d)
+        _rmtree(d)
+        removed.append((str(d), n))
+
+    root = project / SANDBOX_DIR
     for d in sorted(root.glob("run_*")) if root.is_dir() else []:
         if d.is_dir():
-            n = size(d)
-            _rmtree(d)
-            out.append((str(d), n))
-    tmp = Path(tempfile.gettempdir())
-    for d in sorted(tmp.glob("medpaper_repro_*")):
-        try:
-            old = d.is_dir() and time.time() - d.stat().st_mtime > legacy_age_hours * 3600
-        except OSError:
-            old = False
-        if old:
-            n = size(d)
-            _rmtree(d)
-            out.append((str(d), n))
-    return out
+            consider(d, True)
+    for d in sorted(Path(tempfile.gettempdir()).glob("medpaper_repro_*")):
+        if d.is_dir():
+            consider(d, False)
+    return removed, kept
 
 
 def analysis_scripts(project: Path) -> list[Path]:

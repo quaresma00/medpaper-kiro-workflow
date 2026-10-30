@@ -414,16 +414,16 @@ def run_g2(tmp: Path, record, section) -> None:
     _w(stale, "x.bin", "x" * 100)
     legacy = Path(tempfile.gettempdir()) / "medpaper_repro_selftest_legacy"
     _w(legacy, "y.bin", "y")
-    old = time.time() - 7 * 3600
+    old = time.time() - 13 * 3600  # 1.14.0: unmarked temp folders only after 12 h
     os.utime(legacy, (old, old))
     r1 = _run([*RP, "run", "--project", P], cwd=tmp)
     r = rep()
     sb = r.get("sandbox", {})
     inputs = [i["path"] for i in r.get("inputs", [])]
-    record("G2 reproduce: declared data read in place, in-paper data hard-linked, 0 bytes of "
-           "data copied, sandbox inside the paper and deleted after the run",
+    record("G2 reproduce: declared data read in place, in-paper data copied within the budget "
+           "(1.14.0: never hard-linked), sandbox inside the paper and deleted after the run",
            all(x.returncode == 0 for x in rs) and r1.returncode == 0 and r.get("all_match")
-           and sb.get("data_bytes_copied") == 0 and sb.get("data_files_linked", 0) >= 1
+           and sb.get("data_bytes_copied", 0) > 0 and sb.get("data_files_linked") == 0
            and sb.get("data_sources_in_place") == 2 and "datasource:src/big.csv" in inputs
            and "02_data/raw/small.csv" in inputs
            and not any((P / rp.SANDBOX_DIR).iterdir()), _out(r1)[-300:])

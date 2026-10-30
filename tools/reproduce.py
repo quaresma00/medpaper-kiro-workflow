@@ -12,13 +12,16 @@ results in <paper>/.wf/repro/rerun/ as evidence and writes 03_analysis/reproduci
 Acquisition is never re-run. `check` runs the analysis_reproduces gate logic and prints the
 cheapest next command. Exit 0 = identical, 2 = not reproduced, 1 = refused.
 
-1.13.0: the sandbox is <paper>/.wf/repro/sandboxes/run_*/ (one run per paper, lock file). Only
-scripts and configs are copied; data inputs inside the paper are hard-linked (zero bytes) and
-declared data sources are read in place, read-only, through .wf/data_sources.json. Copying more
-than data_copy_limit_mb (default 200 MB) of input data is refused. The sandbox is deleted after
-the run (kept only with --keep-sandbox) and leftovers of interrupted runs - including old
-medpaper_repro_* folders in the system temp - are removed by the next run. Logs: one file per
-command in .wf/logs/ (reproduce.log, reproduce_scripts.log), size-capped.
+1.13.0: the sandbox is <paper>/.wf/repro/sandboxes/run_*/ (one run per paper, lock file).
+1.14.0: scripts, configs and in-paper inputs are copied (never hard-linked: a link is the same
+file, so a script writing the sandbox path would change the original); declared data sources
+are read in place, read-only, through .wf/data_sources.json. Copying more than
+data_copy_limit_mb (default 200 MB) is refused. Every data source and in-place input is
+checked before and after the run (size + mtime + cached sha256; a full hash when they differ);
+a change is CRITICAL and invalidates the run. Each sandbox carries an owner marker (paper, pid,
+host, start); the next run removes only this paper's sandboxes whose process is gone, and
+unmarked medpaper_repro_* folders in the system temp only when older than 12 h and referenced
+by no running process - others are listed. Logs: one file per command in .wf/logs/.
 
 1.9.1: with a passing proof whose recorded hashes (scripts, manifest, data, tolerance, results,
 retained re-run, the engine helpers the paper uses) all still match, `run` executes nothing and
@@ -69,10 +72,12 @@ def cmd_run(args) -> int:
         print(f"reproduce: refused: {busy}")
         return 1
     try:
-        freed = rp.cleanup_stale(paper)
+        freed, kept = rp.cleanup_stale(paper)
         if freed:
             print(f"cleaned {len(freed)} leftover sandbox(es) of interrupted runs "
                   f"({sum(n for _, n in freed) / 1e6:,.0f} MB freed)")
+        for why in kept[:5]:
+            print(f"left in place: {why}")
         return _run(args, paper, timeout)
     finally:
         rp.release_lock(paper)
@@ -152,6 +157,7 @@ def _run(args, paper: Path, timeout: float) -> int:
     sys.stdout.flush()
     sandbox_root.mkdir(parents=True, exist_ok=True)
     sandbox = Path(tempfile.mkdtemp(prefix="run_", dir=sandbox_root)).resolve()
+    rp.write_marker(sandbox, paper)  # 1.14.0 (D): owner marker for safe cleanup
     budget = rp.Budget(datasources.copy_limit_bytes(paper))
     try:
         return _execute(args, paper, sandbox, budget, scripts, order_source, previous, scoped,
@@ -160,7 +166,6 @@ def _run(args, paper: Path, timeout: float) -> int:
         print(f"reproduce: refused: {exc}")
         return 1
     finally:
-        rp.unlink_links(budget)
         if args.keep_sandbox:
             print(f"sandbox kept: {sandbox}")
         else:
@@ -172,6 +177,9 @@ def _execute(args, paper, sandbox, budget, scripts, order_source, previous, scop
     started = _now()
     engine_hashes = rp.engine_inputs(paper)
     before = runner.tree_snapshot(paper, rp.SNAPSHOT_EXCLUDE)
+    # 1.14.0 (D): every data source and every in-place paper input is checked before and after.
+    guard = rp.integrity_snapshot(paper, [paper / r for r in rp.sandbox_inputs(paper)
+                                          if r.startswith("02_data/")])
     inputs = []
     for rel in rp.sandbox_inputs(paper):
         if rel.startswith(rp.DATASOURCE_PREFIX):
@@ -228,8 +236,8 @@ def _execute(args, paper, sandbox, budget, scripts, order_source, previous, scop
         for o in carried:
             if (paper / o).is_file():
                 shutil.copy2(paper / o, sandbox / o)
-    print(f"sandbox {sandbox}: {budget.linked} data file(s) hard-linked, "
-          f"{budget.copied / 1e6:,.1f} MB copied; declared data sources read in place")
+    print(f"sandbox {sandbox}: {budget.copied / 1e6:,.1f} MB of paper inputs copied (no "
+          "links); declared data sources read in place")
 
     prev_rows = {r.get("path"): r for r in (previous or {}).get("scripts", [])
                  if isinstance(r, dict)}
@@ -291,11 +299,16 @@ def _execute(args, paper, sandbox, budget, scripts, order_source, previous, scop
     os.replace(rerun_new, rerun)
 
     entries, within = rp.compare(paper, rerun, tols)
+    damaged = rp.integrity_changes(guard)
+    for label in damaged:
+        print(f"CRITICAL: a data source or in-place input changed during the run: {label} - "
+              "the run is invalid; restore the file from its origin and find the script that "
+              "wrote it (data are read-only)")
     after = runner.tree_snapshot(paper, rp.SNAPSHOT_EXCLUDE)
     # 1.13.0: only analysis inputs and results can invalidate a run; notes, documentation and
     # manuscript edits meanwhile are recorded, not fatal.
     changes, side_edits = rp.split_paper_changes(runner.diff_snapshots(before, after))
-    all_match = (failed is None and not changes and
+    all_match = (failed is None and not changes and not damaged and
                  all(e["status"] in ("match", "not_rerun_acquisition") for e in entries))
     tp = paper / rp.TOLERANCE_REL
     report = {
@@ -320,6 +333,7 @@ def _execute(args, paper, sandbox, budget, scripts, order_source, previous, scop
                                                  if i["path"].startswith(rp.DATASOURCE_PREFIX))},
         "scripts": script_rows,
         "failed_script": failed,
+        "data_integrity": {"ok": not damaged, "checked": len(guard), "changed": damaged[:50]},
         "results": entries,
         "within_tolerance": within,
         "paper_changes": changes[:50],
