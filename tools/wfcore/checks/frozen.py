@@ -175,6 +175,16 @@ def variant_preserves_science(ctx: Ctx) -> Result:
         return Result(True, "variant_preserves_science",
                       f"no numbers, citations or artifact references lost in adaptation"
                       + (f" ({words})" if words else ""))
+    meaning_problems = scifreeze.variant_meaning(ctx.project)
+    if meaning_problems:
+        # 1.14.0 (A): a meaning-bearing rewording needs a per-pair verdict; a trim
+        # authorisation never covers it.
+        return Result(False, "variant_preserves_science",
+                      "; ".join(meaning_problems[:4]),
+                      ["Restore the frozen wording, or have the read-only reviewer judge the "
+                       "pairs in the bundle named above (or the author: rework.py "
+                       "meaning-decide --context variant --pair P01 --verdict unchanged "
+                       "--words \"...\"). 'meaning changed' is science: open a revision round."])
     # A deliberate, user-authorised cut is legitimate; an unrecorded one is not.
     rec = ctx.state.decision("journal_trim_authorised")
     if rec and str(rec.get("value", "")).strip() == "YES":

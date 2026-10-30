@@ -106,6 +106,11 @@ def compare(project: Path, original: Path, copy: Path) -> list[str]:
             problems.append(f"{copy.name}: numbers added that no results JSON holds: "
                             + ", ".join(untraced)[:160])
         problems += [f"{copy.name}: {p}" for p in ratio_problems(after)]
+    # 1.14.0 (A): an author's final edit that keeps the numbers can still change the meaning.
+    from . import meaning
+    pairs = meaning.pairs_for(before, after, f"{DIR}/{copy.name}",
+                              meaning.dictionary_terms(project), line_mode=True)
+    problems += [f"{copy.name}: {p}" for p in meaning.gate(project, "final", pairs)]
     fb, fa = presentation.text_facts(before), presentation.text_facts(after)
     new_refs = Counter(fa["artifacts"]) - Counter(fb["artifacts"])
     unknown = [a for a in new_refs if a not in set(fb["artifacts"])]

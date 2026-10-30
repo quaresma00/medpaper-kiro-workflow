@@ -73,7 +73,8 @@ PY_ASSIGN_RE = re.compile(r"\b(\w+)\s*=\s*(?:Path\()?r?[\"']([^\"'\r\n]+)[\"']")
 # logs/, review_bundle/<round>/report.md, writer_bundle/, engine_fork/).
 _ENGINE_STATE_NAMES = ("state.json", "progress.md", "review_rounds.json", "check_receipts.json",
                        "data_sources.json", "hash_cache.json", "final_copy.json",
-                       "presentation_deltas.json", "review_coverage.json", "reference_live.json")
+                       "presentation_deltas.json", "review_coverage.json", "reference_live.json",
+                       "meaning_verdicts.json")
 ENGINE_STATE = frozenset(os.path.normcase(f".wf/{n}").replace("\\", "/")
                          for n in _ENGINE_STATE_NAMES)
 ENGINE_STATE_DIRS = tuple(os.path.normcase(d).replace("\\", "/")

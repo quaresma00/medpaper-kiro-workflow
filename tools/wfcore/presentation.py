@@ -17,6 +17,11 @@ Now a post-freeze revision item is classified when it is checked (1.13.0 rule, c
                      freezes record a presentation delta instead of being invalidated, no new
                      review round and no re-confirmation.
 
+1.14.0 (A): a third class between them - MEANING_CHECK (wfcore/meaning.py): numbers unchanged
+but negation, causal/association, hedging, direction, limitation or group/time wording changed
+in an aligned paragraph. Never a rewind by itself; a per-pair reviewer/author verdict decides
+('meaning changed' -> scientific). The labels shown are SAFE / MEANING_CHECK / SCIENCE.
+
 Facts are what review certified: numbers (sign-aware, separator/minus/spacing-insensitive),
 citation keys, figure/table references, table cell values, and for figures the data behind
 them (sidecar source hashes, population, numbers drawn in the figure) - not styling.
@@ -165,7 +170,7 @@ def cited_numbers(text: str) -> set[str]:
     return out
 
 
-ORDER_KEYS = ("seq",)
+ORDER_KEYS = ("seq", "text")  # 1.14.0: "text" feeds the meaning check, never fact identity
 
 
 def same_facts(a: dict | None, b: dict | None) -> bool:
@@ -317,9 +322,24 @@ def identity(rel: str) -> str:
     return rel
 
 
-def facts(project: Path, rel: str) -> dict | None:
+def reviewed_text(project: Path, rel: str) -> str:
+    """The text the meaning check compares (registered administrative facts removed)."""
+    path = Path(project) / rel
+    return strip_admin(path.read_text(encoding="utf-8", errors="replace"),
+                       admin_strings(project), rel)
+
+
+def facts(project: Path, rel: str, with_text: bool = False) -> dict | None:
     """Facts of one paper file, or None when the file carries no reviewable facts itself
-    (a build script is judged by what it renders)."""
+    (a build script is judged by what it renders). 1.14.0: `with_text` keeps the Markdown
+    text too (rework baselines, presentation-layer freeze), for the meaning check."""
+    out = _facts(project, rel)
+    if with_text and out is not None and rel.endswith(".md") and (Path(project) / rel).is_file():
+        out["text"] = reviewed_text(project, rel)
+    return out
+
+
+def _facts(project: Path, rel: str) -> dict | None:
     project = Path(project)
     path = project / rel
     if not path.is_file():
@@ -354,7 +374,7 @@ def in_scope(rel: str) -> bool:
     return rel.startswith(FACT_FILES)
 
 
-def snapshot_facts(project: Path) -> dict[str, dict]:
+def snapshot_facts(project: Path, with_text: bool = False) -> dict[str, dict]:
     """{identity: facts} for every reviewable file (taken when a post-freeze round opens)."""
     project = Path(project)
     out: dict[str, dict] = {}
@@ -368,7 +388,7 @@ def snapshot_facts(project: Path) -> dict[str, dict]:
             rel = path.relative_to(project).as_posix()
             if not in_scope(rel):
                 continue
-            f = facts(project, rel)
+            f = facts(project, rel, with_text)
             if f is not None:
                 out.setdefault(identity(rel), f)
     return out
@@ -408,6 +428,18 @@ def classify(project: Path, before: dict[str, dict], changed: list[str]) -> dict
     project = Path(project)
     reasons, checked, added, deleted = [], [], [], []
     index = None
+    from . import meaning
+    terms = meaning.dictionary_terms(project)
+    pairs: list[dict] = []
+    from . import journalspec
+    aliases = journalspec.project_aliases(project)
+
+    def meaning_pairs(rel: str, old: dict | None, new_text: str) -> None:
+        # 1.14.0 (A): wording that keeps every number can still change the science.
+        if rel.endswith(".md") and old:
+            legacy = old.get("text") is None  # baseline taken before 1.14.0: reading order only
+            pairs.extend(meaning.pairs_for(old.get("text"), new_text, rel, terms, old.get("seq"),
+                                           new_seq=token_seq(new_text, aliases) if legacy else None))
     for rel in sorted(set(changed)):
         if science_source(rel):
             reasons.append(f"{rel}: analysis code, data, manifest or results changed")
@@ -426,7 +458,10 @@ def classify(project: Path, before: dict[str, dict], changed: list[str]) -> dict
             if key.startswith("figure:") and facts(project, f"05_figures/qc/{key[7:]}.artist.json"):
                 continue
             deleted += [{"file": rel, "number": n} for n in (old.get("numbers") or [])]
+            meaning_pairs(rel, old, "")
             continue
+        if rel.endswith(".md"):
+            meaning_pairs(rel, old, reviewed_text(project, rel))
         old = old or {}
         for k, why in (("sources", "the data behind the figure changed"),
                        ("population", "the population drawn in the figure changed")):
@@ -466,8 +501,10 @@ def classify(project: Path, before: dict[str, dict], changed: list[str]) -> dict
             for prob in ratio_problems(text):
                 if any(a["number"] in prob for a in mine):
                     reasons.append(f"{rel}: inconsistent proportion {prob}")
-    return {"class": "scientific" if reasons else "presentation", "reasons": reasons,
-            "checked": checked, "added_numbers": added, "deleted_numbers": deleted, "at": _now()}
+    cls = "scientific" if reasons else ("meaning_check" if pairs else "presentation")
+    return {"class": cls, "label": meaning.CLASS_LABEL[cls], "reasons": reasons,
+            "checked": checked, "added_numbers": added, "deleted_numbers": deleted,
+            "meaning_pairs": meaning.number(pairs), "at": _now()}
 
 
 def change_summary(verdict: dict) -> list[str]:

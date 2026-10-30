@@ -200,3 +200,24 @@ Resource 2). Only the deterministic checks re-run (provenance, denominators, cit
 new review round, no re-confirmation - the S24 '我确认这一版' covers them.
 `rework.py preview` shows the verdict and the added numbers before anything is recorded.
 
+## Meaning check (1.14.0)
+
+Three classes everywhere a post-freeze change is judged (rework check/preview, the journal
+copy `variant_preserves_science`, the author's final copy, the frozen presentation layer):
+SAFE (no meaning-bearing change), MEANING_CHECK, SCIENCE (above). Traceable numbers alone
+never prove a rewording harmless. MEANING_CHECK is detected on aligned old/new paragraphs:
+negation and its scope, association vs causal wording, hedging vs certainty, comparison
+direction and significance claims, limitations/caveats removed or weakened, and population,
+exposure, comparator, outcome or time-window terms (display-dictionary labels count as one
+term with their abbreviation). Synonyms, reordering, typos and punctuation stay SAFE.
+
+MEANING_CHECK never rewinds. `rework.py check` writes
+`.wf/review_bundle/meaning_<round>_<digest>/` (pairs.md: old/new paragraphs; results in words;
+a neutral narrow brief). Run the read-only `medpaper-reviewer` on that MANIFEST.md only; it
+writes one line per pair to the bundle's report.md (`P01: meaning unchanged` or `P01: meaning
+changed - <reason>`). Or the author decides: `rework.py meaning-decide --pair P01 --verdict
+unchanged|changed --words "<author's words>"` (`--context variant|final|freeze` outside a
+round). Verdicts are kept by pair hash in `.wf/meaning_verdicts.json`. The round cannot close
+while a pair has no verdict; 'meaning changed' routes to SCIENCE (S19 only with '我确认回退').
+A journal-trim authorisation never covers a meaning change.
+

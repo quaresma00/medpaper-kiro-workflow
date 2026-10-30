@@ -403,7 +403,7 @@ def _add_fact_baseline(project: Path, revision: dict) -> None:
     """Post-freeze rounds remember the reviewed facts so `check` can classify by content."""
     from wfcore import presentation, scifreeze
     if revision.get("review_stage") in POST_FREEZE_STAGES and scifreeze.is_frozen(project):
-        revision["fact_baseline"] = presentation.snapshot_facts(project)
+        revision["fact_baseline"] = presentation.snapshot_facts(project, with_text=True)
         # Frozen files already edited before the round opened cannot be compared with what
         # review saw; they are judged scientific (restore them, then open the round).
         _, drift, _ = scifreeze.verify_freeze(project)
@@ -457,6 +457,30 @@ def _classify_for_check(project: Path, pipe, state: State, path: Path, revision:
         verdict["reasons"] += [f"{rel}: edited after the freeze before this round opened "
                                "(cannot be compared with the reviewed text)" for rel in early]
         verdict["class"] = "scientific"
+    if verdict["class"] == "meaning_check":
+        # 1.14.0 (A): never a rewind by itself - a reviewer verdict (or the author) per pair.
+        from wfcore import meaning
+        context = revision["round_id"]
+        unresolved, changed_meaning = meaning.resolve(project, context, verdict["meaning_pairs"])
+        if changed_meaning:
+            verdict["reasons"] += [f"{p['file']} {p['id']}: meaning changed ({p.get('by')}): "
+                                   f"{p['reason'][:100]}" for p in changed_meaning]
+            verdict["class"] = "scientific"
+        elif unresolved:
+            revision["classification"] = verdict
+            _write_round(path, revision)
+            print(f"MEANING_CHECK: {len(verdict['meaning_pairs'])} wording change(s) may change "
+                  "the scientific meaning (no number changed). Nothing was rewound.")
+            for p in verdict["meaning_pairs"][:8]:
+                print(f"  {p['id']} {p['file']}: {', '.join(p['cues'][:3])}")
+            print(meaning.instructions(project, context, unresolved))
+            print("Then rerun rework.py check; the round cannot close before every pair has a verdict.")
+            return 2
+        else:
+            verdict["meaning_verified"] = len(verdict["meaning_pairs"])
+            verdict["class"] = "presentation"
+    verdict["label"] = {"presentation": "SAFE", "scientific": "SCIENCE"}.get(verdict["class"],
+                                                                             "MEANING_CHECK")
     revision["classification"] = verdict
     if verdict["class"] == "presentation":
         summary = "; ".join(i["request"][:120] for i in revision["items"])
@@ -473,6 +497,9 @@ def _classify_for_check(project: Path, pipe, state: State, path: Path, revision:
         print("changed: " + (", ".join(sorted(changed)) or "none"))
         for line in presentation.change_summary(verdict):
             print(line)
+        if verdict.get("meaning_verified"):
+            print(f"meaning check: {verdict['meaning_verified']} wording change(s) judged "
+                  "'meaning unchanged' (reviewer/author verdicts in .wf/meaning_verdicts.json)")
         print("Show the user this change summary (each added number with its source) when "
               "reporting the round.")
         return None
@@ -545,10 +572,15 @@ def _cmd_preview(project: Path, state: State) -> int:
         return 0
     changed = sorted(_changed_since_baseline(project, revision))
     verdict = presentation.classify(project, revision["fact_baseline"], changed)
-    print(f"PREVIEW {revision['round_id']}: {verdict['class'].upper()} "
-          f"({len(changed)} changed file(s), {len(verdict['checked'])} fact-checked); nothing recorded")
+    print(f"PREVIEW {revision['round_id']}: {verdict['label']} ({verdict['class']}; "
+          f"{len(changed)} changed file(s), {len(verdict['checked'])} fact-checked); nothing recorded")
     for reason in verdict["reasons"][:12]:
         print(f"  - {reason}")
+    for p in verdict.get("meaning_pairs", [])[:12]:
+        print(f"  ~ {p['id']} {p['file']}: {', '.join(p['cues'][:3])}")
+    if verdict["class"] == "meaning_check":
+        print("check would write a meaning-check bundle for the read-only reviewer (one verdict "
+              "per pair); no rewind unless a pair is judged 'meaning changed'")
     for line in presentation.change_summary(verdict):
         print(line)
     if verdict["class"] == "scientific" and revision["review_stage"] == "S24_package_human_review":
@@ -566,6 +598,27 @@ def _cmd_confirm_rewind(state: State, words: str) -> int:
     state.event("revision_rewind_confirmed", f"{revision['round_id']}: \"{words.strip()}\"")
     state.save()
     print(f"{revision['round_id']}: rewind to S19 authorised by the user; run rework.py check (or seal) again")
+    return 0
+
+
+def _cmd_meaning_decide(project: Path, state: State, pair_id: str | None, verdict: str | None,
+                        words: str, context: str | None = None) -> int:
+    """1.14.0 (A): the author's verdict on one meaning-check pair (instead of the reviewer)."""
+    from wfcore import meaning
+    if context:  # journal copy / final copy / presentation layer: the latest bundle's pairs
+        pairs, label = meaning.bundle_pairs(project, context), context
+    else:
+        _path, revision = _load_round(state)
+        pairs = (revision.get("classification") or {}).get("meaning_pairs") or []
+        label = revision["round_id"]
+    pair = next((p for p in pairs if p.get("id") == str(pair_id or "").upper()), None)
+    if pair is None or not verdict:
+        raise ValueError("meaning-decide needs --pair <id from the check output> and --verdict "
+                         "unchanged|changed; known pairs: " + ", ".join(p["id"] for p in pairs))
+    meaning.record_author(project, pair, verdict, words or "")
+    state.event("meaning_decided", f"{label} {pair['id']}: {verdict} (author)")
+    state.save()
+    print(f"{pair['id']}: meaning {verdict} (author); rerun rework.py check")
     return 0
 
 
@@ -941,6 +994,14 @@ def _cmd_close(args, state: State, pipe=None) -> int:
     if len(args.summary.strip()) < 40:
         raise ValueError("close summary must describe the completed round in at least 40 characters")
     project = state.project
+    cls = revision.get("classification") or {}
+    if cls.get("class") == "meaning_check":
+        from wfcore import meaning
+        unresolved, _changed = meaning.resolve(project, revision["round_id"],
+                                               cls.get("meaning_pairs") or [])
+        raise ValueError(f"cannot close: {len(unresolved)} meaning-check pair(s) without a "
+                         "verdict; get the reviewer's verdicts (or the author's: rework.py "
+                         "meaning-decide), then rerun rework.py check")
     if scoped.is_scoped(revision):
         pipe = pipe or _pipeline(state)
         checked = revision.get("validation", {})
@@ -1026,7 +1087,13 @@ def _main() -> int:
     parser.add_argument("command", choices=["plan", "start", "batch", "seal", "check", "build",
                                             "refresh", "status", "mark", "close", "suspend",
                                             "resume", "progress", "layout", "preview",
-                                            "confirm-rewind"])
+                                            "confirm-rewind", "meaning-decide"])
+    parser.add_argument("--pair", help="meaning-decide: the pair id (P01) from rework.py check")
+    parser.add_argument("--verdict", choices=["unchanged", "changed"],
+                        help="meaning-decide: the author's verdict on that pair")
+    parser.add_argument("--context", choices=["variant", "final", "freeze"],
+                        help="meaning-decide outside a round: the journal copy, the author's "
+                             "final copy or the frozen presentation layer")
     parser.add_argument("--words", default="", help="confirm-rewind: the user's exact words")
     for opt in ("--words", "--why", "--rewind-words"):  # 1.12.0 (C1): expanded by fix_argv
         parser.add_argument(f"{opt}-file", help=f"UTF-8 file holding {opt}")
@@ -1112,6 +1179,9 @@ def _main() -> int:
             return _cmd_preview(project, state)
         if args.command == "confirm-rewind":
             return _cmd_confirm_rewind(state, args.words)
+        if args.command == "meaning-decide":
+            return _cmd_meaning_decide(project, state, args.pair, args.verdict, args.words,
+                                       args.context)
         if args.command == "check" and (args.wait or args.log) and not os.environ.get("MEDPAPER_WAIT_CHILD"):
             from wfcore import longrun
             return longrun.run_quiet([sys.executable, *sys.argv], args.log or (

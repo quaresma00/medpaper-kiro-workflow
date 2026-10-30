@@ -21,7 +21,9 @@ Details (presentation vs science, rework kinds, Word layout edits): `reference/s
    traceable to the results (show the user each with its source), deletions, reviewer-
    driven wording/structure, label numbers (Online Resource 2) - is presentation: checks
    only, no S19 return, no new round, this round's 我确认这一版 covers it. An S19 return
-   needs 我确认回退.
+   needs 我确认回退. 1.14.0: wording that may change meaning (negation, causal, hedging,
+   direction, limitation, group/time terms) is MEANING_CHECK: run `medpaper-reviewer` on
+   the printed meaning bundle only; 'meaning changed' is science.
 3. Close against the saved report; every F-numbered finding once; protected categories
    changed or `author`:
 ```

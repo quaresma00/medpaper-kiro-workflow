@@ -228,7 +228,7 @@ def build_freeze(project: Path) -> dict:
     for rel in payload["files"]:
         if rel in PRESENTATION_LAYER:
             payload["files"][rel]["layer"] = "presentation"
-            payload["files"][rel]["facts"] = presentation.facts(project, rel)
+            payload["files"][rel]["facts"] = presentation.facts(project, rel, with_text=True)
     # Bind the freeze to the S19 review ZIP the user released, so the gate can prove the frozen
     # text is the reviewed text (scientific_freeze_intact checks the decision rationale).
     # 1.8.1: bind to the latest subagent review round the user ended; legacy papers without
@@ -322,6 +322,15 @@ def verify_freeze(project: Path) -> tuple[bool, list[str], int]:
             if meta.get("layer") == "presentation" and meta.get("facts") is not None:
                 from . import presentation
                 if presentation.same_facts(presentation.facts(project, rel), meta["facts"]):
+                    # 1.14.0 (A): facts identical - is the meaning too?
+                    from . import meaning
+                    old = meta["facts"]
+                    pairs = meaning.pairs_for(
+                        old.get("text"), presentation.reviewed_text(project, rel), rel,
+                        meaning.dictionary_terms(project), old.get("seq"),
+                        new_seq=None if old.get("text") is not None else presentation.token_seq(
+                            presentation.reviewed_text(project, rel)))
+                    problems += meaning.gate(project, "freeze", pairs)
                     continue  # presentation layer: wording changed, facts identical
                 problems.append(f"{rel}: presentation-layer file changed its facts (numbers, "
                                 "citations or display references) after the freeze")
@@ -502,7 +511,7 @@ def rebind_variant(project: Path) -> dict:
     if not variant_exists(project):
         raise SystemExit(f"no journal variant in {VARIANT_DIR}/ to rebind")
     ok, problems, _ = variant_delta(project)
-    if not ok and not _trim_authorised(project):
+    if not ok and (variant_meaning(project) or not _trim_authorised(project)):
         raise SystemExit("refusing to rebind: the journal copy is missing re-approved science:\n  "
                          + "\n  ".join(problems[:8])
                          + "\n(a cut the user authorised is recorded with `wf decide "
@@ -602,4 +611,20 @@ def variant_delta(project: Path) -> tuple[bool, list[str], dict]:
                 problems.append(f"{name}: {field} dropped during journal adaptation: {items}")
         entry["words_delta"] = entry["words_after"] - entry["words_before"]
         summary[name] = entry
+    problems += variant_meaning(project)
     return not problems, problems, summary
+
+
+def variant_meaning(project: Path) -> list[str]:
+    """1.14.0 (A): a journal copy may tighten wording, never change its meaning unchecked.
+    These problems are never covered by journal_trim_authorised."""
+    from . import meaning
+    terms = meaning.dictionary_terms(project)
+    pairs: list[dict] = []
+    for name in ("full_manuscript.md", "supplementary_methods.md"):
+        src, var = project / SOURCE_DIR / name, project / VARIANT_DIR / name
+        if src.is_file() and var.is_file():
+            pairs += meaning.pairs_for(src.read_text(encoding="utf-8", errors="replace"),
+                                       var.read_text(encoding="utf-8", errors="replace"),
+                                       f"{VARIANT_DIR}/{name}", terms)
+    return meaning.gate(project, "variant", pairs)
