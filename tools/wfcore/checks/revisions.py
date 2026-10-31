@@ -49,7 +49,6 @@ def revision_rounds_closed(ctx: Ctx) -> Result:
         return Result(True, "revision_rounds_closed", "no revision rounds recorded")
     problems = []
     count = 0
-    latest_receipts: dict[str, tuple[str, str, str]] = {}
     rounds = []
     for path in sorted(directory.glob("R*.json")):
         count += 1
@@ -66,9 +65,6 @@ def revision_rounds_closed(ctx: Ctx) -> Result:
             problems.append(f"{path.name}: not a completed schema-1/2 revision round")
             continue
         rounds.append((path, revision))
-    # Scoped (schema-2) rounds also bind every file their checks certified. Only the newest
-    # completed round's set is compared: a later round re-certifies (or rebuilds) them.
-    latest_scoped = rounds[-1] if rounds and rounds[-1][1].get("schema_version") == 2 else None
     for path, revision in rounds:
         if revision.get("schema_version") == 2:
             proof = revision.get("validation", {})
@@ -93,23 +89,12 @@ def revision_rounds_closed(ctx: Ctx) -> Result:
                 if not rel or not expected:
                     problems.append(f"{path.name}/{item_id}: malformed changed-file proof")
                     continue
-                # A later completed revision may legitimately supersede the same source.
-                # Keep every old receipt as history, but compare the working tree only with
-                # the newest completed receipt for each path.
-                if not renewable(str(rel)):
-                    latest_receipts[str(rel)] = (path.name, str(item_id), receipt)
-    if latest_scoped:
-        path, revision = latest_scoped
-        val = revision.get("validation", {})
-        content = val.get("artifact_content", {})
-        for rel, expected in val.get("artifact_hashes", {}).items():
-            if not renewable(rel):
-                latest_receipts[rel] = (path.name, "scoped validation",
-                                        {"path": rel, "sha256": expected,
-                                         "content_sha256": content.get(rel)})
-        for rel in val.get("artifact_deleted", []):
-            latest_receipts[rel] = (path.name, "scoped validation",
-                                    {"path": rel, "sha256": DELETED, "deleted": True})
+    # 1.14.1 (B2): per file the LATEST credential across every closed round (items, the
+    # round's validation set, derived outputs the engine builders wrote during the round);
+    # older receipts stay as history. Before, only the newest round's validation set counted,
+    # so a file re-certified by an intermediate round was compared with an older receipt.
+    from ..revision import latest_receipts as _latest
+    latest_receipts = _latest(ctx.project, [(p.name, r) for p, r in rounds])
     # 1.9.0: every drifted file is listed at once (not the first few), and a credential holds
     # on visible content, so an identical rebuild with new container timestamps is not drift.
     missing, drifted, back = [], [], []

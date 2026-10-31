@@ -171,6 +171,7 @@ def _load(need_state: bool = True, warn_stderr: bool = True):
         st.load()
         st.migrate_pipeline(str(pipe.meta.get("version", "0")),
                             [stage.id for stage in pipe.stages], STAGE_ALIASES)
+        _refresh_adapters(pipe, st, proj)
         history_problems = overrides.validate_against_state(paper_over, st)
         if history_problems:
             raise SystemExit(
@@ -179,6 +180,22 @@ def _load(need_state: bool = True, warn_stderr: bool = True):
                 + "\nRestore the recorded override first, run `wf loop --to STAGE --why \"...\"`, "
                   "then change it while that stage is active.")
     return pipe, st, proj
+
+
+def _refresh_adapters(pipe, st, proj: Path) -> None:
+    """1.14.1 (P2): every wf command brings the paper's derived adapters (.kiro hooks and
+    steering) up to the engine release - one line and one event, no user action."""
+    try:
+        changed = adapters.refresh_paper(proj)
+    except Exception:  # noqa: BLE001 - adapters never block a paper command
+        return
+    if not changed:
+        return
+    version = pipe.meta.get("version")
+    print(f"[medpaper] Kiro adapters refreshed for engine {version}: {', '.join(changed)}",
+          file=sys.stderr)
+    st.event("adapters_refreshed", f"engine {version}: {', '.join(changed)}")
+    st.save()
 
 
 def _mark(pipe, st, stage) -> str:
@@ -303,9 +320,11 @@ def _record_user_files(pipe, proj: Path) -> None:
     info) are the user's, never orphans; they are listed once in .wf/user_files.json."""
     state_dir = proj / pipe.layout.get("state_dir", ".wf")
     skip = {pipe.layout.get("state_dir", ".wf"), ".kiro", ".git"}
+    foreign = paths.foreign_prefixes(proj)  # 1.14.1: older paper attempts stay theirs
     found = sorted(p.relative_to(proj).as_posix() for p in proj.rglob("*")
                    if p.is_file() and not set(p.relative_to(proj).parts[:1]) & skip
-                   and p.name != ".gitkeep")
+                   and p.name != ".gitkeep"
+                   and not p.relative_to(proj).as_posix().startswith(foreign))
     if found:
         state_dir.mkdir(parents=True, exist_ok=True)
         (state_dir / "user_files.json").write_text(
@@ -327,11 +346,52 @@ def _finish_paper(pipe, proj: Path, verb: str) -> None:
         here = paths._norm(Path.cwd()) == paths._norm(proj)
     except OSError:
         here = False
+    older = paths.nested_papers(proj)
+    if older:
+        # 1.14.1 (P1): mentioned once; never read, moved or resumed from here.
+        print("note: an older paper attempt in " + ", ".join(
+            p.relative_to(proj).as_posix() + "/" for p in older[:3])
+              + " is left untouched and isolated (the paper guard blocks it); this folder is "
+                "the paper")
     print(f"\nput your research idea in {proj.as_posix()}/00_input/, then:")
     print(f'  python "{paths.repo_root().as_posix()}/tools/wf.py" status')
     if not here:
-        print(f"\nopen this folder as the Kiro workspace (commands act on the workspace's paper "
-              f"only): {proj}")
+        print(f"\nthe user asked for this location explicitly; to work on it, open this folder "
+              f"as the Kiro workspace (commands act on the workspace's paper only): {proj}")
+
+
+def _archive_run(pipe, proj: Path) -> Path:
+    """1.14.1 (P1): a confirmed fresh restart keeps the old run in place. The state goes to
+    .wf_archive/<UTC>/wf_state/ (not '.wf', so the archive is never mistaken for a paper) and
+    every pipeline output file moves alongside it; the user's own files stay where they are."""
+    from datetime import datetime, timezone
+    import shutil
+    state_dir = pipe.layout.get("state_dir", ".wf")
+    dest = proj / paths.ARCHIVE_DIR / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    dest.mkdir(parents=True, exist_ok=False)
+    users = paths.user_files(proj)
+    shutil.move(str(proj / state_dir), str(dest / "wf_state"))
+    tops = {str(name) for name in list(pipe.layout.get("dirs", {})) + list(SUBDIRS)}
+    tops = {Path(t).parts[0] for t in tops if t and not t.startswith("00_input")}
+    tops.add(pipe.layout.get("temp_dir", "temp"))
+    foreign = paths.foreign_prefixes(proj)
+    for top in sorted(tops):
+        root = proj / top
+        if not root.is_dir():
+            continue
+        for p in sorted(root.rglob("*")):
+            rel = p.relative_to(proj).as_posix()
+            if not p.is_file() or p.name == ".gitkeep" or rel in users or rel.startswith(foreign):
+                continue
+            target = dest / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(p), str(target))
+    if users:
+        (proj / state_dir).mkdir(parents=True, exist_ok=True)
+        (proj / state_dir / "user_files.json").write_text(
+            json.dumps({"schema": 1, "files": sorted(users)[:500]}, indent=1,
+                       ensure_ascii=False) + "\n", encoding="utf-8")
+    return dest
 
 
 def _location_refusal(target: Path, source: str) -> tuple[Path | None, str | None]:
@@ -352,14 +412,32 @@ def cmd_init(args) -> int:
     target = Path(env) if env else Path.cwd()
     st = State(target.resolve(), pipe.layout.get("state_dir", ".wf"))
     if st.exists() and not args.force:
-        print(f"run state already exists at {st.file}")
-        print("keeping existing artifacts and state; use --force only to reset intentionally")
+        # 1.14.1 (P1): the opened folder is already this paper - resume it.
+        try:
+            cur = st.load().current
+        except (Exception, SystemExit):  # noqa: BLE001
+            cur = "?"
+        print(f"this folder is already a paper (current stage {cur}); resuming it - nothing "
+              "was reset")
+        print(f'next:  python "{paths.repo_root().as_posix()}/tools/wf.py" status')
+        print("A fresh restart in this folder (`wf init --force --yes`) archives the current run "
+              f"in place under {paths.ARCHIVE_DIR}/<UTC>/ and needs one explicit confirmation "
+              "from the user first.")
         return 0
     proj, why = _location_refusal(target, "MEDPAPER_PROJECT" if env else "wf init")
     if why:
         print(f"refusing to initialise: {why}")
         return 2
-    if not st.exists():
+    if st.exists():
+        if not getattr(args, "yes", False):
+            print("refusing to restart: this folder is already a paper. A fresh restart moves "
+                  f"the run state (.wf) and the pipeline's outputs into {paths.ARCHIVE_DIR}/<UTC>/ "
+                  "in this folder (nothing is deleted; the user's own files stay where they "
+                  "are). Ask the user once; only after an explicit yes run:  wf init --force --yes")
+            return 2
+        where = _archive_run(pipe, proj)
+        print(f"archived the previous run in place: {where.relative_to(proj).as_posix()}/")
+    else:
         _record_user_files(pipe, proj)
     _scaffold(pipe, proj)
     st = State(proj, pipe.layout.get("state_dir", ".wf"))
@@ -1054,10 +1132,13 @@ def cmd_clean(args) -> int:
     declared = set(declared) | paths.user_files(proj)
     tmp = pipe.layout.get("temp_dir", "temp")
     scratch, orphans = [], []
+    foreign = paths.foreign_prefixes(proj)  # 1.14.1: never touch an older attempt or the archive
     for p in proj.rglob("*"):
         if not p.is_file():
             continue
         rel = p.relative_to(proj).as_posix()
+        if rel.startswith(foreign):
+            continue
         if rel.startswith(f"{tmp}/"):
             if p.name != ".gitkeep":
                 scratch.append(rel)
@@ -1802,7 +1883,101 @@ def cmd_override(args) -> int:
     return 0
 
 
+USER_LIST_KEYS = ("report_dirs",)
+
+
+def _user_config_set_list(key: str, values: list[str]) -> Path:
+    """Rewrite one top-level list key of ~/.medpaper/config.toml, keeping every other line."""
+    import tomllib
+    cfg_path = paths.user_home() / "config.toml"
+    text = cfg_path.read_text(encoding="utf-8") if cfg_path.is_file() else ""
+    line = f"{key} = [" + ", ".join(json.dumps(v, ensure_ascii=False) for v in values) + "]"
+    pat = re.compile(rf"(?m)^{re.escape(key)}\s*=\s*\[[^\]]*\]\s*$")
+    if pat.search(text):
+        new = pat.sub(lambda _: line, text, count=1)
+    else:
+        # top-level keys must precede the first [table]
+        m = re.search(r"(?m)^\[", text)
+        new = (text[:m.start()] + line + "\n" + text[m.start():]) if m else \
+            (text.rstrip("\n") + ("\n" if text.strip() else "") + line + "\n")
+    tomllib.loads(new)  # never write a config the engine cannot read back
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg_path.write_text(new, encoding="utf-8")
+    return cfg_path
+
+
+def report_dir_refusal(d: Path) -> str | None:
+    """1.14.1 (P2): why a folder cannot be a report folder (engine, papers, drive roots)."""
+    if d.parent == d:
+        return f"{d} is a drive root"
+    try:
+        if paths._norm(d) == paths._norm(Path.home()):
+            return f"{d} is your home folder"
+    except RuntimeError:
+        pass
+    if paths.in_engine(d):
+        return f"{d} is inside, equal to or contains the medpaper engine"
+    if paths._find_upwards(d) is not None:
+        return f"{d} is a paper or lies inside one"
+    try:
+        root = paths.papers_root()[0]
+        if paths.within(d, root) or paths.within(root, d):
+            return f"{d} is inside or contains the central papers root"
+    except SystemExit:
+        pass
+    if paths.nested_papers(d):
+        return f"{d} holds papers"
+    return None
+
+
+def cmd_config_user(args) -> int:
+    """`wf config --user list | get KEY | add KEY DIR | remove KEY DIR` (user level)."""
+    cfg = paths.user_config()
+    if args.action == "list":
+        for k in sorted(cfg):
+            print(f"{k:<28} {cfg[k]}")
+        return 0
+    if args.key not in USER_LIST_KEYS:
+        print(f"unknown user-level key '{args.key}'; known: {', '.join(USER_LIST_KEYS)}")
+        return 2
+    current = [str(x) for x in cfg.get(args.key, []) if isinstance(x, str)]
+    if args.action == "get":
+        print("\n".join(current) if current else "<unset>")
+        return 0
+    if args.action not in ("add", "remove") or not args.value:
+        print("use: wf config --user add|remove report_dirs <folder>")
+        return 2
+    d = Path(args.value).expanduser()
+    d = (d if d.is_absolute() else Path.cwd() / d).resolve()
+    if args.action == "add":
+        why = report_dir_refusal(d)
+        if why:
+            print(f"refusing report folder: {why}")
+            return 2
+        if any(paths._norm(x) == paths._norm(d) for x in current):
+            print(f"{d} is already a report folder")
+            return 0
+        current.append(str(d))
+    else:
+        current = [x for x in current if paths._norm(x) != paths._norm(d)]
+    where = _user_config_set_list(args.key, current)
+    print(f"{args.key} = {current}   (user config {where})")
+    print("paper sessions may write .md/.txt files there (never other file types or papers)")
+    return 0
+
+
 def cmd_config(args) -> int:
+    if getattr(args, "user", False):
+        if args.action in USER_LIST_KEYS:  # `wf config --user report_dirs add DIR`
+            args.action, args.key = (args.key or "get"), args.action
+        if args.action not in ("list", "get", "add", "remove"):
+            print("use: wf config --user list | get KEY | report_dirs add|remove <folder>")
+            return 2
+        return cmd_config_user(args)
+    if args.action not in ("list", "get", "set"):
+        print("use: wf config list | get KEY | set KEY VALUE  (user level: wf config --user "
+              "report_dirs add <folder>)")
+        return 2
     pipe, st, _ = _load()
     if args.action == "list":
         for k, v in sorted(pipe.targets.items()):
@@ -1849,8 +2024,12 @@ def build_parser() -> argparse.ArgumentParser:
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("init", help="initialise the working directory (the Kiro workspace the "
-                                    "user opened) as a paper, in place")
-    p.add_argument("--force", action="store_true")
+                                    "user opened) as a paper, in place; an existing paper here "
+                                    "is resumed")
+    p.add_argument("--force", action="store_true",
+                   help="fresh restart of an existing paper here (needs --yes after the user "
+                        "confirmed; the old run is archived in place under .wf_archive/)")
+    p.add_argument("--yes", action="store_true", help="the user confirmed the fresh restart")
     p.set_defaults(fn=cmd_init)
 
     p = sub.add_parser("new", help="start a paper in place (default); --root DIR or --central "
@@ -1860,6 +2039,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--central", action="store_true",
                    help="create it under the central papers root (only on explicit request)")
     p.add_argument("--force", action="store_true")
+    p.add_argument("--yes", action="store_true")
     p.set_defaults(fn=cmd_new)
 
     p = sub.add_parser("use", help="say where a paper is (there is no global selection)")
@@ -1968,8 +2148,13 @@ def build_parser() -> argparse.ArgumentParser:
                    help="init only: replace an existing file with the blank commented template")
     p.set_defaults(fn=cmd_override)
 
-    p = sub.add_parser("config", help="view or override per-paper numeric/string targets")
-    p.add_argument("action", choices=["list", "get", "set"])
+    p = sub.add_parser("config", help="view or override per-paper numeric/string targets; "
+                                      "--user for user-level keys (report_dirs)")
+    p.add_argument("--user", action="store_true",
+                   help="user-level config (~/.medpaper/config.toml): list | get KEY | "
+                        "add report_dirs DIR | remove report_dirs DIR")
+    p.add_argument("action", help="list | get | set (paper); --user: list | get | add | remove, "
+                                  "also as `--user report_dirs add DIR`")
     p.add_argument("key", nargs="?")
     p.add_argument("value", nargs="?")
     p.set_defaults(fn=cmd_config)
@@ -2027,9 +2212,10 @@ def main(argv: list[str] | None = None) -> int:
     # 1.12.0 (C1): --why-file/--why-b64 and mis-decoded Chinese text are fixed before parsing.
     argv = argtext.fix_argv(sys.argv[1:] if argv is None else argv)
     args = ap.parse_args(argv)
-    if args.cmd == "config" and args.action == "set" and (not args.key or args.value is None):
+    if args.cmd == "config" and not args.user and args.action == "set" and (
+            not args.key or args.value is None):
         ap.error("config set needs KEY and VALUE")
-    if args.cmd == "config" and args.action == "get" and not args.key:
+    if args.cmd == "config" and not args.user and args.action == "get" and not args.key:
         ap.error("config get needs KEY")
     from . import integrity, logs
     if getattr(args, "wait", False) and not os.environ.get("MEDPAPER_WAIT_CHILD"):

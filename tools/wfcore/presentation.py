@@ -150,6 +150,8 @@ def token_seq(text: str, aliases: dict | None = None) -> list[str]:
     if aliases:
         from . import journalspec
         text = journalspec.expand_aliases(text, aliases)
+    from . import nonfacts  # 1.14.1 (B6): no version/URL/DOI/identifier digits in the diff
+    text = nonfacts.strip(text)
     text = ART_RE.sub(" ", CITE_RE.sub(" ", text))
     text = THOUSANDS_RE.sub("", strip_non_facts(text))
     return [t.replace("\u2212", "-").casefold() for t in TOKEN_RE.findall(text)]

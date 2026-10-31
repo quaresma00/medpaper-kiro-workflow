@@ -72,6 +72,8 @@ def measure(ctx) -> list[dict]:
         pages += [f"{path.name}: {p}" for p in docxaudit.footer_page_problems(xmls)]
         text = "\n".join(t for t, _, _ in docxaudit.paragraphs(root))
         code += [f"{path.name}: {p}" for p in docxaudit.pipeline_code_problems(text)]
+        if _since_1141(ctx):  # 1.14.1 (B5): document properties too (docProps/*, customXml/*)
+            code += [f"{path.name}: {p}" for p in docxaudit.docprops_problems(path)]
         if role == "manuscript":
             refs += docxaudit.reference_problems(root, spec["reference_separator"])
             legends += docxaudit.legend_problems(root, spec["main_figures"], 10 ** 6,
@@ -96,7 +98,9 @@ def measure(ctx) -> list[dict]:
                  "07_manuscript/statements.md", "08_submission/cover_letter.md"):
         src = ctx.src(name) if name.startswith("07_") else name
         if ctx.p(src).is_file():
-            leaks += [f"{Path(src).name}: {h}" for h in backstage_hits(ctx.read(src))]
+            from .checks.text import polish_allowed, unallowed  # 1.14.1 (B7)
+            leaks += [f"{Path(src).name}: {h}" for h in
+                      unallowed(backstage_hits(ctx.read(src)), polish_allowed(project))]
     row("No pipeline review/draft history in the text", leaks, "none found")
     try:
         import sys
@@ -179,6 +183,15 @@ def render_qc(existing: str, rows: list[dict]) -> str:
     return head + block + "\n"
 
 
+def _since_1141(ctx) -> bool:
+    """Stricter measurements apply to a paper pinned before 1.14.1 only after wf migrate."""
+    from .state import version_tuple
+    try:
+        return version_tuple(ctx.state.engine_pin) >= (1, 14, 1)
+    except Exception:  # noqa: BLE001
+        return True
+
+
 def write(ctx) -> list[dict]:
     rows = measure(ctx)
     (ctx.project / CHECKLIST_REL).parent.mkdir(parents=True, exist_ok=True)
@@ -186,6 +199,8 @@ def write(ctx) -> list[dict]:
     qc = ctx.project / QC_REL
     qc.write_text(render_qc(qc.read_text(encoding="utf-8") if qc.is_file() else "", rows),
                   encoding="utf-8")
+    from .revision import record_derived
+    record_derived(ctx.project, [ctx.project / CHECKLIST_REL, qc])  # 1.14.1 (B2)
     return rows
 
 

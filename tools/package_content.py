@@ -47,6 +47,7 @@ def main() -> int:
         except (OSError, ValueError) as exc:
             print(f"package content: {exc}", file=sys.stderr)
             return 2
+        revision.record_derived(project, [output])  # 1.14.1 (B2): the round's own output
         print(f"captured DOCX visible-text baseline -> {output}")
         return 0
     ok, details, count = verify_baseline(project)

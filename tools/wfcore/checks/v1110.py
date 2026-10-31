@@ -244,7 +244,9 @@ def docx_keep_with_next(ctx: Ctx) -> Result:
         except (OSError, KeyError, zipfile.BadZipFile, ET.ParseError) as exc:
             problems.append(f"{p.name}: unreadable ({exc})")
             continue
-        problems += [f"{p.name}: {x}" for x in docxaudit.keep_problems(root, styles)]
+        from .manuscript import _footnote_keep_allowed  # 1.14.1 (P3): opt-in footnote row
+        problems += [f"{p.name}: {x}" for x in docxaudit.keep_problems(
+            root, styles, _footnote_keep_allowed(ctx, docxaudit.audit_spec(ctx.project)))]
     if problems:
         return Result(False, "docx_keep_with_next", "; ".join(problems[:6]),
                       ["Rebuild with this engine's build_docx.py (1.13.0): no keepNext/keepLines/"

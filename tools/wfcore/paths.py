@@ -256,19 +256,51 @@ def check_not_nested(target: Path) -> None:
         root = None
     if root is not None and _norm(root) == _norm(target):
         raise SystemExit(f"{target} is the papers root; it holds papers, it is not one")
-    found: list[str] = []
-    if target.is_dir():
+    # 1.14.1 (P1): an older paper attempt in a subfolder no longer makes the opened folder
+    # unsuitable; it is left untouched and isolated (nested_papers, the paper guard).
+
+
+ARCHIVE_DIR = ".wf_archive"
+
+
+def nested_papers(target: Path | str) -> list[Path]:
+    """1.14.1 (P1): older paper attempts in subfolders (up to two levels) of a paper folder.
+    They stay untouched: the outer paper's scans skip them and the paper guard blocks them."""
+    target = Path(target)
+    found: list[Path] = []
+    try:
+        if not target.is_dir():
+            return []
         for pattern in ("*/.wf/state.json", "*/*/.wf/state.json"):
-            found.extend(str(p.parents[1]) for p in target.glob(pattern)
-                         if not _norm(p.parents[1]).startswith(_norm(target / ".wf")))
-    if found:
-        raise SystemExit(f"{target} already contains {len(found)} other paper(s); a paper folder "
-                         "never holds other papers")
+            for p in target.glob(pattern):
+                top = p.relative_to(target).parts[0]
+                if top in (".wf", ARCHIVE_DIR, ".kiro", ".git"):
+                    continue
+                found.append(p.parents[1])
+    except OSError:
+        return []
+    return sorted(set(found))
 
 
-ASK_ONCE = ("Ask the user once which folder this paper should live in, open that folder as the "
-            "Kiro workspace and run `wf init` there. Never invent a location (such as a "
-            "'studies' folder next to the data) and never use the data folder or its parent.")
+def foreign_prefixes(project: Path | str) -> tuple[str, ...]:
+    """Paper-relative prefixes that are not this paper's own files: older paper attempts in
+    subfolders and the in-place restart archive (1.14.1)."""
+    project = Path(project)
+    out = [ARCHIVE_DIR + "/"]
+    for n in nested_papers(project):
+        try:
+            out.append(n.relative_to(project).as_posix() + "/")
+        except ValueError:
+            continue
+    return tuple(out)
+
+
+ASK_ONCE = ("The paper is the folder the user opened as the Kiro workspace: run `wf init` there, "
+            "in place. Never create a subfolder for the paper and never ask the user to reopen "
+            "another folder. Only when this folder itself is refused (a drive root, the home "
+            "folder, the engine, the papers root or a folder inside another paper) tell the "
+            "user why and ask once which folder to open instead; never use the data folder or "
+            "its parent.")
 
 
 def user_files(project: Path | str) -> set[str]:
@@ -286,8 +318,8 @@ def unsuitable_paper_dir(target: Path | str) -> str | None:
     """Why `target` cannot be a paper folder (1.13.0), or None.
 
     Refused: a drive root, the user's home folder, the engine (or a folder inside or around
-    it), a folder inside another paper, the central papers root itself, a folder that already
-    holds other papers."""
+    it), a folder inside another paper, the central papers root itself. 1.14.1: a folder with
+    an older paper attempt in a subfolder is accepted (nested_papers)."""
     t = Path(target).expanduser().resolve()
     if t.parent == t:
         return f"{t} is a drive root"
@@ -357,8 +389,7 @@ def project_dir(layout: dict | None = None, *, check_engine: bool = True) -> Pat
         if here is None:
             raise SystemExit(
                 "no paper here: the working directory is not inside an initialised paper.\n"
-                "The paper is the folder the user opened as the Kiro workspace: run `wf init` "
-                "there (in place). " + ASK_ONCE.split(". ", 1)[1])
+                + ASK_ONCE)
         found = check_paper_location(here, "working directory")
     if check_engine:
         from . import integrity

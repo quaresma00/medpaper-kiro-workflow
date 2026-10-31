@@ -82,16 +82,23 @@ def evidence_block(project: Path, delta: bool = False) -> str:
     return "```json\n" + json.dumps(payload, indent=2, ensure_ascii=False) + "\n```"
 
 
-def write_text_copies(project: Path, rels) -> list[str]:
+def write_text_copies(project: Path, rels, round_id: str | None = None) -> list[str]:
     """Hash-bound plain-text copies of DOCX/XLSX inputs for read-only reviewers.
 
-    Regenerated on every call and stale copies removed, so a reviewer can never be handed an
-    outdated temp extract. The first lines name the source file and its SHA-256.
+    Regenerated on every call; the first lines name the source file and its SHA-256, so a
+    reviewer can tell an outdated extract. 1.14.1 (B8): a call never wipes the folder - a
+    delta round passes only the changed files, and the other copies stay; a copy is removed
+    only when its source file no longer exists. With `round_id` the copies are also kept in
+    .wf/review_text/<round_id>/ (one folder per round).
     """
     from . import xlsxlite
     from .packagecontent import visible_text
     out_dir = project / TEXT_DIR_REL
     out_dir.mkdir(parents=True, exist_ok=True)
+    keep_dir = None
+    if round_id:
+        keep_dir = out_dir / re.sub(r"[^A-Za-z0-9_-]+", "_", str(round_id))[:40]
+        keep_dir.mkdir(parents=True, exist_ok=True)
     written = []
     for rel in sorted(rels):
         path = project / rel
@@ -104,10 +111,18 @@ def write_text_copies(project: Path, rels) -> list[str]:
             body = "\n\n".join(f"## sheet {s.name}\n" + "\n".join(
                 "\t".join(s.row_text(r)) for r in range(1, s.max_row + 1)) for s in book.sheets)
         target = out_dir / (rel.replace("/", "__") + ".txt")
-        target.write_text(f"# source: {rel}\n# sha256: {_sha256(path)}\n\n{body}\n", encoding="utf-8")
+        payload = f"# source: {rel}\n# sha256: {_sha256(path)}\n\n{body}\n"
+        target.write_text(payload, encoding="utf-8")
+        if keep_dir is not None:
+            (keep_dir / target.name).write_text(payload, encoding="utf-8")
         written.append(target.relative_to(project).as_posix())
     for stale in out_dir.glob("*.txt"):
-        if stale.relative_to(project).as_posix() not in written:
+        try:
+            head = stale.read_text(encoding="utf-8", errors="replace").split("\n", 1)[0]
+        except OSError:
+            continue
+        src = head.removeprefix("# source: ").strip() if head.startswith("# source: ") else ""
+        if src and not (project / src).is_file():
             stale.unlink()
     return written
 

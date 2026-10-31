@@ -43,16 +43,18 @@ def _paths(payload: str) -> list[str]:
     return found
 
 
-def blocked(payload: str) -> str | None:
+def blocked(payload: str, project: Path | None = None) -> str | None:
+    """1.14.1: also called in-process by paper_guard.py (one merged hook) with the paper."""
     try:
         from wfcore import paths, revision, scifreeze
-        project = paths.project_dir(check_engine=False).resolve()
+        project = (Path(project) if project is not None
+                   else paths.project_dir(check_engine=False)).resolve()
     except (Exception, SystemExit):  # noqa: BLE001 - no paper selected: nothing to guard
         return None
     rels = []
     for raw in _paths(payload):
         p = Path(raw)
-        p = (p if p.is_absolute() else Path.cwd() / p).resolve()
+        p = (p if p.is_absolute() else project / p).resolve()
         try:
             rels.append(p.relative_to(project).as_posix())
         except ValueError:

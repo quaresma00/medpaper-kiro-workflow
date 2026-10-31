@@ -27,7 +27,9 @@ Only if the study basis declares manual abstraction (`data_source.manual_abstrac
 and `idea.json` lacks `human_coders`, ask in the same message for each coder's and
 adjudicator's specialty and years of experience; automated extraction never triggers it.
 
-Write the response faithfully to `project/00_input/author_info.json`, then create:
+Write the response faithfully to `project/00_input/author_info.json` (the corresponding author
+as `"corresponding": {"name": ..., "email": ..., "affiliation": ...}`; the supplementary
+information page reads `affiliation`, or `address` in older files), then create:
 - `project/07_manuscript/title_page.md` using the already selected title without offering
   new title options;
 - `project/07_manuscript/statements.md` headed `Declarations and Statements`, containing

@@ -264,14 +264,20 @@ def _save_verdicts(project: Path, data: dict) -> None:
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
-VERDICT_RE = re.compile(r"(?im)^[\s>*+\-#|]*\**\s*(P\d{1,3})\b\**\s*[:\-\u2013\u2014|)\]]+\s*\**"
-                        r"\s*meaning\s+(unchanged|changed)\b\**\s*[:\-\u2013\u2014,;.]*\s*(.*)$")
+# 1.14.1 (B1): one verdict per LINE. The 1.14.0 pattern used \s*, which crossed the newline
+# after a verdict without a reason and swallowed the next line ("P02: ...") as P01's reason.
+VERDICT_RE = re.compile(r"(?i)^[ \t>*+\-#|]*\**[ \t]*(P\d{1,3})\b\**[ \t]*[:\-\u2013\u2014|)\]]+"
+                        r"[ \t]*\**[ \t]*meaning[ \t]+(unchanged|changed)\b\**"
+                        r"[ \t]*[:\-\u2013\u2014,;.|]*[ \t]*(.*)$")
 
 
 def parse_report(text: str) -> dict[str, tuple[str, str]]:
     out = {}
-    for pid, verdict, why in VERDICT_RE.findall(text or ""):
-        out[pid.upper()] = (verdict.casefold(), why.strip())
+    for line in (text or "").splitlines():
+        m = VERDICT_RE.match(line)
+        if m:
+            pid, verdict, why = m.groups()
+            out[pid.upper()] = (verdict.casefold(), why.strip().strip("|*").strip())
     return out
 
 

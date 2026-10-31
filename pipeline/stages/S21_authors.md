@@ -20,7 +20,7 @@ missing item; never draft an AI-use disclosure unless the user asks for that exa
 
 ## Do
 1. Write the answers faithfully to `00_input/author_info.json` (administrative; does not touch
-   the reproduction proof).
+   the reproduction proof); `corresponding` = {name, email, affiliation}.
 2. In the journal variant (`08_submission/manuscript/`, never `07_manuscript/`): `title_page.md`
    with the selected title unchanged, and `statements.md` with the user's facts, the
    declarations the journal requires (its heading names and order from `target_journal.json`)

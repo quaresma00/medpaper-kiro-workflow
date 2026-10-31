@@ -854,7 +854,7 @@ def run_i(tmp: Path, record, section) -> None:
     def flagged(mutate) -> bool:
         r2 = ET.fromstring(kept)
         mutate(r2)
-        return any("black squares" in x for x in docxaudit.keep_problems(r2))
+        return any("black squares" in x for x in docxaudit.keep_problems(r2, None, True))
 
     def add(where, tag="keepNext"):
         def f(r2):
@@ -868,10 +868,14 @@ def run_i(tmp: Path, record, section) -> None:
     heading_p = lambda r2: r2.find(f"{{{W}}}body/{{{W}}}p")  # noqa: E731
     last_row_p = lambda r2: r2.findall(f".//{{{W}}}tbl")[0].findall(  # noqa: E731
         f"{{{W}}}tr")[-1].find(f".//{{{W}}}p")
-    record("D3 keepNext only on the last data row of a table followed by its footnote; the "
-           "audit allows exactly that row and flags a keep marker anywhere else",
+    # 1.14.1 (P3): the D3 row is an opt-in journal switch (keep_table_footnotes) now.
+    record("D3 (opt-in since 1.14.1) keepNext only on the last data row of a table followed by "
+           "its footnote; with the switch the audit allows exactly that row and flags a keep "
+           "marker anywhere else",
            per_row == [[0, 0, 2], [0, 0]] and b"<w:pPr><w:keepNext/><w:jc" in kept
-           and not docxaudit.keep_problems(root) and docxaudit.stray_markers(root, "keepNext") == 0
+           and not docxaudit.keep_problems(root, None, True)
+           and docxaudit.stray_markers(root, "keepNext", True) == 0
+           and docxaudit.keep_problems(root) and docxaudit.stray_markers(root, "keepNext") == 2
            and flagged(add(first_row_p)) and flagged(add(heading_p))
            and flagged(add(last_row_p, "keepLines")), str(per_row))
     st = bd.modern_layout(b'<w:settings xmlns:w="x"><w:zoom/><w:rsids/></w:settings>')
@@ -904,7 +908,8 @@ def run_r(tmp: Path, record, section) -> None:
     sizes = {s.id: len((ROOT / "pipeline" / s.card).read_text(encoding="utf-8")) for s in pipe.stages}
     record("R pipeline 1.14.0; a 1.13 paper gets exactly one 1.14.0 migration event and no paper "
            "file changes; every card <= the card limit",
-           pipe.meta.get("version") == "1.14.0" and len(notes) == 1 and before == after
+           pipe.meta.get("version") in ("1.14.0", "1.14.1") and len(notes) == 1
+           and before == after
            and max(sizes.values()) <= registry.CARD_MAX_CHARS, f"{len(notes)} {max(sizes.values())}")
 
 

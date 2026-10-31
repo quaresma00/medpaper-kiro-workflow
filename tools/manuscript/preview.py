@@ -54,9 +54,12 @@ def to_pdf(src: Path, work: Path) -> Path:
     return out
 
 
+PAGES_PER_SHEET = 12
+
+
 def _pages(spec: str | None, total: int) -> list[int]:
     if not spec:
-        return list(range(min(total, 12)))
+        return list(range(total))  # 1.14.1 (B13): every page by default
     out = []
     for part in spec.split(","):
         a, _, b = part.partition("-")
@@ -85,8 +88,6 @@ def rasterise(pdf: Path, work: Path, pages: str | None, dpi: int) -> list[Path]:
     if pages and "-" in pages and "," not in pages:
         a, b = pages.split("-")
         first_last = ["-f", a, "-l", b]
-    elif not pages:
-        first_last = ["-f", "1", "-l", "12"]
     subprocess.run([exe, "-png", "-r", str(dpi), *first_last, str(pdf), str(work / "page")],
                    capture_output=True, timeout=300)
     return sorted(work.glob("page*.png"))
@@ -114,7 +115,7 @@ def contact_sheet(images: list[Path], out: Path, columns: int) -> Path:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="render uploads to a PNG contact sheet")
     ap.add_argument("files", nargs="+", type=Path, help="paper-relative or absolute DOCX/XLSX/PDF")
-    ap.add_argument("--pages", help="e.g. 1-4 or 1,3,5 (default: first 12 pages)")
+    ap.add_argument("--pages", help="e.g. 1-4 or 1,3,5 (default: every page, 12 per sheet)")
     ap.add_argument("--dpi", type=int, default=60)
     ap.add_argument("--columns", type=int, default=4)
     args = ap.parse_args(argv)
@@ -134,13 +135,28 @@ def main(argv: list[str] | None = None) -> int:
                 work = Path(tmp)
                 pdf = to_pdf(src, work)
                 images = rasterise(pdf, work, args.pages, args.dpi)
-                out = contact_sheet(images, outdir / f"{src.stem}-{stamp}.png", args.columns)
+                outs = sheets(images, outdir, f"{src.stem}-{stamp}", args.columns)
         except Exception as exc:  # noqa: BLE001
             print(f"{src.name}: preview failed: {exc}")
             rc = 2
             continue
-        print(f"{src.name}: {len(images)} page(s) -> {out}")
+        for out in outs:
+            print(f"{src.name}: {len(images)} page(s) -> {out}")
     return rc
+
+
+def sheets(images: list[Path], outdir: Path, stem: str, columns: int,
+           per_sheet: int = PAGES_PER_SHEET) -> list[Path]:
+    """1.14.1 (B13): every page, PAGES_PER_SHEET per contact sheet, unique names
+    (<stem>.png for one sheet, <stem>-p01-12.png, <stem>-p13-24.png ... for more)."""
+    if len(images) <= per_sheet:
+        return [contact_sheet(images, outdir / f"{stem}.png", columns)]
+    out = []
+    for i in range(0, len(images), per_sheet):
+        chunk = images[i:i + per_sheet]
+        out.append(contact_sheet(chunk, outdir / f"{stem}-p{i + 1:02d}-{i + len(chunk):02d}.png",
+                                 columns))
+    return out
 
 
 if __name__ == "__main__":

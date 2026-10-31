@@ -107,10 +107,11 @@ def run_g1(tmp: Path, record, section) -> None:
            p.returncode == 0 and (ws2 / ".wf/state.json").is_file()
            and not (papers_root / "second-paper").exists(), _out(p)[-160:])
     p = _wf("init", cwd=ideas)
-    record("G1 a folder that already holds another paper is refused, asks the user once and "
-           "names no other paper", p.returncode == 2 and "already contains" in p.stdout
-           and "anticoag-idea" not in p.stdout and "Ask the user once" in p.stdout,
-           p.stdout[-220:])
+    # 1.14.1 (P1): the opened folder is the paper even with an older attempt in a subfolder;
+    # the attempt is mentioned once and stays isolated (selftest_v1141 P1).
+    record("G1 a folder that already holds an older paper attempt is initialised in place and "
+           "mentions the attempt once", p.returncode == 0 and "older paper attempt" in p.stdout
+           and p.stdout.count("older paper attempt") == 1, p.stdout[-220:])
     record("G1 a drive root and the home folder are never a paper",
            "drive root" in (paths.unsuitable_paper_dir(Path(ws.anchor)) or "")
            and "home folder" in (paths.unsuitable_paper_dir(Path.home()) or ""))
@@ -285,14 +286,16 @@ def run_guard(tmp: Path, record, hook_paper: Path) -> None:
     import paper_guard
     hook = json.loads((hook_paper / ".kiro/hooks/medpaper-paper-guard.json").read_text(
         encoding="utf-8"))["hooks"][0]
-    record("G1 the paper guard is a v1 PreToolUse command hook matching the file, search, "
-           "shell and subagent tools", hook["trigger"] == "PreToolUse"
+    # 1.14.1 (P2): writes and directory discovery only - reads and shell calls no longer
+    # trigger the hook (selftest_v1141 P2 has the full matcher check).
+    record("G1 the paper guard is a v1 PreToolUse command hook matching the write and "
+           "folder-search tools", hook["trigger"] == "PreToolUse"
            and hook["action"]["type"] == "command" and "paper_guard.py" in hook["action"]["command"]
            and "--paper" in hook["action"]["command"]
-           and all(t in hook["matcher"] for t in ("read_file", "list_directory", "grep_search",
+           and all(t in hook["matcher"] for t in ("list_directory", "grep_search",
                                                    "file_search", "fs_write", "str_replace",
-                                                   "delete_file", "smart_relocate",
-                                                   "execute_pwsh", "[Ss]ub_?[Aa]gent")))
+                                                   "delete_file", "smart_relocate"))
+           and "execute_pwsh" not in hook["matcher"] and "read_file" not in hook["matcher"])
     g = tmp / "guard"
     cur = _paper(g / "ws" / "paper_a")
     other = _paper(g / "ws" / "paper_b")

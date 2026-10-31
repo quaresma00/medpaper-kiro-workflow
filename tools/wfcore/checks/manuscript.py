@@ -19,6 +19,8 @@ PKG_REL = "http://schemas.openxmlformats.org/package/2006/relationships"
 NS = {"w": W, "rel": PKG_REL}
 TEXT_ROLES = {"manuscript", "title_page", "cover_letter", "supplementary",
               "statements", "figure_legends"}
+# 1.14.1 (B12): manifest roles of the reporting-checklist upload (tables allowed).
+CHECKLIST_ROLES = {"checklist", "reporting_checklist", "checklist_form"}
 # 1.11.0 (#1e): keepNext/keepLines are forbidden on headings and in styles only.
 FORBIDDEN_PARAGRAPH_CONTROLS = (
     "outlineLvl", "pageBreakBefore",
@@ -338,8 +340,11 @@ def _docx_legend_problems(root, expected: list[str], cap: int,
 
 def _audit_docx(path: Path, style: dict, role: str,
                 planned_figures: list[str] | None = None, legend_cap: int = 180,
-                spec: dict | None = None, strict_keep: bool = False) -> list[str]:
+                spec: dict | None = None, strict_keep: bool = False,
+                allow_footnote_keep: bool | None = None) -> list[str]:
     problems: list[str] = []
+    if allow_footnote_keep is None:
+        allow_footnote_keep = bool((spec or {}).get("keep_table_footnotes"))
     try:
         with zipfile.ZipFile(path) as zf:
             if zf.testzip():
@@ -374,7 +379,7 @@ def _audit_docx(path: Path, style: dict, role: str,
             () if name == "word/document.xml" else HEADING_ONLY_CONTROLS)
         from .. import docxaudit as _dxa_
         for tag in tags:
-            if _dxa_.stray_markers(part, tag):  # 1.14.0 (D3): table-footnote row allowed
+            if _dxa_.stray_markers(part, tag, allow_footnote_keep):  # 1.14.1 (P3): opt-in row
                 problems.append(f"{path.name}: forbidden {tag} paragraph control remains in {name}"
                                 + (" (Word shows it as a black square; rebuild with this "
                                    "engine's build_docx.py)" if tag.startswith("keep") else ""))
@@ -405,11 +410,15 @@ def _audit_docx(path: Path, style: dict, role: str,
                         float(style["subsection_heading_font_pt"])} if style_id == "SectionHeading" else
                        {float(style.get("code_font_pt", 8))} if is_code else
                        {float(style["body_font_pt"])})
+        if role in CHECKLIST_ROLES:
+            # 1.14.1 (B12): a reporting checklist is a table form (checklist_docx.py or
+            # build_docx --kind checklist_form); its own compact sizes and spacing are fine.
+            allowed_pts = {x / 2 for x in range(14, 33)}
         run_font = str(style.get("code_font_family", "Courier New")) if is_code else font
         paragraph_text = "".join(t.text or "" for t in p.findall(".//w:t", NS)).strip()
         spacing_node = None if ppr is None else ppr.find("w:spacing", NS)
         line = str(int(round((1.0 if is_code else float(style["line_spacing"])) * 240)))
-        if paragraph_text and (spacing_node is None or
+        if paragraph_text and role not in CHECKLIST_ROLES and (spacing_node is None or
                 spacing_node.get(f"{{{W}}}line") != line or
                 spacing_node.get(f"{{{W}}}after", "0") !=
                 str(int(round(float(style["paragraph_spacing_after_pt"]) * 20)))):
@@ -462,7 +471,8 @@ def _audit_docx(path: Path, style: dict, role: str,
     if role == "supplementary" and root.findall(".//w:tbl", NS):
         problems.append(
             f"{path.name}: supplementary Methods contains a table instead of a separate "
-            "three-line supplementary table"
+            "three-line supplementary table (a reporting checklist is listed with role "
+            "'checklist', where tables are allowed)"
         )
     if role in TEXT_ROLES:
         problems.extend(docxaudit.extra_problems(path.name, xmls, root, role, spec, legend_cap))
@@ -483,6 +493,14 @@ def submission_checklist_measured(ctx: Ctx) -> Result:
                   "checklist and QC record match the current measured files; every row passes")
 
 
+def _footnote_keep_allowed(ctx: Ctx, spec: dict) -> bool:
+    """1.14.1 (P3): keepNext on a table's last row only with keep_table_footnotes; a paper
+    pinned to 1.14.0 keeps the D3 exception until `wf migrate --yes`."""
+    from ..state import version_tuple
+    return bool(spec.get("keep_table_footnotes")) or \
+        version_tuple(ctx.state.engine_pin) < (1, 14, 1)
+
+
 @check("docx_bundle_ready")
 def docx_bundle_ready(ctx: Ctx) -> Result:
     manifest_rel = "08_submission/bundle/manifest.json"
@@ -501,6 +519,8 @@ def docx_bundle_ready(ctx: Ctx) -> Result:
     if planned is None:
         problems.append("01_protocol/artifact_plan.json is missing or invalid")
     spec = docxaudit.audit_spec(ctx.project)
+    from ..state import version_tuple as _vt
+    v1141 = _vt(ctx.state.engine_pin) >= (1, 14, 1)  # stricter upload checks since 1.14.1
     for item in manifest.get("items", []):
         role = str(item.get("role", "")).casefold()
         raw = str(item.get("file", ""))
@@ -515,7 +535,19 @@ def docx_bundle_ready(ctx: Ctx) -> Result:
             strict = version_tuple(ctx.state.engine_pin) >= (1, 13, 0)
             problems.extend(_audit_docx(path, style, role, planned,
                                         journalspec.legend_cap(journalspec.load(ctx.project))
-                                        or journalspec.NO_CAP, spec, strict_keep=strict))
+                                        or journalspec.NO_CAP, spec, strict_keep=strict,
+                                        allow_footnote_keep=_footnote_keep_allowed(ctx, spec)))
+            if v1141 and path.is_file():  # 1.14.1 (B5), since 1.14.1 for a pinned paper
+                problems.extend(f"{path.name}: {p}" for p in docxaudit.docprops_problems(path))
+        if v1141 and path.suffix.casefold() == ".pdf" and path.is_file() and (
+                role == "supplementary_pdf" or path.with_suffix(".docx").is_file()):
+            # 1.14.1 (B4): an engine-exported PDF carries the journal's language.
+            from ..determinism import pdf_lang
+            got = pdf_lang(path)
+            if got != spec.get("pdf_lang", "en-US"):
+                problems.append(f"{path.name}: PDF language /Lang is {got or 'missing'}, expected "
+                                f"{spec.get('pdf_lang', 'en-US')} (rebuild with build_docx.py "
+                                "--pdf; target_journal.json `language` sets it)")
     for role in ("manuscript", "title_page", "cover_letter"):
         if not any(p.suffix.casefold() == ".docx" for p in roles.get(role, [])):
             problems.append(f"no DOCX for required role '{role}'")

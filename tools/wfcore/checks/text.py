@@ -65,8 +65,8 @@ DEVIATION_RE = re.compile(
     r"\binitial\s+(?:study\s+)?(?:protocol|plan|analysis\s+plan)\b|"
     r"\bchanged\s+from\s+(?:the\s+)?(?:protocol|plan)\b|"
     r"\bas\s+planned\s+in\s+the\s+protocol\b|"
-    r"\b(?:the\s+)?(?:study\s+)?protocol\s+(?:was|is)\s+(?:not\s+)?(?:registered|archived)\b|"
-    r"\bunregistered\s+protocol\b|\barchived,?\s+(?:unregistered\s+)?protocol\b|"
+    r"\b(?:the\s+)?(?:study\s+)?protocol\s+(?:was|is)\s+archived\b|"
+    r"\barchived,?\s+(?:unregistered\s+)?protocol\b|"
     r"方案偏离|偏离(?:了)?(?:原|初始|最初|预先|预设|既定|研究)?(?:研究)?(?:方案|计划)|"
     r"(?:最初|初始|原定|原始)(?:的)?(?:研究)?(?:方案|计划)|与(?:研究)?方案不(?:同|一致)|"
     r"按(?:研究)?方案(?:原)?计划", re.I)
@@ -99,10 +99,54 @@ def deviation_reporting_allowed(project) -> bool:
     return False
 
 
+# 1.14.1 (B7): the registration status a reporting guideline asks for (READUS-PV 14d, STROBE,
+# PRISMA 24a: "the protocol was not registered", "not registered in PROSPERO", "was not
+# prospectively registered") is a required statement, not a plan-versus-practice narrative.
+REGISTRATION_STATUS_RE = re.compile(
+    r"\b(?:the\s+|this\s+|our\s+)?(?:study\s+|review\s+|analysis\s+)?(?:protocol|study|review|"
+    r"analysis)\s+(?:was|is|has)\s+(?:not\s+)?(?:been\s+)?(?:prospectively\s+|publicly\s+)?"
+    r"(?:registered|pre-?registered)\b(?:\s+(?:in|with|on|at)\s+[A-Z][\w.-]*(?:\s+[A-Z][\w.-]*)*)?|"
+    r"\b(?:was|were|is|are)\s+not\s+(?:prospectively\s+|publicly\s+)?(?:registered|"
+    r"pre-?registered)\b(?:\s+(?:in|with|on|at)\s+[A-Z][\w.-]*)?|"
+    r"\bnot\s+(?:prospectively\s+)?registered\s+(?:in|with|on|at)\s+(?:PROSPERO|OSF|"
+    r"ClinicalTrials\.gov|a\s+(?:public\s+)?registry)\b|"
+    r"\bunregistered\s+protocol\b|\bno\s+(?:registered\s+)?protocol\s+was\s+registered\b", re.I)
+
+
 def deviation_hits(text: str, project=None) -> list[str]:
     if project is not None and deviation_reporting_allowed(project):
         return []
-    return sorted({m.group(0) for m in DEVIATION_RE.finditer(_body(text))})
+    body = REGISTRATION_STATUS_RE.sub(" ", _body(text))
+    return sorted({m.group(0) for m in DEVIATION_RE.finditer(body)})
+
+
+def polish_allowed(project) -> dict[str, str]:
+    """1.14.1 (B7): the paper's polish_allowlist.tsv patterns (lower-case) with reasons, read
+    from 07_manuscript/ and from the journal copy 08_submission/manuscript/ (after S19 the
+    frozen folder is read-only, so the exception lives with the copy)."""
+    out: dict[str, str] = {}
+    if project is None:
+        return out
+    for rel in ("07_manuscript/polish_allowlist.tsv", "08_submission/manuscript/polish_allowlist.tsv"):
+        p = Path(project) / rel
+        try:
+            lines = p.read_text(encoding="utf-8").splitlines() if p.is_file() else []
+        except OSError:
+            lines = []
+        for line in lines:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                bits = line.split("\t")
+                if bits[0].strip():
+                    out[bits[0].strip().lower()] = bits[1].strip() if len(bits) > 1 else ""
+    return out
+
+
+def unallowed(hits: list[str], allow: dict[str, str]) -> list[str]:
+    """Backstage/deviation hits the paper did not allowlist (pattern in the hit or vice versa)."""
+    if not allow:
+        return hits
+    return [h for h in hits if not any(a in h.lower() or h.lower() in a for a in allow)]
 
 
 # (#10) CRediT contributor role names are journal-template text, not revision history:
@@ -287,7 +331,8 @@ def no_ai_boilerplate(ctx: Ctx) -> Result:
             f"{rel} still contains placeholder text: " + ", ".join(sorted(set(hard))),
             ["Resolve every placeholder from real data or delete the sentence."],
         )
-    leaks = backstage_hits(raw) + deviation_hits(raw, ctx.project)
+    leaks = unallowed(backstage_hits(raw) + deviation_hits(raw, ctx.project),
+                      polish_allowed(ctx.project))  # 1.14.1 (B7): the paper's allowlist
     if leaks:
         return Result(
             False, "no_ai_boilerplate",

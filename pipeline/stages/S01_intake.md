@@ -3,6 +3,10 @@
 Goal: turn the user's idea into a machine-readable spec every later stage argues against.
 Details (JSON template, notes headings): `reference/stage_details/S01_intake.md` - read only if needed.
 
+Workspace: the folder the user opened is the paper (`wf init` there, in place). Never create a
+subfolder for the paper and never ask the user to reopen another folder. The user's notes stay
+where they are; an older attempt in a subfolder stays untouched (mention it once).
+
 ## Do
 1. Save the idea under `00_input/` (pasted text -> `00_input/idea_source.md`) and read it in full.
 2. Write `01_protocol/idea.json` (template in the details file): title, design, population,

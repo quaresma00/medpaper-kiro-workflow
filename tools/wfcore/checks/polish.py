@@ -239,7 +239,7 @@ def journal_limits_met(ctx: Ctx) -> Result:
     scope = journalspec.word_count_scope(target)
     docx = _final_manuscript_docx(ctx)
     if docx is not None:
-        counts = journalspec.docx_counts(docx, scope)
+        counts = journalspec.docx_counts(docx, scope, target)
         refs, basis = counts["references"], f"final DOCX {docx.name}"
     else:
         rel = ctx.src("07_manuscript/full_manuscript.md")

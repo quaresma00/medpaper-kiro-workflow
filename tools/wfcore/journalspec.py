@@ -363,16 +363,22 @@ def markdown_counts(text: str, scope: list[str]) -> dict[str, int]:
     return {"main": body, "abstract": word_count(abstract)}
 
 
-def docx_counts(path: Path, scope: list[str]) -> dict[str, int]:
-    """Count the final Word file's sections, split on SectionHeading paragraphs."""
+def docx_counts(path: Path, scope: list[str], target: dict | None = None) -> dict[str, int]:
+    """Count the final Word file's sections, split on SectionHeading paragraphs.
+
+    1.14.1 (B11): headings are judged by their semantic role (section_role), so 'Statements and
+    Declarations', 'Compliance with Ethical Standards' or the journal's declarations_heading end
+    the counted body exactly like 'Declarations'."""
     import zipfile
     from xml.etree import ElementTree as ET
     w = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
     with zipfile.ZipFile(path) as zf:
         root = ET.fromstring(zf.read("word/document.xml"))
-    names = {s.casefold() for s in scope}
-    level1 = {"abstract", "references", "figure legends", "declarations and statements",
-              "declarations", "tables", "supplementary figure legends", *names}
+    names = {section_role(s, target) for s in scope}
+    level1 = {"abstract", "references", "figure legends", "declarations", "tables",
+              "supplementary figure legends", *names}
+    # A structured abstract's 'Background'/'Results' subheadings never end the abstract.
+    intro_names = {"introduction", main_text_headings(target or {})["Introduction"].casefold()}
     section, counts, refs = "front", {"main": 0, "abstract": 0}, 0
     for p in root.iter(w + "p"):
         text = "".join(t.text or "" for t in p.iter(w + "t")).strip()
@@ -384,9 +390,10 @@ def docx_counts(path: Path, scope: list[str]) -> dict[str, int]:
             section = "keywords"
             continue
         # Structured-abstract subheadings (Results, Conclusions) do not end the abstract.
-        if sid == "SectionHeading" and text.casefold() in level1 and not (
-                section == "abstract" and text.casefold() != "introduction"):
-            section = text.casefold()
+        role = section_role(text, target) if sid == "SectionHeading" else ""
+        if sid == "SectionHeading" and role in level1 and not (
+                section == "abstract" and text.casefold() not in intro_names):
+            section = role
             continue
         if section == "abstract":
             counts["abstract"] += word_count(text)

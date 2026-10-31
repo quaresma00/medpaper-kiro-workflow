@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -565,17 +566,56 @@ def _table_tiles(plan: dict, missing: list[str]) -> list[tuple[str, np.ndarray]]
     sys.path.insert(0, str(_TOOLS / "manuscript"))
     import preview  # tools/manuscript/preview.py
     out = []
-    for e in list(plan.get("main_tables", [])) + list(plan.get("supp_tables", [])):
+    entries = list(plan.get("main_tables", [])) + list(plan.get("supp_tables", []))
+    for e in entries:
         src = project_root() / str(e.get("file", ""))
         if not src.is_file():
             missing.append(str(e.get("id")))
             continue
         try:
             with tempfile.TemporaryDirectory(prefix="medpaper_tables_") as tmp:
-                pages = preview.rasterise(preview.to_pdf(src, Path(tmp)), Path(tmp), "1", 110)
+                # 1.14.1 (B10): a workbook with one sheet per table (Table S1, S2, ...) is
+                # rendered sheet by sheet; page 1 of the whole workbook was Table S1 every time.
+                one = table_sheet_copy(src, e, entries, Path(tmp))
+                pages = preview.rasterise(preview.to_pdf(one, Path(tmp)), Path(tmp), "1", 110)
                 out.append((str(e.get("id")), read_png(pages[0])))
         except Exception as exc:  # noqa: BLE001 - reported, the figures still tile
             missing.append(f"{e.get('id')} ({type(exc).__name__}: {str(exc)[:80]})")
+    return out
+
+
+def table_sheet(src: Path, entry: dict, entries: list[dict]) -> str | None:
+    """The worksheet that holds one planned table: its `sheet`, else a sheet named like its id
+    (e.g. 'Table S2' / 'S2'), else its position among the entries sharing the workbook."""
+    from openpyxl import load_workbook
+    names = load_workbook(src, read_only=True).sheetnames
+    if len(names) <= 1:
+        return names[0] if names else None
+    if entry.get("sheet") in names:
+        return entry["sheet"]
+    tid = str(entry.get("id", "")).strip()
+    short = re.sub(r"(?i)^(?:supplementary\s+)?table\s*", "", tid)
+    for n in names:
+        if n.strip().casefold() in {tid.casefold(), short.casefold(), f"table {short}".casefold()}:
+            return n
+    same = [x for x in entries if str(x.get("file", "")) == str(entry.get("file", ""))]
+    i = next((k for k, x in enumerate(same) if x is entry), 0)
+    return names[i] if i < len(names) else names[0]
+
+
+def table_sheet_copy(src: Path, entry: dict, entries: list[dict], work: Path) -> Path:
+    """A temporary copy of the workbook holding only the entry's sheet (formatting kept)."""
+    from openpyxl import load_workbook
+    sheet = table_sheet(src, entry, entries)
+    wb = load_workbook(src)
+    if sheet is None or len(wb.sheetnames) <= 1:
+        return src
+    for name in list(wb.sheetnames):
+        if name != sheet:
+            del wb[name]
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "_", str(entry.get("id", "table")))[:40] or "table"
+    out = work / f"{safe}.xlsx"
+    wb.save(out)
     return out
 
 

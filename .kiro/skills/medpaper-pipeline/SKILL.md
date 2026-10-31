@@ -3,7 +3,7 @@ name: medpaper-pipeline
 description: Drives a gated, resumable medical/clinical research paper pipeline from a research idea through feasibility, data acquisition, exploratory analysis, figure and table production, IMRAD writing, independent review, journal selection, de-AI polish and a Word submission package. Use whenever the task involves a medical research idea, a clinical manuscript, a research protocol, literature retrieval via PubMed, publication-grade figures or three-line tables, journal selection, a submission package, or a revision round on any of these. Do not follow the workflow from memory - run `python tools/wf.py status` and obey the stage card it prints.
 compatibility: Requires Python 3.11+ for the driver. Tables and Word output additionally need numpy, pandas, openpyxl and python-docx (matplotlib for the Python figure path). R 4.3+ with the packages in reference/language_policy.toml (figures default to R). Network access is required for PubMed, Crossref and Unpaywall. Set NCBI_API_KEY to raise the E-utilities rate limit.
 metadata:
-  version: "2.6.0"
+  version: "2.6.1"
   stages: "25"
   entrypoint: "python tools/wf.py status"
 ---
@@ -25,9 +25,13 @@ python tools/wf.py advance --note "..."         # refuses on a red gate
 
 Run `status` once per session or stage change; never infer the stage from memory or files.
 The paper is the folder the user opened as the Kiro workspace: `wf init` there, in place
-(never invent a location, never the data folder or its parent; ask once if the folder is
-unsuitable). Commands act only on that paper; never read or list another paper. Datasets are
-declared in place, read-only, never copied: `wf data add <absolute path>`.
+(an existing paper there is resumed). Never create a subfolder for the paper, never ask the
+user to reopen another folder, never invent a location, never the data folder or its parent;
+`wf init` names the rare refusal (drive root, home folder, inside another paper) and only then
+ask once. An older attempt in a subfolder stays untouched. `wf new --root/--central` only on
+the user's explicit request. Commands act only on that paper; never read or list another
+paper. Datasets are declared in place, read-only, never copied: `wf data add <absolute path>`.
+Reports the user wants outside the paper: `wf config --user report_dirs add <dir>` (.md/.txt).
 
 ## Execution economy (1.12.0)
 

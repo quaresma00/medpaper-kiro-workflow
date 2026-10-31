@@ -102,17 +102,23 @@ def upload_files(project: Path) -> set[str]:
     """1.9.0: what the user confirms is what gets uploaded - manifest items and the bundle."""
     project = Path(project).resolve()
     out: set[str] = set()
+    not_uploaded: set[str] = set()
     manifest = project.joinpath(*PurePosixPath(MANIFEST_REL).parts)
     try:
         for item in json.loads(manifest.read_text(encoding="utf-8")).get("items", []):
-            out.add(str(item.get("file", "")).replace("\\", "/"))
+            rel = str(item.get("file", "")).replace("\\", "/")
+            # 1.14.1 (B9): a manifest item marked "upload": false is evidence, not an upload
+            if item.get("upload") is False:
+                not_uploaded.add(rel)
+            else:
+                out.add(rel)
     except (OSError, ValueError, AttributeError):
         pass
     bundle = project / "08_submission" / "bundle"
     if bundle.is_dir():
         out.update(p.relative_to(project).as_posix() for p in bundle.rglob("*")
                    if p.is_file() and p.name != "manifest.json")
-    return {r for r in out if r}
+    return {r for r in out if r and r not in not_uploaded}
 
 
 def _records(project: Path) -> list[dict]:

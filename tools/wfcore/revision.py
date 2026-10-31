@@ -146,12 +146,14 @@ def snapshot(project: Path) -> dict[str, str]:
     Detects accidental scope drift, not same-privilege timestamp forgery; data and reference
     integrity gates still validate their own receipts.
     """
+    from . import paths as _paths
     out: dict[str, str] = {}
+    skip = SNAPSHOT_SKIP + _paths.foreign_prefixes(project)  # 1.14.1: older attempts, archive
     for path in sorted(project.rglob("*")):
         if not path.is_file() or "__pycache__" in path.parts or path.name == ".gitkeep":
             continue
         rel = path.relative_to(project).as_posix()
-        if rel.startswith(SNAPSHOT_SKIP) or rel in LIFECYCLE_FILES:
+        if rel.startswith(skip) or rel in LIFECYCLE_FILES:
             continue
         if rel.startswith("02_data/raw/") or "/cache/" in rel or "/fulltext/" in rel:
             st = path.stat()
@@ -211,58 +213,108 @@ def guard_outputs(project: Path, outputs: list[Path]) -> None:
                              "only the planned dependency closure may be rebuilt (rework.py status)")
 
 
-def certified_receipts(project: Path) -> dict[str, tuple[str, dict]]:
-    """rel -> (round id, credential) like certified_hashes, keeping content/deletion data."""
-    directory = project / ".wf" / "revisions"
-    rounds = []
-    for path in sorted(directory.glob("R*.json")) if directory.is_dir() else []:
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        if data.get("status") == "complete":
-            rounds.append(data)
-    out: dict[str, tuple[str, dict]] = {}
-    for data in rounds:
-        for item in data.get("items", []):
-            for rec in item.get("changed_files", []) or []:
-                if isinstance(rec, dict) and rec.get("path") and not renewable(rec["path"]):
-                    out[rec["path"]] = (data.get("round_id", "?"), rec)
-    if rounds and rounds[-1].get("schema_version") == SCHEMA:
-        val = rounds[-1].get("validation", {})
-        content = val.get("artifact_content", {})
-        for rel, digest in val.get("artifact_hashes", {}).items():
-            if not renewable(rel):
-                out[rel] = (rounds[-1].get("round_id", "?"),
-                            {"path": rel, "sha256": digest, "content_sha256": content.get(rel)})
-        for rel in val.get("artifact_deleted", []):
-            out[rel] = (rounds[-1].get("round_id", "?"), {"path": rel, "sha256": DELETED,
-                                                          "deleted": True})
+def round_certificates(revision: dict) -> list[tuple[str, str, dict]]:
+    """1.14.1 (B2): what one closed scoped round certified beyond its items' changed files -
+    the files its checks certified (validation) and the derived outputs engine builders wrote
+    while it was open (derived_outputs), as (rel, label, credential), in that order."""
+    out: list[tuple[str, str, dict]] = []
+    if revision.get("schema_version") != SCHEMA:
+        return out
+    val = revision.get("validation", {}) or {}
+    content = val.get("artifact_content", {}) or {}
+    for rel, digest in (val.get("artifact_hashes", {}) or {}).items():
+        if not renewable(rel):
+            out.append((rel, "scoped validation",
+                        {"path": rel, "sha256": digest, "content_sha256": content.get(rel)}))
+    for rel in val.get("artifact_deleted", []) or []:
+        out.append((rel, "scoped validation", {"path": rel, "sha256": DELETED, "deleted": True}))
+    for rel, rec in sorted((revision.get("derived_outputs") or {}).items()):
+        if isinstance(rec, dict) and rec.get("sha256") and not renewable(rel):
+            out.append((rel, "derived output", {**rec, "path": rel}))
     return out
+
+
+def _pin_at_least(project: Path, version: tuple[int, ...]) -> bool:
+    from .state import version_tuple
+    try:
+        data = json.loads((Path(project) / ".wf/state.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return True
+    return version_tuple(str(data.get("engine_pin") or data.get("pipeline_version") or "0")) \
+        >= version
+
+
+def latest_receipts(project: Path, rounds: list[tuple[str, dict]] | None = None
+                    ) -> dict[str, tuple[str, str, dict]]:
+    """rel -> (round file/id, item label, credential): per file the LATEST credential across
+    every closed round, oldest round first (1.14.1, B2). Until 1.14.1 only the newest round's
+    validation set was used, so a file re-certified by an intermediate round was compared with
+    an older round's receipt and reported as drift. A paper pinned before 1.14.1 uses the
+    other rounds' validation sets only to supersede an existing receipt (never a new
+    comparison) until `wf migrate --yes`."""
+    if rounds is None:
+        rounds = []
+        directory = Path(project) / ".wf" / "revisions"
+        for path in sorted(directory.glob("R*.json")) if directory.is_dir() else []:
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if data.get("status") == "complete":
+                rounds.append((data.get("round_id", path.stem), data))
+    strict = _pin_at_least(project, (1, 14, 1))
+    out: dict[str, tuple[str, str, dict]] = {}
+    for i, (name, data) in enumerate(rounds):
+        for item in data.get("items", []) or []:
+            for rec in item.get("changed_files", []) or []:
+                if isinstance(rec, dict) and rec.get("path") and rec.get("sha256") \
+                        and not renewable(str(rec["path"])):
+                    out[str(rec["path"])] = (name, str(item.get("id", "?")), rec)
+        newest = i == len(rounds) - 1
+        for rel, label, rec in round_certificates(data):
+            if strict or newest or rel in out:
+                out[rel] = (name, label, rec)
+    return out
+
+
+def certified_receipts(project: Path) -> dict[str, tuple[str, dict]]:
+    """rel -> (round id, credential): the latest credential per file across closed rounds."""
+    return {rel: (name, rec) for rel, (name, _, rec) in latest_receipts(project).items()}
 
 
 def certified_hashes(project: Path) -> dict[str, tuple[str, str]]:
-    """rel -> (round id, sha256) for every file the newest closed rounds certified."""
-    directory = project / ".wf" / "revisions"
-    out: dict[str, tuple[str, str]] = {}
-    rounds = []
-    for path in sorted(directory.glob("R*.json")) if directory.is_dir() else []:
+    """rel -> (round id, sha256) for every file the closed rounds certified (latest wins)."""
+    return {rel: (name, str(rec.get("sha256", "")))
+            for rel, (name, rec) in certified_receipts(project).items()}
+
+
+def record_derived(project: Path, outputs) -> list[str]:
+    """1.14.1 (B2): an engine builder (build_docx, polish, submission_qc, package_content
+    capture) records what it wrote into the open scoped round, so the round certifies its own
+    derived outputs and no bookkeeping-only round is ever needed."""
+    project = Path(project)
+    revision = active(project)
+    if not (is_scoped(revision) and revision.get("status") == "active"):
+        return []
+    path = round_path(project, str(revision.get("round_id")))
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    derived = data.setdefault("derived_outputs", {})
+    done = []
+    for out in outputs:
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+            rel = Path(out).resolve().relative_to(project.resolve()).as_posix()
+        except (ValueError, OSError):
             continue
-        if data.get("status") == "complete":
-            rounds.append(data)
-    for data in rounds:
-        for item in data.get("items", []):
-            for receipt in item.get("changed_files", []) or []:
-                if isinstance(receipt, dict) and receipt.get("path") and not renewable(receipt["path"]):
-                    out[receipt["path"]] = (data.get("round_id", "?"), str(receipt.get("sha256", "")))
-    if rounds and rounds[-1].get("schema_version") == SCHEMA:
-        for rel, digest in rounds[-1].get("validation", {}).get("artifact_hashes", {}).items():
-            if not renewable(rel):
-                out[rel] = (rounds[-1].get("round_id", "?"), digest)
-    return out
+        if rel.startswith(SCOPE_EXEMPT) or not (project / rel).is_file():
+            continue
+        derived[rel] = {**receipt(project, rel), "at": _now()}
+        done.append(rel)
+    if done:
+        atomic_json(path, data)
+    return done
 
 
 def certified_drift(project: Path) -> list[str]:

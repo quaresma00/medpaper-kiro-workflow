@@ -150,11 +150,14 @@ def no_orphans(ctx: Ctx) -> Result:
     always = ctx.pipeline.policy.get("always_allowed", [])
     from .. import paths as _paths
     users = _paths.user_files(ctx.project)  # 1.13.0: the user's own files from before `wf init`
+    foreign = _paths.foreign_prefixes(ctx.project)  # 1.14.1: older attempts, restart archive
     orphans = []
     for p in ctx.project.rglob("*"):
         if not p.is_file():
             continue
         rel = p.relative_to(ctx.project).as_posix()
+        if rel.startswith(foreign):
+            continue
         # Archived journal variants/packages are kept on purpose (a rejected journal's work).
         if rel.startswith("08_submission/journal_archives/"):
             continue

@@ -62,10 +62,14 @@ def heading_keep_problems(root) -> list[str]:
 KEEP_MARKERS = ("keepNext", "keepLines", "pageBreakBefore")
 
 
-def table_footnote_rows(root) -> set[int]:
+def table_footnote_rows(root, allow: bool = True) -> set[int]:
     """1.14.0 (D3): ids of the paragraphs in the last row of each table - the only place a
-    keepNext may stand (it keeps the table footnote on the table's page)."""
+    keepNext may stand (it keeps the table footnote on the table's page). 1.14.1 (P3): only
+    when the journal switch keep_table_footnotes is on (allow); by default no keep marker
+    stands anywhere, because Word shows each one as a black square."""
     out: set[int] = set()
+    if not allow:
+        return out
     for tbl in root.iter(f"{{{W}}}tbl"):
         rows = tbl.findall("w:tr", NS)
         if rows:
@@ -79,10 +83,11 @@ def _allowed_keep(p, allowed: set[int]) -> bool:
         _has(p, t) for t in KEEP_MARKERS if t != "keepNext")
 
 
-def stray_markers(part, tag: str) -> int:
-    """How many `tag` markers in an XML part stand anywhere but the D3 table-footnote row."""
+def stray_markers(part, tag: str, allow_table_footnotes: bool = False) -> int:
+    """How many `tag` markers in an XML part stand anywhere but the D3 table-footnote row
+    (that row only counts when keep_table_footnotes is on)."""
     nodes = part.findall(f".//w:{tag}", NS)
-    if tag != "keepNext" or not nodes:
+    if tag != "keepNext" or not nodes or not allow_table_footnotes:
         return len(nodes)
     allowed = table_footnote_rows(part)
     ok = sum(1 for p in part.iter(f"{{{W}}}p") if _allowed_keep(p, allowed))
@@ -131,11 +136,12 @@ def _usable_height_in(body) -> float:
     return (h - top - bottom) / 1440
 
 
-def keep_problems(root, styles_root=None) -> list[str]:
+def keep_problems(root, styles_root=None, allow_table_footnotes: bool = False) -> list[str]:
     """1.13.0 (#10): the Word layout audit (replaces the 1.11 keep-with-next audit).
 
-    Zero keepNext/keepLines/pageBreakBefore in document.xml and in the effective styles (1.14.0
-    D3: except keepNext on the last row of each table, which keeps its footnote with it), plus
+    Zero keepNext/keepLines/pageBreakBefore in document.xml and in the effective styles (1.14.1:
+    keepNext on the last row of each table only with the journal switch keep_table_footnotes,
+    allow_table_footnotes), plus
     structure: every table row cantSplit; each embedded figure starts after an explicit page
     break, is followed by its legend, and image + estimated legend fit the usable page
     height. (Tables starting their own section are checked by table_layout_problems.)"""
@@ -143,7 +149,7 @@ def keep_problems(root, styles_root=None) -> list[str]:
     if body is None:
         return ["no document body"]
     out = []
-    allowed = table_footnote_rows(root)  # 1.14.0 (D3): keepNext on each table's last row only
+    allowed = table_footnote_rows(root, allow_table_footnotes)  # 1.14.1 (P3): opt-in only
     marked = [(_ptext(p)[:30] or "(empty)") for p in root.iter(f"{{{W}}}p")
               if any(_has(p, t) for t in KEEP_MARKERS) and not _allowed_keep(p, allowed)]
     if marked:
@@ -215,7 +221,43 @@ def audit_spec(project: Path) -> dict:
             "main_figures": counts["main_figures"], "supp_figures": counts["supp_figures"],
             "main_tables": counts["main_tables"],
             "line_numbers": journalspec.line_numbers(target),
+            # 1.14.1 (P3): footnote kept with the table's last row only on this opt-in switch
+            "keep_table_footnotes": target.get("keep_table_footnotes") is True,
+            "pdf_lang": pdf_lang(target),
             "table_orientation": table_overrides(project, counts["plan"])}
+
+
+def pdf_lang(target: dict) -> str:
+    """1.14.1 (B4): /Lang of every engine-exported PDF - target_journal.json `language`
+    (a BCP 47 tag such as en-US or en-GB), default en-US."""
+    raw = str((target or {}).get("language", "") or "").strip().replace("_", "-")
+    return raw if re.fullmatch(r"[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*", raw) else "en-US"
+
+
+DOCPROPS_PATH_RE = re.compile(r"(?<![\w])[A-Za-z]:[\\/][^<\s\"']*|(?<![\w./])/(?:Users|home|tmp)/"
+                              r"[^<\s\"']+|\b\d\d_[a-z]+[\\/][\w./\\-]+|medpaper_\w+|\.csl\b")
+
+
+def docprops_problems(path) -> list[str]:
+    """1.14.1 (B5): document properties (docProps/*, customXml/*) of an upload carry no local
+    path, build folder, pipeline name or citation-style file (pandoc writes csl/bibliography
+    into docProps/custom.xml)."""
+    import zipfile
+    hits: list[str] = []
+    try:
+        with zipfile.ZipFile(path) as zf:
+            for name in zf.namelist():
+                if not name.startswith(("docProps/", "customXml/")) or not name.endswith(".xml"):
+                    continue
+                text = zf.read(name).decode("utf-8", errors="replace")
+                values = " ".join(re.findall(r">([^<]+)<", text))
+                hits += [f"{name}: {m.group(0)[:50]}" for m in DOCPROPS_PATH_RE.finditer(values)]
+                hits += [f"{name}: {m.group(0)[:50]}"
+                         for m in journalspec.PIPELINE_CODE_RE.finditer(values)]
+    except (OSError, zipfile.BadZipFile):
+        return []
+    return ["local path or build data in document properties: " + ", ".join(sorted(set(hits))[:4])
+            ] if hits else []
 
 
 def line_number_problems(root, mode: str) -> list[str]:

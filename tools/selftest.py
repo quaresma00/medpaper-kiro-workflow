@@ -2149,8 +2149,8 @@ def run_codex_integration() -> None:
                f"card must name `{agent}` so the work is not done in the main context")
 
     record("pipeline and skill versions agree",
-           pipe["meta"]["version"] == "1.14.0" and 'version: "2.6.0"' in skill,
-           f'pipeline={pipe["meta"]["version"]}, skill=2.6.0 (Kiro adapter revision)')
+           pipe["meta"]["version"] == "1.14.1" and 'version: "2.6.1"' in skill,
+           f'pipeline={pipe["meta"]["version"]}, skill=2.6.1 (Kiro adapter revision)')
     record("all 25 stage cards exist",
            len(pipe["stage"]) == 25 and
            all((ROOT / "pipeline" / s["card"]).is_file() for s in pipe["stage"]),
@@ -3849,12 +3849,12 @@ def run_engine_purity(tmp: Path) -> None:
            p.returncode == 1 and "inside the engine" in _out(p) and not (ROOT / "temp").exists(),
            _out(p)[-100:])
 
+    # 1.14.1 (P1): a folder AROUND an older paper may be initialised (selftest_v1141 P1).
     nested = [_wf("init", cwd=demo / "03_analysis").returncode,
               _wf("init", cwd=papers).returncode,
-              _wf("init", cwd=tmp).returncode,
               _wf("new", "inner", "--root", demo, cwd=tmp).returncode,
               _wf("init", "--force", cwd=demo / "03_analysis").returncode]
-    record("papers cannot be nested (inside a paper, the papers root, or around one)",
+    record("papers cannot be nested (inside a paper or the papers root)",
            all(c == 2 for c in nested) and not (demo / "03_analysis/.wf").exists()
            and not (demo / "inner").exists(), str(nested))
 
@@ -5184,7 +5184,7 @@ def run_v160(tmp: Path) -> None:
            any(g["check"] == "reader_review_coverage" for g in s18["gate"])
            and "review_round.py start --scope manuscript" in (ROOT / "pipeline/stages/S18_independent_review.md")
            .read_text(encoding="utf-8"))
-    record("pipeline version is 1.14.0", pipe.meta.get("version") == "1.14.0")
+    record("pipeline version is 1.14.1", pipe.meta.get("version") == "1.14.1")
 
 
 def run_v170(tmp: Path) -> None:
@@ -5869,6 +5869,8 @@ def main() -> int:
         selftest_v1130.run(tmp / "v1130_root", record, section)
         import selftest_v1140
         selftest_v1140.run(tmp / "v1140_root", record, section)
+        import selftest_v1141
+        selftest_v1141.run(tmp / "v1141_root", record, section)
         run_new_wiring()
         section("isolation")
         record("selftest did not touch the real papers root or user home",

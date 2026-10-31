@@ -13,8 +13,8 @@ inclusion: always
 This workspace is the medpaper ENGINE: the shared, pure workflow that drives every paper. It is
 maintenance only. No paper may live in it, be selected in it, or write into it.
 
-- Never create, select or continue a paper here. Start one with
-  `python tools/wf.py new <slug>` and open the folder it prints as its own Kiro workspace.
+- Never create, select or continue a paper here. A paper is the folder the user opens as its
+  own Kiro workspace; `wf init` there makes it a paper in place.
 - `python tools/wf.py status` here prints the ENGINE WORKSPACE banner (papers root, papers,
   selection); paper-driving commands are refused from this folder.
 - The pipeline has 25 stages, defined in `pipeline/pipeline.toml` with one card per stage in

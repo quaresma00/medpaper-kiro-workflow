@@ -472,7 +472,7 @@ def _add_page_numbers(doc, font: str, size: float) -> None:
 
 def normalize_docx(path: Path, style: dict, kind: str, *, legend_bold: bool = True,
                    reference_separator: str = "space", blind: bool = False,
-                   line_numbers: str = "none") -> None:
+                   line_numbers: str = "none", keep_footnotes: bool = False) -> None:
     doc = Document(path)
     if blind:  # 1.9.0 (#13): no author identity in the review-facing file's metadata
         cp = doc.core_properties
@@ -573,7 +573,9 @@ def normalize_docx(path: Path, style: dict, kind: str, *, legend_bold: bool = Tr
         _set_line_numbers(section._sectPr, line_numbers if kind == "manuscript" else "none")
 
     doc.save(path)
-    _sanitize_package_xml(path, font)
+    _sanitize_package_xml(path, font, keep_footnotes)
+    # 1.14.1 (B5): no csl/bibliography custom properties, no local paths in core/app.
+    determinism.scrub_properties(path)
     # 1.9.0: identical source -> identical bytes (fixed zip dates and docProps timestamps);
     # blinded files also lose creator/lastModifiedBy/company.
     determinism.normalize(path, blind=blind)
@@ -661,7 +663,7 @@ def modern_layout(blob: bytes) -> bytes:
 
 
 
-def _sanitize_package_xml(path: Path, font: str) -> None:
+def _sanitize_package_xml(path: Path, font: str, keep_footnotes: bool = False) -> None:
     """Remove theme residue and every Word paragraph control the user prohibited."""
     with zipfile.ZipFile(path, "r") as src:
         entries = [(item, src.read(item.filename)) for item in src.infolist()]
@@ -682,7 +684,9 @@ def _sanitize_package_xml(path: Path, font: str) -> None:
                     blob = re.sub(rb"<w:" + name + rb"\b[^>]*/>", b"", blob)
                     blob = re.sub(rb"<w:" + name + rb"\b[^>]*>.*?</w:" + name + rb">",
                                   b"", blob, flags=re.S)
-                if item.filename == "word/document.xml":
+                if item.filename == "word/document.xml" and keep_footnotes:
+                    # 1.14.1 (P3): opt-in journal switch only; by default no keep marker
+                    # anywhere (Word shows each as a black square).
                     blob = keep_table_footnotes(blob)
                 if item.filename == "word/settings.xml":
                     blob = modern_layout(blob)
@@ -752,11 +756,13 @@ def audit_docx(path: Path, style: dict, kind: str = "",
             problems.append(f"{path.name}: forbidden down-arrow character remains in {name}")
         for tag in FORBIDDEN_PARAGRAPH_CONTROLS + (
                 () if name == "word/document.xml" else HEADING_ONLY_CONTROLS):
-            if docxaudit.stray_markers(part, tag):  # 1.14.0 (D3): table-footnote row allowed
+            # 1.14.1 (P3): the table-footnote row only with keep_table_footnotes
+            if docxaudit.stray_markers(part, tag, bool((spec or {}).get("keep_table_footnotes"))):
                 problems.append(f"{path.name}: forbidden {tag} paragraph control remains in {name}")
         if part.findall(".//w:pBdr", NS):
             problems.append(f"{path.name}: paragraph border/horizontal-rule residue remains in {name}")
     problems += [f"{path.name}: {p}" for p in docxaudit.heading_keep_problems(root)]
+    problems += [f"{path.name}: {p}" for p in docxaudit.docprops_problems(path)]  # 1.14.1 (B5)
     expected_font = str(style["font_family"])
     if expected_font.casefold() == "times new roman" and any(b"Aptos" in b for b in xmls.values()):
         problems.append(f"{path.name}: Aptos remains in Word XML")
@@ -1190,6 +1196,8 @@ def _info_page(project: Path) -> str:
         lines += ["Authors: " + ", ".join(n for n in names if n), ""]
     corr = info.get("corresponding")
     if isinstance(corr, dict):
+        # 1.14.1 (B3): S21 writes 'affiliation'; author files from earlier runs used 'address'.
+        corr = {**corr, "affiliation": corr.get("affiliation") or corr.get("address")}
         corr = ", ".join(str(corr[k]) for k in ("name", "email", "affiliation") if corr.get(k))
     if corr:
         lines += [f"Corresponding author: {corr}", ""]
@@ -1309,7 +1317,8 @@ def draft_docx(project: Path, output: Path) -> Path:
     normalize_docx(output, style, "manuscript",
                    legend_bold=bool(spec["legend_style"].get("bold", True)),
                    reference_separator=spec["reference_separator"],
-                   line_numbers=spec.get("line_numbers", "none"))
+                   line_numbers=spec.get("line_numbers", "none"),
+                   keep_footnotes=bool(spec.get("keep_table_footnotes")))
     return output
 
 
@@ -1470,12 +1479,15 @@ def build(args) -> int:
         normalize_docx(args.output, style, args.kind,
                        legend_bold=bool(spec["legend_style"].get("bold", True)),
                        reference_separator=spec["reference_separator"], blind=blind,
-                       line_numbers=spec.get("line_numbers", "none"))
+                       line_numbers=spec.get("line_numbers", "none"),
+                       keep_footnotes=bool(spec.get("keep_table_footnotes")))
         problems = audit_docx(args.output, style, args.kind,
                               planned_figure_ids() if args.kind == "manuscript" else None,
                               figure_legend_cap(), spec)
         if not problems and pdf_path is not None:
             _convert_pdf(args.output, pdf_path)
+            # 1.14.1 (B4): Word on a Chinese system writes /Lang zh; the journal's language wins.
+            determinism.set_pdf_lang(pdf_path, spec.get("pdf_lang", "en-US"))
             determinism.normalize(pdf_path)
     except Exception as exc:  # noqa: BLE001
         args.output.unlink(missing_ok=True)
@@ -1494,6 +1506,8 @@ def build(args) -> int:
         receipt_path.unlink(missing_ok=True)
         print(f"DOCX build receipt failed: {exc}", file=sys.stderr)
         return 2
+    from wfcore.revision import record_derived
+    record_derived(project, [args.output, receipt] + ([pdf_path] if pdf_path else []))  # 1.14.1
     print(f"built and audited {args.kind} -> {args.output}")
     if pdf_path is not None:
         print(f"PDF export -> {pdf_path}")

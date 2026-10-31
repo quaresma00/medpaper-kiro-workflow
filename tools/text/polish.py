@@ -190,9 +190,15 @@ def flow(text: str) -> str:
 
 
 def allowlist() -> dict[str, str]:
-    p = project_root() / _resolve(ALLOWLIST)
+    """polish_allowlist.tsv patterns: 07_manuscript/, the resolved journal variant and (1.14.1,
+    B7) the journal copy 08_submission/manuscript/ - after S19 the frozen folder is read-only."""
     out: dict[str, str] = {}
-    if p.exists():
+    seen = []
+    for rel in (ALLOWLIST, _resolve(ALLOWLIST), "08_submission/manuscript/polish_allowlist.tsv"):
+        p = project_root() / rel
+        if rel in seen or not p.exists():
+            continue
+        seen.append(rel)
         for line in p.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if line and not line.startswith("#"):
@@ -309,7 +315,10 @@ def lint_structure(rel: str, text: str) -> list[dict]:
             proj = project_root()
         except (Exception, SystemExit):  # noqa: BLE001 - linting a file outside a paper
             proj = None
-        leaks = backstage_hits(text) + deviation_hits(text, proj)
+        from wfcore.checks.text import polish_allowed, unallowed
+        # 1.14.1 (B7): polish_allowlist.tsv (07_manuscript/ or the journal copy) applies here.
+        leaks = unallowed(backstage_hits(text) + deviation_hits(text, proj),
+                          polish_allowed(proj))
     except ImportError:  # pragma: no cover - engine layout broken
         leaks = []
     if leaks:
@@ -643,6 +652,16 @@ def readability(rel: str, text: str) -> dict:
 # ===========================================================================
 # commands
 # ===========================================================================
+def _record_derived(proj: Path, outputs) -> None:
+    """1.14.1 (B2): what the polish tool writes during an open round is that round's output."""
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from wfcore.revision import record_derived
+        record_derived(proj, [p for p in outputs if Path(p).is_file()])
+    except Exception:  # noqa: BLE001 - bookkeeping never breaks the polish tool
+        pass
+
+
 def cmd_snapshot(args) -> int:
     proj = project_root()
     snapshot_rel = _resolve(SNAPSHOT_DIR)
@@ -665,6 +684,7 @@ def cmd_snapshot(args) -> int:
     (dest / "facts.json").write_text(
         json.dumps({"snapshot_at": now(), "files": facts_index}, indent=2, ensure_ascii=False),
         encoding="utf-8")
+    _record_derived(proj, sorted(dest.iterdir()))
     print(f"snapshotted {len(docs)} section(s) -> project/{snapshot_rel}/")
     for rel, f in facts_index.items():
         print(f"  {Path(rel).name:<20} {len(f['numbers']):>4} numbers  "
@@ -716,6 +736,8 @@ def cmd_lint(args) -> int:
         (proj / report_rel).parent.mkdir(parents=True, exist_ok=True)
         (proj / report_rel).write_text(
             json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+        _record_derived(proj, [proj / report_rel,
+                               proj / _resolve("07_manuscript/polish_log.md")])
 
     if args.json:
         print(json.dumps(report, indent=2, ensure_ascii=False))

@@ -752,8 +752,17 @@ def run_review(tmp: Path, record, section) -> None:
     wb.active["B2"] = "62.9"
     wb.save(p / "04_tables/main/Table1.xlsx")
     record("a delta review that misses a changed file still fails", bool(rr.verify(p)))
+    # 1.14.1 (B8): a (delta) call keeps the other copies; only a copy whose source is gone goes.
     rr.write_text_copies(p, [])
-    record("stale text copies are removed when regenerated", not list((p / rr.TEXT_DIR_REL).glob("*.txt")))
+    kept = list((p / rr.TEXT_DIR_REL).glob("*.txt"))
+    _gone = p / "04_tables/main/Table1.xlsx"
+    _blob = _gone.read_bytes()
+    _gone.unlink()
+    rr.write_text_copies(p, [])
+    left = [x.name for x in (p / rr.TEXT_DIR_REL).glob("*.txt")]
+    _gone.write_bytes(_blob)
+    record("text copies survive a delta call; a copy whose source is gone is removed",
+           bool(kept) and not any("Table1.xlsx" in n for n in left), str(left))
     proto = p / "01_protocol/protocol_v1.md"
     proto.write_text("# Design precedent\n- Comparator: precedent yes - PMID 31234567\n"
                      "- Denominator: precedent no - justification: device-level reports have no exposure "

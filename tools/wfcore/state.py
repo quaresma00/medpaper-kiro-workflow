@@ -156,8 +156,31 @@ class State:
             self._note_v1120(old_version, pipeline_version)
             self._note_v1130(old_version, pipeline_version)
             self._note_v1140(old_version, pipeline_version)
+            self._note_v1141(old_version, pipeline_version)
             self.save()
         return changed
+
+    def _note_v1141(self, old_version: str, new_version: str) -> None:
+        """1.14.1: patch release. Event only; no file or stage is touched."""
+        if (version_tuple(old_version) >= (1, 14, 1) or version_tuple(new_version) < (1, 14, 1)
+                or self.data.get("v1141_migration_noted")):
+            return
+        self.data["v1141_migration_noted"] = True
+        self.event("requirements_changed",
+                   "1.14.1: the opened folder is the paper (an older attempt in a subfolder is "
+                   "left isolated; a fresh restart archives in place after confirmation); one "
+                   "merged guard hook on writes and folder searches only (adapters refresh "
+                   "automatically); Word files carry no keep markers unless the journal sets "
+                   "keep_table_footnotes; meaning-report lines parsed one by one; the latest "
+                   "receipt per file across all closed rounds, builder outputs recorded into the "
+                   "open round; supplementary page reads affiliation or address; versions, URLs, "
+                   "DOIs and identifiers are not numbers to trace; registration-status sentences "
+                   "are allowed; polish_allowlist also from 08_submission/manuscript/; "
+                   "upload:false items are evidence; per-sheet table tiles; previews of every "
+                   "page. Stricter checks (zero keep markers without the switch, PDF /Lang, "
+                   "document properties without local paths, receipts of every closed round) "
+                   "apply to this paper only after `wf migrate --yes`. Paper files were not "
+                   "modified.")
 
     def _note_v1140(self, old_version: str, new_version: str) -> None:
         """1.14.0: an external review of 1.13.0. Event only; no file or stage is touched."""

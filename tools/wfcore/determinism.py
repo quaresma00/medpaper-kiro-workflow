@@ -178,6 +178,83 @@ def _normalize_tiff(path: Path) -> None:
     copy.save(path, format="TIFF", **kwargs)
 
 
+EMPTY_CUSTOM = (b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+                b'<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/'
+                b'custom-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/'
+                b'2006/docPropsVTypes"/>')
+_LOCAL_PATH_RE = re.compile(r"(?<![\w])[A-Za-z]:[\\/][^<]*|(?<![\w./])/(?:Users|home|tmp)/[^<]*")
+
+
+def scrub_properties(path: Path) -> Path:
+    """1.14.1 (B5): an engine-built Office file carries no build data in its properties:
+    docProps/custom.xml loses every property (pandoc writes csl and bibliography paths there)
+    and local paths are removed from the core/app property values."""
+    path = Path(path)
+    if path.suffix.casefold() not in _ZIP_SUFFIXES or not path.is_file():
+        return path
+    try:
+        with zipfile.ZipFile(path) as src:
+            entries = [(info, src.read(info.filename)) for info in src.infolist()]
+    except (OSError, zipfile.BadZipFile):
+        return path
+    changed = False
+    out_entries = []
+    for info, blob in entries:
+        new = blob
+        if info.filename == "docProps/custom.xml":
+            new = EMPTY_CUSTOM
+        elif info.filename in ("docProps/core.xml", "docProps/app.xml"):
+            text = blob.decode("utf-8", errors="replace")
+            text = re.sub(r">([^<]*)<", lambda m: ">" + _LOCAL_PATH_RE.sub("", m.group(1)) + "<",
+                          text)
+            new = text.encode("utf-8")
+        changed |= new != blob
+        out_entries.append((info, new))
+    if not changed:
+        return path
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as out:
+        for info, blob in out_entries:
+            out.writestr(info, blob)
+    path.write_bytes(buf.getvalue())
+    return path
+
+
+def set_pdf_lang(path: Path, lang: str = "en-US") -> bool:
+    """1.14.1 (B4): the document language of an engine-exported PDF (/Lang in the catalog).
+    Word COM on a Chinese system writes /Lang (zh); the journal's language wins. pypdf is
+    required; without it the PDF is left as it is (the audit then reports the language)."""
+    path = Path(path)
+    try:
+        from pypdf import PdfReader, PdfWriter
+        from pypdf.generic import NameObject, TextStringObject
+    except ImportError:
+        return False
+    try:
+        reader = PdfReader(str(path))
+        if str(reader.trailer["/Root"].get("/Lang", "")) == lang:
+            return True
+        writer = PdfWriter(clone_from=reader)
+        writer._root_object[NameObject("/Lang")] = TextStringObject(lang)
+        buf = io.BytesIO()
+        writer.write(buf)
+    except Exception:  # noqa: BLE001 - a PDF pypdf cannot rewrite stays as exported
+        return False
+    path.write_bytes(buf.getvalue())
+    return True
+
+
+def pdf_lang(path: Path) -> str | None:
+    """/Lang of a PDF's catalog (None when absent or unreadable)."""
+    try:
+        from pypdf import PdfReader
+        value = PdfReader(str(path)).trailer["/Root"].get("/Lang")
+        return None if value is None else str(value)
+    except Exception:  # noqa: BLE001
+        m = re.search(rb"/Lang\s*\(([^)]*)\)", Path(path).read_bytes() if Path(path).is_file() else b"")
+        return m.group(1).decode("latin-1") if m else None
+
+
 def normalize(path: Path, *, blind: bool = False) -> Path:
     """Make a written derived file byte-stable. Unknown types are left untouched."""
     path = Path(path)

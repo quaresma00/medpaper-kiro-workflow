@@ -35,8 +35,8 @@ ENGINE_BLOCK = """
 > sessions: no paper lives in it or writes into it, and it refuses to run when modified.
 >
 > The paper is the folder the user opened as the Kiro workspace. Initialise it in place with
-> `python "{engine}/tools/wf.py" init` (never invent another location, never use the data
-> folder or its parent); then:
+> `python "{engine}/tools/wf.py" init` (never create a subfolder for it, never ask the user to
+> reopen another folder, never use the data folder or its parent); then:
 >
 > ```
 > python "{engine}/tools/wf.py" status

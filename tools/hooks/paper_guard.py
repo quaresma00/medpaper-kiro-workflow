@@ -33,6 +33,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # frozen_guard (merged hook, 1.14.1)
 
 WRITE_TOOL_RE = re.compile(r"(?i)write|replace|append|delete|remove|relocate|rename|move|edit|"
                            r"create|insert|patch")
@@ -203,11 +204,17 @@ class Guard:
         except SystemExit:
             self.papers_root = None
         self.deny = []
+        self.reports: list[Path] = []
         try:
             cfg = paths.user_config()
             self.deny = [Path(x) for x in cfg.get("guard_deny", []) if isinstance(x, str)]
+            # 1.14.1 (P2): user-declared report folders (.md/.txt writes allowed there)
+            self.reports = [Path(x) for x in cfg.get("report_dirs", []) if isinstance(x, str)]
         except SystemExit:
             pass
+        # 1.14.1 (P1): an older paper attempt in a subfolder of this paper stays isolated.
+        self.nested = [Path(os.path.abspath(str(n))) for n in paths.nested_papers(self.paper)]
+        self.archive = self.paper / paths.ARCHIVE_DIR
         env_temp = os.environ.get("MEDPAPER_GUARD_TEMP")
         self.temp = Path(env_temp) if env_temp else (temp or Path(tempfile.gettempdir()))
         self._memo: dict[str, str] = {}
@@ -265,6 +272,10 @@ class Guard:
 
     def _classify(self, p: Path, directory_scan: bool) -> str:
         if _within(p, self.paper):
+            if any(_within(p, n) for n in self.nested):
+                return "other_paper"
+            if _within(p, self.archive):
+                return "paper_state"
             rel = os.path.relpath(_norm(p), _norm(self.paper)).replace("\\", "/")
             if rel in ENGINE_STATE or rel.startswith(ENGINE_STATE_DIRS):
                 return "paper_state"
@@ -290,6 +301,8 @@ class Guard:
             return "kiro"
         if self._holds_paper(p):  # an existing folder with other papers below it (2 levels)
             return "holds_papers"
+        if any(_within(p, r) for r in self.reports):
+            return "report"
         return "outside"
 
     # ------------------------------------------------------------------ decisions
@@ -323,11 +336,39 @@ class Guard:
         why = self.READ_DENY.get(cls)
         return f"{what} {p}: {why}" if why else None
 
+    REPORT_SUFFIXES = (".md", ".txt")
+
     def _deny_write(self, p: Path, cls: str, what: str) -> str | None:
         if cls in self.READ_DENY:
             return self._deny_read(p, cls, what)
+        if cls == "report":
+            # 1.14.1 (P2): a user-declared report folder takes .md/.txt files only.
+            if p.suffix.casefold() in self.REPORT_SUFFIXES:
+                return None
+            return (f"{what} {p}: only .md/.txt reports may be written into a declared report "
+                    "folder (report_dirs)")
         why = self.WRITE_DENY.get(cls, self.WRITE_DENY["outside"])
         return f"{what} {p}: {why}" if why else None
+
+    def _nested_scope(self, name: str, args) -> str | None:
+        """1.14.1 (P1): a whole-workspace search would read an older paper attempt kept in a
+        subfolder; the search has to name this paper's folders or exclude that subfolder."""
+        if not self.nested or not re.search(r"(?i)grep|search", name or ""):
+            return None
+        if not isinstance(args, dict):
+            return None
+        inc = str(args.get("includePattern") or args.get("include_pattern") or "")
+        exc = str(args.get("excludePattern") or args.get("exclude_pattern") or "")
+        rels = [os.path.relpath(_norm(n), _norm(self.paper)).replace("\\", "/") for n in self.nested]
+        if all(r.casefold() in exc.replace("\\", "/").casefold() for r in rels):
+            return None
+        head = inc.replace("\\", "/").lstrip("./")
+        if head and not head.startswith(("*", "{", "[")):
+            return None  # scoped to one of this paper's folders (check_path judges it)
+        return (f"search of the whole workspace: it holds an older paper attempt in "
+                f"{', '.join(r + '/' for r in rels[:3])}, which stays isolated - give an "
+                f"includePattern under this paper's folders (e.g. 07_manuscript/**) or an "
+                f"excludePattern for {rels[0]}/**")
 
     def _glob_dir(self, raw: str, base: Path) -> Path | None:
         cut = min((raw.find(c) for c in GLOB_CHARS if c in raw), default=-1)
@@ -499,6 +540,10 @@ class Guard:
         is_write = bool(WRITE_TOOL_RE.search(name)) if name else bool(
             isinstance(args, dict) and ({"text", "newstr", "content", "newStr"} & set(args)))
         problems: list[str | None] = []
+        if not is_write:
+            nested = self._nested_scope(name, args)
+            if nested:
+                return nested
 
         def walk(node, key=""):
             if isinstance(node, dict):
@@ -555,6 +600,17 @@ def main(argv: list[str] | None = None) -> int:
               f"{paper}; it may read and write only itself, read the engine and its declared "
               "data sources (wf data list).", file=sys.stderr)
         return 2
+    # 1.14.1 (P2): the frozen-source guard (1.8.0) runs in the same hook, on writes only.
+    name = next((payload[k] for k in NAME_KEYS if isinstance(payload.get(k), str)), "")
+    if name and WRITE_TOOL_RE.search(name):
+        try:
+            import frozen_guard
+            frozen = frozen_guard.blocked(raw, project=paper)
+        except Exception:  # noqa: BLE001 - fail open, as the separate hook did
+            frozen = None
+        if frozen:
+            print(frozen, file=sys.stderr)
+            return 2
     return 0
 
 

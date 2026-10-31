@@ -64,6 +64,22 @@ def build(src: Path, out: Path, official: dict[str, str] | None = None,
     if not blocks:
         raise ValueError(f"{src.name}: no 'Guideline:' block with a table")
     titles = _titles()
+    font = "Times New Roman"
+    try:  # 1.14.1 (B12): the journal's Word font, so the upload audit passes as role checklist
+        style = json.loads((wfpaths.project_dir(check_engine=False)
+                            / "08_submission/docx_style.json").read_text(encoding="utf-8"))
+        font = str(style.get("font_family") or font)
+    except (OSError, ValueError, SystemExit):
+        pass
+
+    def fmt(run, size: float = 10):
+        """Explicit black journal font on every run (what docx_bundle_ready audits)."""
+        run.font.name, run.font.size = font, Pt(size)
+        run.font.color.rgb = RGBColor(0, 0, 0)
+        rfonts = run._element.get_or_add_rPr().get_or_add_rFonts()
+        for attr in ("w:ascii", "w:hAnsi", "w:eastAsia", "w:cs"):
+            rfonts.set(qn(attr), font)
+        return run
     doc = Document()
     sec = doc.sections[0]
     sec.orientation = WD_ORIENT.LANDSCAPE
@@ -71,9 +87,9 @@ def build(src: Path, out: Path, official: dict[str, str] | None = None,
     for side in ("left_margin", "right_margin", "top_margin", "bottom_margin"):
         setattr(sec, side, Cm(2.0))
     normal = doc.styles["Normal"]
-    normal.font.name, normal.font.size = "Times New Roman", Pt(10)
+    normal.font.name, normal.font.size = font, Pt(10)
     normal.font.color.rgb = RGBColor(0, 0, 0)
-    normal.element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:eastAsia"), "Times New Roman")
+    normal.element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:eastAsia"), font)
     cols = [("Item", 1.6), ("Topic", 6.5 if official else 5.0)]
     if official:
         cols.append(("Recommendation", 8.0))
@@ -82,9 +98,8 @@ def build(src: Path, out: Path, official: dict[str, str] | None = None,
         cols.append(("Page", 1.6))
     for block in blocks:
         head = doc.add_paragraph()
-        run = head.add_run(f"{block['guideline']} checklist")
+        run = fmt(head.add_run(f"{block['guideline']} checklist"), 12)
         run.bold = True
-        run.font.size = Pt(12)
         gid = block["guideline"].split("+")[0].strip().upper()
         table = doc.add_table(rows=1, cols=len(cols))
         table.autofit = False
@@ -95,7 +110,7 @@ def build(src: Path, out: Path, official: dict[str, str] | None = None,
         for i, (name, width) in enumerate(cols):
             cell = table.rows[0].cells[i]
             cell.width = Cm(width)
-            cell.paragraphs[0].add_run(name).bold = True
+            fmt(cell.paragraphs[0].add_run(name)).bold = True
         for row in block["rows"]:
             item = re.sub(r"^(?:STROBE|RECORD|PRISMA|CONSORT)\s+", "", row["item"], flags=re.I)
             values = [row["item"], titles.get(gid, {}).get(item, "")]
@@ -108,7 +123,7 @@ def build(src: Path, out: Path, official: dict[str, str] | None = None,
             cells = table.add_row().cells
             for i, (value, (_, width)) in enumerate(zip(values, cols)):
                 cells[i].width = Cm(width)
-                cells[i].paragraphs[0].add_run(value)
+                fmt(cells[i].paragraphs[0].add_run(value))
                 if i == 0:  # the item id stays on one line
                     pr = cells[i]._tc.get_or_add_tcPr()
                     nowrap = OxmlElement("w:noWrap")
@@ -121,8 +136,30 @@ def build(src: Path, out: Path, official: dict[str, str] | None = None,
     doc.core_properties.author = ""
     doc.core_properties.last_modified_by = ""
     doc.save(out)
+    _strip_template_controls(out)
+    determinism.scrub_properties(out)  # 1.14.1 (B5)
     determinism.normalize(out, blind=True)
     return out
+
+
+def _strip_template_controls(path: Path) -> None:
+    """1.14.1 (B12): the python-docx template's styles carry keepNext/keepLines/outlineLvl
+    (headings) and a paragraph border (Title); the upload audit refuses all of them (black
+    squares, outline levels), so they go, as in build_docx."""
+    import io
+    import zipfile
+    with zipfile.ZipFile(path) as src:
+        entries = [(i, src.read(i.filename)) for i in src.infolist()]
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as dst:
+        for info, blob in entries:
+            if info.filename.startswith("word/") and info.filename.endswith(".xml"):
+                for tag in (b"keepNext", b"keepLines", b"outlineLvl", b"pageBreakBefore", b"pBdr"):
+                    blob = re.sub(rb"<w:" + tag + rb"\b[^>]*/>", b"", blob)
+                    blob = re.sub(rb"<w:" + tag + rb"\b[^>]*>.*?</w:" + tag + rb">", b"", blob,
+                                  flags=re.S)
+            dst.writestr(info, blob)
+    path.write_bytes(buf.getvalue())
 
 
 def main(argv: list[str] | None = None) -> int:

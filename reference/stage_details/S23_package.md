@@ -204,7 +204,13 @@ Before the user submits, list for them what the portal will ask beyond the files
   font is Times New Roman; no outline numbering, `outlineLvl`, `pageBreakBefore`,
   paragraph-border residue or collapsible heading level in any Word XML; no black squares:
   zero keepNext/keepLines/pageBreakBefore on any paragraph, table cell, caption, footnote,
-  legend, heading or style; embedded figures at a readable size, never thumbnails.
+  legend, heading or style (1.14.1: a table footnote is a normal paragraph after the table; an
+  occasional footnote on the next page is accepted, publishers re-typeset; only the journal
+  switch `keep_table_footnotes: true` in target_journal.json keeps it with the last row);
+  embedded figures at a readable size, never thumbnails. Engine-built Word files carry no
+  custom document properties or local paths; exported PDFs carry the journal's `language`
+  as /Lang (default en-US). A reporting checklist is listed with role `checklist` (tables
+  allowed): build it with `checklist_docx.py` or `build_docx.py --kind checklist_form`.
 - `References` and `Figure legends` must be visible in the manuscript.
 - Any title-page reference count must equal the distinct citations actually used in the
   canonical manuscript; both the Markdown source and generated Word title page are checked.

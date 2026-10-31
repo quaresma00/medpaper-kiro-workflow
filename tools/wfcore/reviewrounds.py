@@ -269,7 +269,7 @@ def write_bundle(project: Path, rnd: dict) -> Path:
         dst = out / "files" / rel.replace("/", "__")
         shutil.copyfile(src, dst)
         lines.append(f"- {dst} <- {rel} ({digest[:16]})")
-    for rel in write_text_copies(project, [r for r in rnd["reviewed"]
+    for rel in write_text_copies(project, round_id=rnd["id"], rels=[r for r in rnd["reviewed"]
                                            if r.endswith((".docx", ".xlsx"))]):
         dst = out / "files" / Path(rel).name
         shutil.copyfile(project / rel, dst)

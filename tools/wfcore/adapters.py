@@ -28,8 +28,8 @@ inclusion: always
 This workspace is the medpaper ENGINE: the shared, pure workflow that drives every paper. It is
 maintenance only. No paper may live in it, be selected in it, or write into it.
 
-- Never create, select or continue a paper here. Start one with
-  `python tools/wf.py new <slug>` and open the folder it prints as its own Kiro workspace.
+- Never create, select or continue a paper here. A paper is the folder the user opens as its
+  own Kiro workspace; `wf init` there makes it a paper in place.
 - `python tools/wf.py status` here prints the ENGINE WORKSPACE banner (papers root, papers,
   selection); paper-driving commands are refused from this folder.
 - The pipeline has 25 stages, defined in `pipeline/pipeline.toml` with one card per stage in
@@ -64,12 +64,15 @@ inclusion: always
 > prompt governs; this file does not.
 
 This workspace is one medpaper PAPER: this folder is the paper (`project/...` in a stage card
-means this folder). The engine at `${engine}` is shared and read-only for you: never edit,
+means this folder). Never create a subfolder for the paper and never ask the user to reopen
+another folder; an older attempt in a subfolder stays untouched. The engine at `${engine}`
+is shared and read-only for you: never edit,
 create or delete anything under it; the engine refuses to run when it was modified. If a gate
 is genuinely wrong for this paper: paper overrides first (`wf config set`, `wf override init`,
 target_journal.json), then a project-local fork (`${wf} engine-fork create`), never the global
 engine. Never read, list, search or copy another paper or the central papers root; the
-paper-guard hook blocks it. The user's datasets are read in place, read-only, and are never
+paper-guard hook blocks it. Files are written only inside this paper, except .md/.txt reports
+into a folder the user declared (`${wf} config --user report_dirs add <dir>`). The user's datasets are read in place, read-only, and are never
 copied: declare each once with `${wf} data add <absolute path>`.
 
 **Before doing anything, run `${wf} status`.** It returns the current stage, the invariants,
@@ -145,12 +148,21 @@ def _hook(name: str, trigger: str, description: str, command: str, timeout: int,
     return json.dumps({"version": "v1", "hooks": [spec]}, indent=2, ensure_ascii=False) + "\n"
 
 
-GUARD_MATCHER = ("read_file|read_code|read_multiple_files|list_directory|grep_search|file_search|"
-                 "fs_write|str_replace|fs_append|delete_file|smart_relocate|semantic_rename|"
-                 "execute_pwsh|execute_bash|control_pwsh_process|readFile|readCode|"
-                 "readMultipleFiles|listDirectory|grepSearch|fileSearch|fsWrite|strReplace|"
-                 "fsAppend|deleteFile|smartRelocate|semanticRename|executePwsh|executeBash|"
-                 "editCode|.*[Ss]ub_?[Aa]gent.*|.*[Ww]orkflow.*|invoke.*|delegate.*")
+# 1.14.1 (P2): ONE merged PreToolUse hook per paper (isolation + frozen-source guard) that
+# matches only the write/delete/rename tools and the directory-discovery tools. Reads and shell
+# calls - the most frequent tool calls - no longer trigger a hook (Kiro showed "Run Command
+# Hook" before almost every call). Discovery of other papers stays blocked, wf output never
+# prints another paper, and the engine refuses paper commands when it was modified or HEAD is
+# not a release tag; data_not_copied still catches a copied dataset. camelCase aliases name the
+# same tools.
+GUARD_TOOLS = ("fs_write", "str_replace", "fs_append", "delete_file", "smart_relocate",
+               "semantic_rename", "list_directory", "file_search", "grep_search")
+GUARD_MATCHER = "|".join(GUARD_TOOLS + ("fsWrite", "strReplace", "fsAppend", "deleteFile",
+                                        "smartRelocate", "semanticRename", "listDirectory",
+                                        "fileSearch", "grepSearch"))
+# Hook files an older engine wrote that the current engine no longer installs (removed on
+# refresh): 1.14.1 merged the frozen-source guard into the paper guard.
+OBSOLETE_HOOKS = (".kiro/hooks/medpaper-frozen-guard.json",)
 
 
 def render_adapters(wf_cmd: str, tool_prefix: str, *, engine_workspace: bool,
@@ -173,29 +185,20 @@ def render_adapters(wf_cmd: str, tool_prefix: str, *, engine_workspace: bool,
         "gate unsatisfiable (write-paper, orchestrate, make-figures, search-lit and others), and "
         "asks for confirmation on skills that merely overlap a stage. Decisions come from "
         "reference/skill_policy.toml.", guard, 30, matcher="disclose_context")
-    frozen_cmd = ("python tools/hooks/frozen_guard.py" if engine_workspace
-                  else f'python "{tool_prefix}hooks/frozen_guard.py"')
-    frozen_guard = _hook(
-        "medpaper: stop edits to frozen or certified sources", "PreToolUse",
-        "Refuses a file write to a scientifically frozen or revision-certified source (for "
-        "example a figure script at S23) unless an open revision round covers it, and names the "
-        "rework.py command that opens one.", frozen_cmd, 30,
-        matcher="fs_write|str_replace|fsWrite|strReplace|fsAppend|editCode")
     files = [(".kiro/steering/medpaper-pipeline.md", steering),
              (".kiro/hooks/medpaper-status.json", status),
-             (".kiro/hooks/medpaper-skill-guard.json", skill_guard),
-             (".kiro/hooks/medpaper-frozen-guard.json", frozen_guard)]
+             (".kiro/hooks/medpaper-skill-guard.json", skill_guard)]
     if not engine_workspace:
-        # 1.13.0: isolation. Blocks other papers, the central papers root, archives, stray temp
-        # files and any write into the shared engine, before the tool call runs.
+        # 1.13.0: isolation; 1.14.1 (P2): one hook for isolation and frozen sources, on writes
+        # and directory discovery only.
         arg = f' --paper "{Path(paper).resolve().as_posix()}"' if paper else ""
         files.append((".kiro/hooks/medpaper-paper-guard.json", _hook(
-            "medpaper: keep this paper isolated", "PreToolUse",
-            "Blocks any read, list, search or write that touches another paper, the central "
-            "papers root or an archive, any write into the shared engine or outside this paper, "
-            "and shell commands that do either. The engine and the declared data sources stay "
-            "readable.", f'python "{tool_prefix}hooks/paper_guard.py"{arg}', 10,
-            matcher=GUARD_MATCHER)))
+            "medpaper: guard writes and folder searches", "PreToolUse",
+            "Runs only on file writes, deletes, renames and folder listing/search. Blocks a "
+            "write into the shared engine, outside this paper (except .md/.txt in your report "
+            "folders) or to a frozen/certified source outside an open revision round, and any "
+            "listing or search of another paper, the central papers root or an archive.",
+            f'python "{tool_prefix}hooks/paper_guard.py"{arg}', 10, matcher=GUARD_MATCHER)))
     return files
 
 
@@ -234,7 +237,41 @@ def write_adapters(dest_root: Path, files, *, check: bool) -> list[tuple[str, st
             continue
         p.write_text(content, encoding="utf-8", newline="\n")
         rows.append((rel, "updated" if existed else "created"))
+    for rel in OBSOLETE_HOOKS:  # 1.14.1: hooks the engine no longer installs
+        p = dest_root / rel
+        if p.is_file() and "medpaper" in p.read_text(encoding="utf-8", errors="replace"):
+            if check:
+                rows.append((rel, "STALE"))
+            else:
+                p.unlink()
+                rows.append((rel, "removed"))
     return rows
+
+
+def _engine_of(paper: Path) -> Path:
+    """The engine a paper's adapters call: its project-local fork, else this engine."""
+    fork = Path(paper) / paths.FORK_REL
+    return fork if (fork / paths.FORK_MARKER).is_file() else paths.repo_root()
+
+
+def refresh_paper(paper: Path) -> list[str]:
+    """1.14.1 (P2): bring a paper's derived adapters (.kiro steering/hooks) up to this engine
+    release. Only a paper that already has medpaper adapters calling THIS engine (or its own
+    fork) is touched; returns the changed files ([] = already current)."""
+    paper = Path(paper)
+    hooks = paper / ".kiro" / "hooks"
+    mine = sorted(hooks.glob("medpaper-*.json")) if hooks.is_dir() else []
+    if not mine:
+        return []
+    engine = _engine_of(paper)
+    marker = Path(engine).as_posix()
+    try:
+        if not any(marker in p.read_text(encoding="utf-8", errors="replace") for p in mine):
+            return []  # written by another engine checkout: never re-point it from here
+        rows = write_adapters(paper, paper_adapters(engine, paper), check=False)
+    except (OSError, ValueError):
+        return []
+    return [rel for rel, status in rows if status in ("updated", "created", "removed")]
 
 
 def global_agents_dir() -> Path:

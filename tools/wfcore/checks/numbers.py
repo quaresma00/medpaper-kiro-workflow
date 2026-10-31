@@ -166,7 +166,9 @@ def _matches(token: str, floats: set[float], strings: set[str]) -> bool:
 
 
 def _scrub(text: str) -> str:
+    from .. import nonfacts  # 1.14.1 (B6): versions, URLs, DOIs, identifiers are not facts
     text = FENCE_RE.sub(" ", text)
+    text = nonfacts.strip(text)
     text = CITE_RE.sub(" ", text)
     text = ARTIFACT_RE.sub(" ", text)
     text = re.sub(r"^\s*#{1,6}\s.*$", " ", text, flags=re.M)
