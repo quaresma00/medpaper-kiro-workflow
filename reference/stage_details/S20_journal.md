@@ -1,5 +1,16 @@
 # S20 - Select the most realistic current SCIE journal - details
 
+> 1.15.0 supersedes older wording below where they differ: only an explicit numeric rule of
+> the guide is a hard cap. Never derive a word cap from a page count; an estimate goes in
+> `limits.estimated` (or a source saying 'estimated from N pages') and is a soft hint that
+> never triggers cutting. New typed switches: `separate_display_files` (default on unless the
+> journal forbids it: main figure TIFFs and table workbooks as separate uploads),
+> `display_file_names`, `figure_dpi`, `supplementary_label` (default "Online Resource"),
+> `abbreviation_list` (`none|after_keywords`, default after_keywords, never inside
+> Declarations), `reference_rules.drop_discussion_pages`. A later change of the official
+> guide: `wf guidelines refresh --from <new extract> --source <url>` (dated snapshot; audits
+> read the latest).
+
 > Long form of `pipeline/stages/S20_journal.md` (moved out of the card in 1.12.0 so the
 > card stays short). Read only the section you need; the card has the commands.
 >

@@ -1,5 +1,14 @@
 # S24 - Review rounds on the submission package, then the user's confirmation - details
 
+> 1.15.0 supersedes older wording below where they differ: after any edit run `wf rebuild
+> --wait`. Meaning checks compare the last confirmed copy with the current one, per sentence
+> pair, in ONE bundle per round; the author may override any pair (also a reviewer's
+> 'changed') with `rework.py meaning-decide --pair <id|hash> --verdict unchanged --words
+> "<author's words>"` (shown in the round summary). The reviewer writes its report itself;
+> when the host refuses, save its reply and use `review_round.py ingest --from <file>` /
+> `rework.py meaning-ingest --from <file>` (verbatim). PREFERENCE findings may close as one
+> group: `review_round.py close ... --preference-group "<reason>"`.
+
 > Long form of `pipeline/stages/S24_package_human_review.md` (moved out of the card in 1.12.0 so the
 > card stays short). Read only the section you need; the card has the commands.
 >

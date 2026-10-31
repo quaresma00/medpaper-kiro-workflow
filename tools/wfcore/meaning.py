@@ -15,11 +15,18 @@ direction and significance claims, limitations/caveats, population and time-wind
 the display-dictionary terms) are compared. A typo fix maps onto its corrected word, a
 reordered paragraph keeps its profile, a moved paragraph cancels out.
 
-MEANING_CHECK never rewinds. The caller writes a small bundle
-(.wf/review_bundle/meaning_<context>_<digest>/: the pairs, the results in words and a neutral
-brief); the read-only medpaper-reviewer subagent records one verdict per pair in that bundle's
-report.md ("P01: meaning unchanged" | "P01: meaning changed - <reason>"), or the author decides
-(rework.py meaning-decide). Verdicts are stored by pair hash in .wf/meaning_verdicts.json.
+MEANING_CHECK never rewinds. The caller writes a small bundle (the pairs, the results in words
+and a neutral brief); the medpaper-reviewer subagent records one verdict per pair in that
+bundle's report.md ("P01: meaning unchanged - why" | "P01: meaning changed - why"), or the
+author decides (rework.py meaning-decide).
+
+1.15.0 (E1): pairs are aligned SENTENCES inside changed paragraphs, hashed on their normalised
+words, so an identical pair is never asked twice; the journal copy and the final copy are
+compared with their last confirmed version (all pairs 'unchanged'), not with the original
+again; while a revision round is open every context shares ONE bundle
+(.wf/review_bundle/meaning_<round>/, stable ids P01..); the author may override any pair,
+including a reviewer's 'changed', by id or hash (the overridden verdict and the author's words
+are kept). Verdicts live in .wf/meaning_verdicts.json (1.14 paragraph hashes still count).
 """
 from __future__ import annotations
 

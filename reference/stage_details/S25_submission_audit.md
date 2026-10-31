@@ -1,5 +1,16 @@
 # S25 - Independent reader, editor and compliance audit of the confirmed package - details
 
+> 1.15.0 supersedes older wording below where they differ: `package_review.py audit-start`
+> writes the audit bundle - the FIRST audit is full, later ones re-check the previous findings
+> plus new BLOCKING issues only - and `package_review.py audit-save [--from <reply>]` copies
+> the reviewer's report verbatim (refused if a paper file changed during the audit).
+> Engine-owned formatting (keep markers, ESM header, PDF language, CSL rendering, document
+> properties) is reported as 'Engine issues' and never causes REVISE by itself. At the first
+> REVISE offer the user the author final copy at once (the open items are printed). The
+> final-copy check also covers PDFs (`final_copy.py export-pdf --docx ...` records
+> provenance) and TIFF/PNG figures (byte-identical to a certified master). The reviewer may
+> write its report file (it is no longer read-only).
+
 > Long form of `pipeline/stages/S25_submission_audit.md` (moved out of the card in 1.12.0 so the
 > card stays short). Read only the section you need; the card has the commands.
 >

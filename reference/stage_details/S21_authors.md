@@ -1,5 +1,12 @@
 # S21 - Collect authors and administrative statements - details
 
+> 1.15.0 supersedes older wording below where they differ: AI/LLM use is asked once, with the
+> journal's rule shown verbatim (`tools/declarations.py ai-rule`); the author's factual answer
+> is recorded (`tools/declarations.py ai --used yes|no --tool --purpose --words`) and the
+> printed statement goes into `statements.md`; audits read the fact instead of listing it as
+> pending. An abbreviation list is written as `## Abbreviations`; the builder moves it after
+> the keywords (or drops it for `abbreviation_list: none`), never inside Declarations.
+
 > Long form of `pipeline/stages/S21_authors.md` (moved out of the card in 1.12.0 so the
 > card stays short). Read only the section you need; the card has the commands.
 >
