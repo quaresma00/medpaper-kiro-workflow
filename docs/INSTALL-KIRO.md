@@ -63,8 +63,10 @@ python <engine>/tools/wf.py data add G:/data/x    # datasets stay where they are
 python <engine>/tools/wf.py new <slug> --central  # only if you want it under the central papers root
 ```
 
-`wf init` also writes the paper's own `.kiro/` steering and hooks (status, skill guard, frozen
-guard, paper isolation guard), which call the engine by absolute path. Put your research idea
+`wf init` also writes the paper's own `.kiro/` steering and hooks (status, skill guard, and one
+guard for writes and folder searches: paper isolation + frozen sources, 1.14.1), which call the
+engine by absolute path; every `wf` command refreshes them after an engine update. The folder
+you opened stays the paper: no subfolder, no reopening another folder. Put your research idea
 file in `00_input/`, then in Kiro chat:
 
 ```
