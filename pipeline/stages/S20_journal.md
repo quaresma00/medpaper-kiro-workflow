@@ -13,7 +13,10 @@ Details (typed-field JSON, docx_style.json template, evidence rules, switching j
    `Reject-fallback cascade`): 5-8 candidates ranked by acceptance probability and fit.
 3. Ask the user to choose (never default to the highest impact factor).
 4. Snapshot the official author guide to `08_submission/cache/` and write
-   `08_submission/target_journal.json` with typed fields: `limits` (+ `source`),
+   `08_submission/target_journal.json` with typed fields: `limits` (+ `source`; only an
+   explicit numeric rule is a cap - never derive word caps from a page count; an estimate
+   goes in `limits.estimated` and is only a hint), `separate_display_files`,
+   `supplementary_label`, `abbreviation_list` (`none|after_keywords`), `figure_dpi`,
    `word_count_scope`, `declarations_order`, `main_text_headings`, `keywords`, `legend_style`,
    `supplementary_aliases`, `reference_separator`, `si_format`, `abbreviation_placement`
    (`self_contained` unless the guide requires `central_required` + `abbreviation_rule_source`),

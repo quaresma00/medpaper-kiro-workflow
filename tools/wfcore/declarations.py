@@ -259,3 +259,50 @@ def answer(project: Path, qid: str, value: str) -> dict:
 def pending(data: dict) -> list[dict]:
     answers = data.get("answers", {})
     return [q for q in data.get("questions", []) if q["id"] not in answers]
+
+
+# --------------------------------------------------------------------------- 1.15.0 (E10)
+AI_RULE_RE = (r"(?i)(large language model|\bLLMs?\b|generative (?:AI|artificial)|"
+              r"artificial intelligence|\bAI\b[- ](?:assisted|generated|tools?|use)|ChatGPT|"
+              r"chatbot)")
+
+
+def ai_requirement(project: Path) -> str:
+    """The journal's AI/LLM-use rule, verbatim from the guideline snapshot ('' = silent)."""
+    from .guidelines import section
+    return section(project, AI_RULE_RE)
+
+
+def ai_statement(fact: dict) -> str:
+    if not fact.get("used"):
+        return ("No generative artificial intelligence (AI) or large language model tools were "
+                "used to write this manuscript or to analyse its data.")
+    return (f"During the preparation of this work the authors used {fact['tool']} for "
+            f"{fact['purpose']}. The authors reviewed and edited the output and take full "
+            "responsibility for the content of the publication.")
+
+
+def record_ai(project: Path, used: bool, tool: str, purpose: str, words: str) -> dict:
+    """The author's FACTUAL answer on AI/LLM use (used or not, tool, purpose), in their words."""
+    if len(words.strip()) < 2:
+        raise ValueError("record the author's own answer (--words)")
+    if used and (len(tool.strip()) < 2 or len(purpose.strip()) < 5):
+        raise ValueError("when AI/LLM tools were used, record the tool and the purpose")
+    data = load(project)
+    if not data:
+        raise ValueError(f"{REL} missing: run tools/declarations.py assess first")
+    fact = {"used": bool(used), "tool": tool.strip() if used else "",
+            "purpose": purpose.strip() if used else "", "author_words": words.strip(),
+            "at": _now()}
+    fact["statement"] = ai_statement(fact)
+    rule = ai_requirement(project)
+    fact["journal_rule"] = rule[:1500]
+    data["ai_use"] = fact
+    (Path(project) / REL).write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+                                     encoding="utf-8")
+    return fact
+
+
+def ai_fact(project: Path) -> dict | None:
+    fact = load(project).get("ai_use")
+    return fact if isinstance(fact, dict) and "used" in fact else None

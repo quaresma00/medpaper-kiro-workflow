@@ -463,8 +463,8 @@ def _classify_for_check(project: Path, pipe, state: State, path: Path, revision:
         context = revision["round_id"]
         unresolved, changed_meaning = meaning.resolve(project, context, verdict["meaning_pairs"])
         if changed_meaning:
-            verdict["reasons"] += [f"{p['file']} {p['id']}: meaning changed ({p.get('by')}): "
-                                   f"{p['reason'][:100]}" for p in changed_meaning]
+            # 1.15.0 (E1d): each 'changed' pair names its id/hash; the author may override it.
+            verdict["reasons"] += [meaning.changed_line(p) for p in changed_meaning]
             verdict["class"] = "scientific"
         elif unresolved:
             revision["classification"] = verdict
@@ -479,6 +479,9 @@ def _classify_for_check(project: Path, pipe, state: State, path: Path, revision:
         else:
             verdict["meaning_verified"] = len(verdict["meaning_pairs"])
             verdict["class"] = "presentation"
+        over = meaning.overrides(project, {p["hash"] for p in verdict["meaning_pairs"]})
+        if over:
+            revision["meaning_overrides"] = over
     verdict["label"] = {"presentation": "SAFE", "scientific": "SCIENCE"}.get(verdict["class"],
                                                                              "MEANING_CHECK")
     revision["classification"] = verdict
@@ -500,6 +503,8 @@ def _classify_for_check(project: Path, pipe, state: State, path: Path, revision:
         if verdict.get("meaning_verified"):
             print(f"meaning check: {verdict['meaning_verified']} wording change(s) judged "
                   "'meaning unchanged' (reviewer/author verdicts in .wf/meaning_verdicts.json)")
+        for line in revision.get("meaning_overrides") or []:
+            print(f"  author override: {line}")
         print("Show the user this change summary (each added number with its source) when "
               "reporting the round.")
         return None
@@ -605,21 +610,39 @@ def _cmd_meaning_decide(project: Path, state: State, pair_id: str | None, verdic
                         words: str, context: str | None = None) -> int:
     """1.14.0 (A): the author's verdict on one meaning-check pair (instead of the reviewer)."""
     from wfcore import meaning
-    if context:  # journal copy / final copy / presentation layer: the latest bundle's pairs
-        pairs, label = meaning.bundle_pairs(project, context), context
-    else:
+    # 1.15.0 (E1d): any pair - by its id in the open round's (or context's) bundle or by the
+    # hash shown in the check output - including one a reviewer judged 'changed'.
+    label = meaning.bundle_key(project, context or "")
+    pair = meaning.find_pair(project, pair_id or "", context)
+    if pair is None and not context and not meaning.active_round(project):
         _path, revision = _load_round(state)
         pairs = (revision.get("classification") or {}).get("meaning_pairs") or []
-        label = revision["round_id"]
-    pair = next((p for p in pairs if p.get("id") == str(pair_id or "").upper()), None)
+        pair = next((p for p in pairs if p.get("id") == str(pair_id or "").upper()), None)
     if pair is None or not verdict:
-        raise ValueError("meaning-decide needs --pair <id from the check output> and --verdict "
-                         "unchanged|changed; known pairs: " + ", ".join(p["id"] for p in pairs))
-    meaning.record_author(project, pair, verdict, words or "")
-    state.event("meaning_decided", f"{label} {pair['id']}: {verdict} (author)")
+        known = meaning.known_pairs(project)
+        raise ValueError("meaning-decide needs --pair <id or hash from the check output> and "
+                         "--verdict unchanged|changed; known: " + ", ".join(
+                             f"{p.get('id')}[{str(p.get('hash'))[:8]}]" for p in known[-12:]))
+    rec = meaning.record_author(project, pair, verdict, words or "")
+    was = f" (overrides reviewer '{rec['overrides']['verdict']}')" if rec.get("overrides") else ""
+    state.event("meaning_decided", f"{label} {pair.get('id')} [{pair['hash'][:8]}]: {verdict} "
+                f"(author{was}): \"{rec['reason'][:200]}\"")
     state.save()
-    print(f"{pair['id']}: meaning {verdict} (author); rerun rework.py check")
+    print(f"{pair.get('id')} [{pair['hash'][:8]}]: meaning {verdict} (author{was}); rerun rework.py check")
     return 0
+
+
+def _cmd_meaning_ingest(project: Path, src: Path | None, context: str | None) -> int:
+    """1.15.0 (E2): the reviewer's saved reply / host workflow-state JSON -> report.md."""
+    from wfcore import meaning
+    from wfcore.argtext import wait_visible
+    if not wait_visible(src):
+        raise ValueError("meaning-ingest needs --from <saved reply or workflow-state JSON>")
+    dest, n = meaning.ingest_file(project, Path(src), context)
+    notes = meaning.ingest_reports(project)
+    print(f"{n} verdict line(s) copied verbatim to {dest}" + (f"; {' '.join(notes)}" if notes else
+                                                              "; rerun rework.py check"))
+    return 2 if notes else 0
 
 
 def _seal_round(state: State, pipe, why: str, rewind_words: str = "") -> int:
@@ -1029,6 +1052,8 @@ def _cmd_close(args, state: State, pipe=None) -> int:
     state.add_note(f"[REVISION COMPLETE] {revision['round_id']}: {args.summary.strip()}", state.current)
     state.save()
     print(f"closed {revision['round_id']}; user review may now continue")
+    for line in revision.get("meaning_overrides") or []:
+        print(f"author meaning override (tell the user): {line}")
     if revision.get("classification", {}).get("class") == "presentation":
         files = revision.get("presentation_delta", {}).get("files", [])
         print(f"presentation delta recorded ({len(files)} file(s)); the freezes were updated, not "
@@ -1087,8 +1112,10 @@ def _main() -> int:
     parser.add_argument("command", choices=["plan", "start", "batch", "seal", "check", "build",
                                             "refresh", "status", "mark", "close", "suspend",
                                             "resume", "progress", "layout", "preview",
-                                            "confirm-rewind", "meaning-decide"])
-    parser.add_argument("--pair", help="meaning-decide: the pair id (P01) from rework.py check")
+                                            "confirm-rewind", "meaning-decide", "meaning-ingest"])
+    parser.add_argument("--from", dest="from_file", type=Path, default=None,
+                        help="meaning-ingest: the reviewer's saved reply or a workflow-state JSON")
+    parser.add_argument("--pair", help="meaning-decide: the pair id (P01) or hash from the check output")
     parser.add_argument("--verdict", choices=["unchanged", "changed"],
                         help="meaning-decide: the author's verdict on that pair")
     parser.add_argument("--context", choices=["variant", "final", "freeze"],
@@ -1182,6 +1209,8 @@ def _main() -> int:
         if args.command == "meaning-decide":
             return _cmd_meaning_decide(project, state, args.pair, args.verdict, args.words,
                                        args.context)
+        if args.command == "meaning-ingest":
+            return _cmd_meaning_ingest(project, args.from_file, args.context)
         if args.command == "check" and (args.wait or args.log) and not os.environ.get("MEDPAPER_WAIT_CHILD"):
             from wfcore import longrun
             return longrun.run_quiet([sys.executable, *sys.argv], args.log or (

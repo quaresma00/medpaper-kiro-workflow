@@ -189,9 +189,38 @@ def pairs_for(old_text: str | None, new_text: str, rel: str, terms: dict[str, st
             o, n = old_t[max(0, i1 - 12):i2 + 12], new_t[max(0, j1 - 12):j2 + 12]
             cues = delta(o, n, terms)
             if cues:
-                out.append({"file": rel, "old": " ".join(o), "new": " ".join(n), "cues": cues})
+                pair = {"file": rel, "old": " ".join(o), "new": " ".join(n), "cues": cues}
+                out.append({**pair, "legacy": legacy_hash(pair)})
         return out
     po, pn = paragraphs(old_text, line_mode), paragraphs(new_text, line_mode)
+    for o, n in _align(po, pn):
+        cues = delta(tokens(o), tokens(n), terms)
+        if not cues:
+            continue
+        para = legacy_hash({"file": rel, "old": o, "new": n})
+        # 1.15.0 (E1b): judge per aligned SENTENCE pair, so a one-word edit in a long paragraph
+        # does not re-open the paragraph's other (already judged) sentences. A paragraph added
+        # or deleted as a whole stays one pair; cues that only cancel across sentences fall
+        # back to the paragraph pair.
+        sub = []
+        if o and n:
+            for a, b in _align(sentences(o), sentences(n)):
+                c = delta(tokens(a), tokens(b), terms)
+                if c:
+                    sub.append({"file": rel, "old": a, "new": b, "cues": c, "para": para})
+        out += sub or [{"file": rel, "old": o, "new": n, "cues": cues, "legacy": para}]
+    return out
+
+
+_SENT = re.compile(r"(?<=[.!?;])\s+(?=[\"'(\[]?[A-Z0-9])")
+
+
+def sentences(text: str) -> list[str]:
+    return [s.strip() for s in _SENT.split(text or "") if s.strip()]
+
+
+def _align(po: list[str], pn: list[str]) -> list[tuple[str, str]]:
+    """Changed (old, new) unit pairs of two unit lists; units that only moved are no change."""
     ko, kn = [_key(p) for p in po], [_key(p) for p in pn]
     sm = difflib.SequenceMatcher(None, ko, kn, autojunk=False)
     gone, came = [], []
@@ -201,7 +230,6 @@ def pairs_for(old_text: str | None, new_text: str, rel: str, terms: dict[str, st
             blocks.append((list(range(i1, i2)), list(range(j1, j2))))
             gone += list(range(i1, i2))
             came += list(range(j1, j2))
-    # A paragraph that only moved (same words elsewhere) is not a change.
     moved = Counter(ko[i] for i in gone) & Counter(kn[j] for j in came)
     left_old, left_new = Counter(moved), Counter(moved)
 
@@ -210,11 +238,11 @@ def pairs_for(old_text: str | None, new_text: str, rel: str, terms: dict[str, st
             left[key] -= 1
             return False
         return True
+    pairs: list[tuple[str, str]] = []
     for olds, news in blocks:
         olds = [i for i in olds if keep(ko[i], left_old)]
         news = [j for j in news if keep(kn[j], left_new)]
         used: set[int] = set()
-        pairs = []
         for i in olds:
             best, score = None, 0.0
             for j in news:
@@ -230,15 +258,19 @@ def pairs_for(old_text: str | None, new_text: str, rel: str, terms: dict[str, st
             else:
                 pairs.append((po[i], ""))
         pairs += [("", pn[j]) for j in news if j not in used]
-        for o, n in pairs:
-            cues = delta(tokens(o), tokens(n), terms)
-            if cues:
-                out.append({"file": rel, "old": o, "new": n, "cues": cues})
-    return out
+    return pairs
+
+
+def legacy_hash(p: dict) -> str:
+    """The 1.14 whole-paragraph hash (file + exact text): verdicts stored under it still count."""
+    blob = json.dumps([p.get("file"), p.get("old"), p.get("new")], ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 
 
 def pair_hash(p: dict) -> str:
-    blob = json.dumps([p.get("file"), p.get("old"), p.get("new")], ensure_ascii=False)
+    """1.15.0 (E1b): normalised words of the old and new sentence (no file, case, spacing,
+    punctuation, citations or numbers), so an identical pair is never asked twice."""
+    blob = " ".join(tokens(p.get("old") or "")) + "\x1f" + " ".join(tokens(p.get("new") or ""))
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 
 
@@ -280,64 +312,231 @@ def parse_report(text: str) -> dict[str, tuple[str, str]]:
             out[pid.upper()] = (verdict.casefold(), why.strip().strip("|*").strip())
     return out
 
+def _verdict(data: dict, p: dict) -> dict | None:
+    """The stored verdict of a pair: its normalised hash, else (verdicts from 1.14) the
+    whole-paragraph hash of the pair itself or of the paragraph a sentence pair came from."""
+    for key in (p.get("hash"), p.get("legacy"), p.get("para")):
+        if key and key in data:
+            return data[key]
+    return None
 
-def record_author(project: Path, pair: dict, verdict: str, reason: str) -> None:
+
+def record_author(project: Path, pair: dict, verdict: str, reason: str) -> dict:
+    """1.15.0 (E1d): the author may decide ANY pair, including one a reviewer judged
+    'changed'; the overridden verdict is kept with the author's exact words."""
     if verdict not in ("unchanged", "changed"):
         raise ValueError("verdict must be 'unchanged' or 'changed'")
     if len(reason.strip()) < 10:
         raise ValueError("an author decision needs the author's reason/words (>= 10 characters)")
     data = load_verdicts(project)
-    data[pair["hash"]] = {"verdict": verdict, "reason": reason.strip(), "by": "author",
-                          "file": pair.get("file"), "at": _now()}
+    prev = _verdict(data, pair)
+    rec = {"verdict": verdict, "reason": reason.strip(), "by": "author",
+           "file": pair.get("file"), "old": pair.get("old"), "new": pair.get("new"), "at": _now()}
+    if prev and prev.get("by") != "author":
+        rec["overrides"] = {k: prev.get(k) for k in ("verdict", "reason", "by")}
+    data[pair["hash"]] = rec
     _save_verdicts(project, data)
+    return rec
 
 
-def bundle_dir(project: Path, context: str, pairs: list[dict]) -> Path:
-    digest = hashlib.sha256("".join(sorted(p["hash"] for p in pairs)).encode()).hexdigest()[:8]
-    safe = re.sub(r"[^A-Za-z0-9_-]+", "_", context)[:40]
-    return Path(project) / BUNDLE_DIR / f"meaning_{safe}_{digest}"
+def overrides(project: Path, hashes=None) -> list[str]:
+    """Author decisions that replaced a reviewer verdict (for the round summary)."""
+    out = []
+    for h, rec in sorted(load_verdicts(project).items()):
+        if rec.get("by") == "author" and rec.get("overrides") and (hashes is None or h in hashes):
+            was = rec["overrides"]
+            out.append(f"[{h[:8]}] {rec.get('file')}: reviewer '{was.get('verdict')}' "
+                       f"({str(was.get('reason') or '')[:60]}) -> author '{rec['verdict']}': "
+                       f"\"{rec['reason'][:160]}\"")
+    return out
 
 
-def bundle_pairs(project: Path, context: str) -> list[dict]:
-    """The pairs of the newest bundle written for a context (for an author decision)."""
-    safe = re.sub(r"[^A-Za-z0-9_-]+", "_", context)[:40]
-    root = Path(project) / BUNDLE_DIR
-    found = sorted(root.glob(f"meaning_{safe}_*/pairs.json"), key=lambda p: p.stat().st_mtime) \
-        if root.is_dir() else []
+# --------------------------------------------------------------------------- one bundle
+ROUNDS_DIR = ".wf/meaning_rounds"
+
+
+def _safe(key: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_-]+", "_", str(key))[:40]
+
+
+def active_round(project: Path) -> str | None:
     try:
-        return json.loads(found[-1].read_text(encoding="utf-8")) if found else []
+        st = json.loads((Path(project) / ".wf/state.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return []
+        return None
+    rid = st.get("active_revision_round") if isinstance(st, dict) else None
+    return str(rid) if rid else None
+
+
+def bundle_key(project: Path, context: str) -> str:
+    """1.15.0 (E1c): while a revision round is open every context (round edits, submission
+    copy, final copy, presentation layer) shares ONE bundle for that round."""
+    return active_round(project) or context
+
+
+def _registry_path(project: Path, key: str) -> Path:
+    return Path(project) / ROUNDS_DIR / f"{_safe(key)}.json"
+
+
+def _load_registry(project: Path, key: str) -> dict:
+    try:
+        data = json.loads(_registry_path(project, key).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    data.setdefault("key", key)
+    data.setdefault("ids", {})
+    data.setdefault("pairs", {})
+    data.setdefault("current", {})
+    return data
+
+
+def _save_registry(project: Path, key: str, data: dict) -> None:
+    path = _registry_path(project, key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def register(project: Path, context: str, pairs: list[dict]) -> list[dict]:
+    """Normalised hashes and STABLE ids (P01, P02, ... per round/context, never reused);
+    duplicates (the same sentence pair seen by two contexts) collapse to one entry."""
+    key = bundle_key(project, context)
+    reg = _load_registry(project, key)
+    out, seen = [], set()
+    for p in pairs:
+        p["hash"] = pair_hash(p)
+        pid = reg["ids"].get(p["hash"])
+        if pid is None:
+            pid = f"P{len(reg['ids']) + 1:02d}"
+            reg["ids"][p["hash"]] = pid
+        p["id"] = pid
+        entry = reg["pairs"].setdefault(p["hash"], {k: p.get(k) for k in (
+            "id", "hash", "file", "old", "new", "cues", "legacy", "para")})
+        entry.setdefault("contexts", [])
+        if context not in entry["contexts"]:
+            entry["contexts"].append(context)
+        if p["hash"] not in seen:
+            seen.add(p["hash"])
+            out.append(p)
+    reg["current"][context] = sorted(seen)
+    _save_registry(project, key, reg)
+    return out
+
+
+def known_pairs(project: Path) -> list[dict]:
+    """Every pair ever put to a meaning check in this paper (registries + 1.14 bundles)."""
+    root = Path(project)
+    out: dict[str, dict] = {}
+    for reg in sorted((root / ROUNDS_DIR).glob("*.json")) if (root / ROUNDS_DIR).is_dir() else []:
+        try:
+            data = json.loads(reg.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        for h, p in (data.get("pairs") or {}).items():
+            out.setdefault(h, {**p, "key": data.get("key")})
+    for pj in sorted((root / BUNDLE_DIR).glob("meaning_*/pairs.json")) \
+            if (root / BUNDLE_DIR).is_dir() else []:
+        try:
+            for p in json.loads(pj.read_text(encoding="utf-8")):
+                out.setdefault(p["hash"], {**p, "key": pj.parent.name})
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    return list(out.values())
+
+
+def find_pair(project: Path, ref: str, context: str | None = None) -> dict | None:
+    """A pair by its id in the open round/context bundle (P03) or by (a prefix of) the hash
+    printed in the check output."""
+    ref = str(ref or "").strip().strip("[]")
+    if not ref:
+        return None
+    if re.fullmatch(r"(?i)P\d{1,3}", ref):
+        key = bundle_key(project, context or "")
+        reg = _load_registry(project, key)
+        for h, pid in reg["ids"].items():
+            if pid == ref.upper() and h in reg["pairs"]:
+                return reg["pairs"][h]
+        legacy = bundle_pairs(project, context) if context else []
+        return next((p for p in legacy if p.get("id") == ref.upper()), None)
+    if re.fullmatch(r"[0-9a-fA-F]{6,16}", ref):
+        hits = [p for p in known_pairs(project) if str(p.get("hash", "")).startswith(ref.lower())]
+        if len({p["hash"] for p in hits}) == 1:
+            return hits[0]
+        data = load_verdicts(project)
+        keys = [h for h in data if h.startswith(ref.lower())]
+        if len(keys) == 1:
+            rec = data[keys[0]]
+            return {"hash": keys[0], "file": rec.get("file"), "old": rec.get("old"),
+                    "new": rec.get("new"), "id": keys[0][:8]}
+    return None
+
+
+# --------------------------------------------------------------------------- reports
+_GUARD_NOTES: list[str] = []
+
+
+def _id_map(folder: Path) -> dict[str, str]:
+    try:
+        ids = json.loads((folder / "ids.json").read_text(encoding="utf-8"))
+        return {pid: h for h, pid in ids.items()}
+    except (OSError, ValueError, AttributeError):
+        pass
+    try:
+        return {r["id"]: r["hash"] for r in json.loads((folder / "pairs.json").read_text(
+            encoding="utf-8"))}
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}
+
+
+def ingest_reports(project: Path) -> list[str]:
+    """Fold every reviewer report.md (and archived report_<n>.md) of every meaning bundle into
+    the verdict store. A report written while a paper file changed is refused (E2)."""
+    from . import reviewguard
+    root = Path(project) / BUNDLE_DIR
+    data = load_verdicts(project)
+    dirty, notes = False, []
+    folders = sorted(root.glob("meaning_*")) if root.is_dir() else []
+    for folder in folders:
+        reports = sorted(folder.glob("report*.md"))
+        if not reports:
+            continue
+        ids = _id_map(folder)
+        try:
+            meta = {p["hash"]: p for p in json.loads((folder / "pairs.json").read_text(
+                encoding="utf-8"))}
+        except (OSError, ValueError, KeyError, TypeError):
+            meta = {}
+        for report in reports:
+            bad = reviewguard.problems(project, folder.name, report)
+            if bad:
+                notes.append(f"{folder.name}/{report.name} refused: paper file(s) changed "
+                             f"during the review: {', '.join(bad[:5])}")
+                continue
+            for pid, (verdict, why) in parse_report(
+                    report.read_text(encoding="utf-8", errors="replace")).items():
+                h = ids.get(pid)
+                if h and h not in data:
+                    m = meta.get(h, {})
+                    data[h] = {"verdict": verdict, "reason": why, "by": "reviewer",
+                               "file": m.get("file"), "old": m.get("old"), "new": m.get("new"),
+                               "at": _now(), "bundle": folder.name}
+                    dirty = True
+    if dirty:
+        _save_verdicts(project, data)
+    _GUARD_NOTES[:] = notes
+    return notes
 
 
 def resolve(project: Path, context: str, pairs: list[dict]) -> tuple[list[dict], list[dict]]:
-    """-> (unresolved pairs, changed pairs with 'reason'). Reviewer verdicts in the bundle's
-    report.md are folded into the verdict store first."""
-    pairs = number(pairs)
+    """-> (unresolved pairs, changed pairs with 'reason'). Reviewer verdicts in the bundle
+    reports are folded into the verdict store first; ids are stable per round."""
+    pairs = register(project, context, pairs)
+    ingest_reports(project)
     data = load_verdicts(project)
-    wanted = {p["hash"]: p for p in pairs}
-    safe = re.sub(r"[^A-Za-z0-9_-]+", "_", context)[:40]
-    root = Path(project) / BUNDLE_DIR
-    dirty = False
-    for report in sorted(root.glob(f"meaning_{safe}_*/report.md")) if root.is_dir() else []:
-        try:
-            ids = {r["id"]: r["hash"] for r in json.loads(
-                (report.parent / "pairs.json").read_text(encoding="utf-8"))}
-        except (OSError, ValueError, KeyError, TypeError):
-            continue
-        for pid, (verdict, why) in parse_report(
-                report.read_text(encoding="utf-8", errors="replace")).items():
-            h = ids.get(pid)
-            if h in wanted and h not in data:
-                data[h] = {"verdict": verdict, "reason": why, "by": "reviewer",
-                           "file": wanted[h].get("file"), "at": _now(),
-                           "bundle": report.parent.name}
-                dirty = True
-    if dirty:
-        _save_verdicts(project, data)
     unresolved, changed = [], []
     for p in pairs:
-        rec = data.get(p["hash"])
+        rec = _verdict(data, p)
         if not rec:
             unresolved.append(p)
         elif rec.get("verdict") == "changed":
@@ -351,21 +550,59 @@ states the same scientific meaning as the old wording (direction, association or
 certainty, significance, comparison, limitations, population, exposure, comparator, outcome
 and time window), judged against the results. Do not judge style. When decision_record.md is
 listed, a post hoc analysis newly worded as confirmatory is a meaning change.
-Write {report} - the only file you may write - with exactly one line per pair:
-  P01: meaning unchanged
-  P02: meaning changed - <one-line reason>"""
+Write {report} - the only file you may write - with exactly one line per pair, each with a
+short reason:
+  P01: meaning unchanged - <one-line reason>
+  P02: meaning changed - <one-line reason>
+If you cannot write files, return exactly these lines between the markers <<<REPORT>>> and
+<<<END>>> in your reply."""
+
+
+def bundle_dir(project: Path, context: str, pairs: list[dict] | None = None) -> Path:
+    return Path(project) / BUNDLE_DIR / f"meaning_{_safe(bundle_key(project, context))}"
+
+
+def bundle_pairs(project: Path, context: str | None) -> list[dict]:
+    """The pairs of the newest 1.14-style bundle written for a context."""
+    if not context:
+        return []
+    root = Path(project) / BUNDLE_DIR
+    found = sorted(root.glob(f"meaning_{_safe(context)}*/pairs.json"),
+                   key=lambda p: p.stat().st_mtime) if root.is_dir() else []
+    try:
+        return json.loads(found[-1].read_text(encoding="utf-8")) if found else []
+    except (OSError, ValueError):
+        return []
 
 
 def write_bundle(project: Path, context: str, pairs: list[dict]) -> Path:
-    """The small reviewer bundle for the unresolved pairs (rewritten only when missing)."""
+    """ONE bundle per open round (else per context) holding every still-unresolved pair of
+    all its contexts; rewritten only when that set changes (an older report is archived as
+    report_<n>.md and still counts, ids are stable)."""
+    from . import reviewguard
     project = Path(project)
-    pairs = number(pairs)
-    out = bundle_dir(project, context, pairs)
-    if (out / "MANIFEST.md").is_file():
+    key = bundle_key(project, context)
+    pairs = register(project, context, pairs)
+    reg = _load_registry(project, key)
+    data = load_verdicts(project)
+    current = sorted({h for hs in reg["current"].values() for h in hs} | {pair_hash(p) for p in pairs})
+    todo = [reg["pairs"][h] for h in current if h in reg["pairs"] and not _verdict(data, reg["pairs"][h])]
+    todo += [p for p in pairs if p.get("hash") not in reg["pairs"]]
+    todo.sort(key=lambda p: p.get("id", ""))
+    out = bundle_dir(project, context)
+    want = [{k: p.get(k) for k in ("id", "hash", "file", "old", "new")} for p in todo]
+    try:
+        have = json.loads((out / "pairs.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        have = None
+    if have == want and (out / "MANIFEST.md").is_file():
         return out
     out.mkdir(parents=True, exist_ok=True)
-    rows = [f"# Meaning check pairs ({context})", ""]
-    for p in pairs:
+    if (out / "report.md").is_file():
+        n = len(list(out.glob("report_*.md"))) + 1
+        (out / "report.md").replace(out / f"report_{n}.md")
+    rows = [f"# Meaning check pairs ({key})", ""]
+    for p in todo:
         rows += [f"## {p['id']} ({p['file']})", "", "Old:", "", "> " + (p["old"] or "(absent)"),
                  "", "New:", "", "> " + (p["new"] or "(deleted)"), ""]
     (out / "pairs.md").write_text("\n".join(rows) + "\n", encoding="utf-8")
@@ -380,26 +617,38 @@ def write_bundle(project: Path, context: str, pairs: list[dict]) -> Path:
         words = ["(results in words unavailable; judge from the pairs)"]
     (out / "results_in_words.md").write_text("# Results in words\n\n" + "\n".join(words) + "\n",
                                              encoding="utf-8")
-    (out / "pairs.json").write_text(json.dumps(
-        [{k: p[k] for k in ("id", "hash", "file", "old", "new")} for p in pairs], indent=1,
-        ensure_ascii=False) + "\n", encoding="utf-8")
+    (out / "pairs.json").write_text(json.dumps(want, indent=1, ensure_ascii=False) + "\n",
+                                    encoding="utf-8")
+    (out / "ids.json").write_text(json.dumps(reg["ids"], indent=1) + "\n", encoding="utf-8")
     manifest = [f"# Meaning-check bundle {out.name}", "",
-                BRIEF.format(context=context, report=out / "report.md"), "", "## Files", "",
+                BRIEF.format(context=key, report=out / "report.md"), "", "## Files", "",
                 f"- {out / 'pairs.md'}", f"- {out / 'results_in_words.md'}"]
     from .decisionrecord import write as _write_record  # 1.14.0 (D1): reviewer only
     record = _write_record(project, out)
     if record:
         manifest.append(f"- {record}")
     (out / "MANIFEST.md").write_text("\n".join(manifest) + "\n", encoding="utf-8")
+    reviewguard.take(project, out.name)
     return out
 
 
 def instructions(project: Path, context: str, pairs: list[dict]) -> str:
     out = write_bundle(project, context, pairs)
-    return (f"{len(pairs)} meaning-bearing wording change(s) need a verdict: run the read-only "
-            f"medpaper-reviewer subagent on {out / 'MANIFEST.md'} only (it writes one line per "
-            "pair to report.md), or record the author's decision (rework.py meaning-decide). "
-            "'meaning changed' routes to the SCIENCE path (S19 only with '我确认回退').")
+    n = len(json.loads((out / "pairs.json").read_text(encoding="utf-8")))
+    notes = " ".join(_GUARD_NOTES)
+    return ((notes + " ") if notes else "") + (
+        f"{n} meaning-bearing wording change(s) need a verdict (one bundle for "
+        f"{bundle_key(project, context)}): pass the medpaper-reviewer subagent this ONE path "
+        f"{out / 'MANIFEST.md'} (it writes one line per pair to {out / 'report.md'}; if it "
+        "cannot write, save its reply and run rework.py meaning-ingest --from <file>), or "
+        "record the author's decision (rework.py meaning-decide --pair <id|hash>). 'meaning "
+        "changed' routes to the SCIENCE path (S19 only with '我确认回退').")
+
+
+def changed_line(p: dict) -> str:
+    return (f"{p['file']} {p['id']} [{p['hash'][:8]}]: meaning changed ({p.get('by')}): "
+            f"{str(p.get('reason') or '')[:120]} (the author may override: rework.py "
+            f"meaning-decide --pair {p['hash'][:8]} --verdict unchanged --words \"<author's words>\")")
 
 
 def gate(project: Path, context: str, pairs: list[dict]) -> list[str]:
@@ -407,8 +656,61 @@ def gate(project: Path, context: str, pairs: list[dict]) -> list[str]:
     if not pairs:
         return []
     unresolved, changed = resolve(project, context, pairs)
-    problems = [f"{p['file']} {p['id']}: meaning changed ({p.get('by')}): {p['reason'][:120]}"
-                for p in changed]
+    problems = [changed_line(p) for p in changed]
     if unresolved:
         problems.append(instructions(project, context, unresolved))
     return problems
+
+
+# --------------------------------------------------------------------------- increments
+CONFIRMED_REL = ".wf/meaning_confirmed.json"
+
+
+def confirmed_text(project: Path, context: str, key: str, anchor: str) -> str | None:
+    """1.15.0 (E1a): the last version of a copy whose every meaning pair was resolved
+    'unchanged' - later checks compare against it, not against the original again."""
+    try:
+        data = json.loads((Path(project) / CONFIRMED_REL).read_text(encoding="utf-8"))
+        rec = data[context][key]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return rec.get("text") if rec.get("anchor") == anchor else None
+
+
+def confirm(project: Path, context: str, key: str, text: str, anchor: str) -> None:
+    path = Path(project) / CONFIRMED_REL
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    prev = (data.get(context) or {}).get(key) or {}
+    if prev.get("anchor") == anchor and prev.get("text") == text:
+        return
+    data.setdefault(context, {})[key] = {"anchor": anchor, "text": text, "at": _now(),
+                                         "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def ingest_file(project: Path, src: Path, context: str | None = None) -> tuple[Path, int]:
+    """E2 fallback: the reviewer's saved reply (or a host workflow-state JSON) -> the bundle's
+    report.md, verbatim between <<<REPORT>>> and <<<END>>>."""
+    from . import reviewguard
+    from .argtext import read_text_retry
+    report = reviewguard.extract_report(read_text_retry(Path(src)))
+    if not report or not parse_report(report):
+        raise ValueError("no meaning verdict lines (P01: meaning unchanged|changed ...) found "
+                         "between <<<REPORT>>> markers")
+    key = active_round(project) or context
+    folder = (Path(project) / BUNDLE_DIR / f"meaning_{_safe(key)}") if key else None
+    if folder is None or not (folder / "pairs.json").is_file():
+        root = Path(project) / BUNDLE_DIR
+        found = sorted(root.glob("meaning_*/pairs.json"), key=lambda p: p.stat().st_mtime) \
+            if root.is_dir() else []
+        if not found:
+            raise ValueError("no meaning-check bundle to attach the report to")
+        folder = found[-1].parent
+    dest = reviewguard.ingest(project, Path(src), folder / "report.md")
+    return dest, len(parse_report(report))

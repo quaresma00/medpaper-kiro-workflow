@@ -46,9 +46,10 @@ def _base_zip(engine: Path, dest: Path) -> tuple[str, str]:
         try:
             done = subprocess.run(["git", "-C", str(engine), "archive", "--format=zip", "-o",
                                    str(dest), "HEAD", *TREES], capture_output=True, text=True,
-                                  timeout=120)
+                                  encoding="utf-8", errors="replace", timeout=120)
             head = subprocess.run(["git", "-C", str(engine), "rev-parse", "HEAD"],
-                                  capture_output=True, text=True, timeout=30)
+                                  capture_output=True, text=True, encoding="utf-8",
+                                  errors="replace", timeout=30)
             if done.returncode == 0 and dest.is_file():
                 return "git HEAD", head.stdout.strip()
         except (OSError, subprocess.SubprocessError):

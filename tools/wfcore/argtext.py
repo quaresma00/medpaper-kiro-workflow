@@ -85,6 +85,32 @@ def _wide_argv() -> list[str] | None:
         return None
 
 
+def read_text_retry(path: Path, encoding: str = "utf-8", seconds: float = 3.0) -> str:
+    """1.15.0: a file the agent wrote a moment ago is sometimes not yet visible to the next
+    process on Windows; wait briefly instead of failing the command."""
+    import time
+    deadline = time.monotonic() + seconds
+    while True:
+        try:
+            return Path(path).read_text(encoding=encoding)
+        except FileNotFoundError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.25)
+
+
+def wait_visible(path: Path | None, seconds: float = 3.0) -> bool:
+    import time
+    if path is None:
+        return False
+    deadline = time.monotonic() + seconds
+    while not Path(path).is_file():
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.25)
+    return True
+
+
 def fix_argv(argv: list[str]) -> list[str]:
     """Expand --X-file / --X-b64 into --X <text> and repair mis-decoded text arguments."""
     argv = list(argv)
@@ -102,7 +128,7 @@ def fix_argv(argv: list[str]) -> list[str]:
                 value = inline if eq else (argv[i + 1] if i + 1 < len(argv) else "")
                 i += 0 if eq else 1
                 if name.endswith("-file"):
-                    text = Path(value).read_text(encoding="utf-8-sig").strip()
+                    text = read_text_retry(Path(value), "utf-8-sig").strip()
                 else:
                     text = base64.b64decode(value).decode("utf-8").strip()
                 out += [opt, text]

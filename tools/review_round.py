@@ -27,7 +27,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from wfcore import paths as wfpaths, readerreview, reviewrounds as rr  # noqa: E402
+from wfcore import paths as wfpaths, readerreview, reviewguard, reviewrounds as rr  # noqa: E402
 from wfcore.state import State  # noqa: E402
 
 
@@ -43,7 +43,10 @@ def _counts(raw: str) -> dict[str, int]:
 
 def _main() -> int:
     ap = argparse.ArgumentParser(description="subagent review rounds (no review package)")
-    ap.add_argument("command", choices=["start", "close", "author", "decide", "export", "status"])
+    ap.add_argument("command", choices=["start", "close", "ingest", "author", "decide", "export",
+                                        "status"])
+    ap.add_argument("--from", dest="from_file", type=Path, default=None,
+                    help="ingest: the reviewer's saved reply or a host workflow-state JSON")
     ap.add_argument("answer", nargs="*")
     ap.add_argument("--scope", choices=sorted(rr.SCOPES))
     ap.add_argument("--project", type=Path, default=None)
@@ -53,6 +56,9 @@ def _main() -> int:
                     metavar=("ID", "CATEGORY", "STATUS", "SUMMARY"))
     ap.add_argument("--change", nargs=2, action="append", default=[], metavar=("FILE", "SUMMARY"))
     ap.add_argument("--kept", nargs=2, action="append", default=[], metavar=("ITEM", "REASON"))
+    ap.add_argument("--preference-group", default="",
+                    help="close: every finding the report tags PREFERENCE is kept as one group "
+                         "with this one reason (1.15.0)")
     ap.add_argument("--words", default="")
     ap.add_argument("--words-file", help="UTF-8 file holding --words (avoids shell code pages)")
     ap.add_argument("--words-b64", help="base64 of the UTF-8 --words text")
@@ -68,6 +74,7 @@ def _main() -> int:
         if args.command == "start":
             rnd = rr.start(project, scope, state.current, delta=args.delta)
             bundle = rr.write_bundle(project, rnd)
+            reviewguard.take(project, rnd["id"])  # 1.15.0 (E2): the review writes only its report
             print(f"review round {rnd['id']} ({rnd['mode']}) opened, {len(rnd['reviewed'])} file(s)."
                   + (f" Linked to {rnd['linked_to']} (awaiting the user)." if rnd.get("linked_to") else ""))
             print(f"Pass the medpaper-reviewer subagent this ONE path (it reads everything itself):\n"
@@ -77,7 +84,9 @@ def _main() -> int:
             print("  " + rr.brief(project, rnd, bundle).replace("\n", "\n  "))
             print(f"The reviewer writes its full report to {bundle / 'report.md'} (its only "
                   "writable file); then close with --report (defaults to that file). Do not "
-                  "paraphrase the findings.")
+                  "paraphrase the findings. If the host would not let it write: save its reply "
+                  "and run review_round.py ingest --from <file> (text between <<<REPORT>>> and "
+                  "<<<END>>> is copied verbatim; a workflow-state JSON works too).")
             print("Bundle contents (current files):")
             for rel in rnd["reviewed"]:
                 print(f"  {rel}")
@@ -91,12 +100,24 @@ def _main() -> int:
                 default = project / rr.BUNDLE_DIR / str((last or {}).get("id", "")) / "report.md"
                 if last and default.is_file():
                     args.report = default
+            last = rr.latest(project, scope)
+            if last and args.report is not None and Path(args.report).is_file():
+                bad = reviewguard.problems(project, str(last["id"]), Path(args.report),
+                                           [f for f, _s in args.change])
+                if bad:
+                    raise ValueError("paper file(s) changed while the review was running and are "
+                                     "not listed as your fixes (a review writes only its "
+                                     "report): " + ", ".join(bad[:8]) + " - restore them (or "
+                                     "list your own fix with --change) and close again")
             rnd = rr.close(project, scope, _counts(args.findings),
                            [{"file": f, "summary": s} for f, s in args.change],
                            [{"item": i, "reason": r} for i, r in args.kept],
                            [{"id": i, "category": c, "status": s, "summary": t}
-                            for i, c, s, t in args.finding], report=args.report)
-            print(f"closed {rnd['id']}: findings {rnd['findings']}; {len(rnd['changes'])} change(s).")
+                            for i, c, s, t in args.finding], report=args.report,
+                           preference_reason=args.preference_group or "")
+            print(f"closed {rnd['id']}: findings {rnd['findings']}; {len(rnd['changes'])} change(s)."
+                  + (f" Preference group kept: {', '.join(rnd['preference_group']['ids'])}."
+                     if rnd.get("preference_group") else ""))
             pend = rr.pending_author(rnd)
             if pend:
                 print("List these as PENDING AUTHOR DECISIONS in the summary (the user decides each):")
@@ -104,6 +125,18 @@ def _main() -> int:
                     print(f"  {f['id']} [{f['category']}] {f['summary']}")
             print("Now give the user ONE summary and ask: another review round, or confirm with "
                   f"the exact sentence '{rr.CONFIRM_PHRASES[0]}'?")
+            return 0
+        if args.command == "ingest":
+            last = rr.latest(project, scope)
+            if not last or last.get("closed_at"):
+                raise ValueError("no open review round to attach a report to")
+            if not argtext.wait_visible(args.from_file):
+                raise ValueError("ingest needs --from <saved reviewer reply or workflow-state JSON>")
+            dest = reviewguard.ingest(project, args.from_file,
+                                      project / rr.BUNDLE_DIR / str(last["id"]) / "report.md")
+            ids = rr.report_ids(dest.read_text(encoding="utf-8"))
+            print(f"{last['id']}: report copied verbatim to {dest} ({len(ids)} numbered "
+                  "finding(s)); close with --report (default)")
             return 0
         if args.command == "author":
             if len(args.answer) != 2:

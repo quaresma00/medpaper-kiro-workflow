@@ -1103,6 +1103,10 @@ def cmd_decide(args) -> int:
         return 1
     st.add_note(f"[DECISION] {args.name} = {args.value}\n{args.why}")
     print(f"recorded {args.name} = {args.value}")
+    if args.name == "submission_package_independent_audit" and args.value == "REVISE":
+        from . import audit  # 1.15.0 (E4): the author-final-copy route is offered at once
+        for line in audit.revise_offer(st.project):
+            print(line)
     return 0
 
 
@@ -1140,7 +1144,8 @@ def cmd_clean(args) -> int:
         if rel.startswith(foreign):
             continue
         if rel.startswith(f"{tmp}/"):
-            if p.name != ".gitkeep":
+            # 1.15.0 (E5): logs survive; durable helper scripts belong in .wf/scripts/.
+            if p.name != ".gitkeep" and not rel.startswith(f"{tmp}/logs/"):
                 scratch.append(rel)
             continue
         if rel in declared or any(fnmatch.fnmatch(rel, g) for g in allowed):
@@ -1166,6 +1171,41 @@ def cmd_clean(args) -> int:
     st.event("clean", f"deleted {len(scratch)} scratch file(s)")
     st.save()
     print(f"\ndeleted {len(scratch)} scratch file(s)")
+    return 0
+
+
+def cmd_rebuild(args) -> int:
+    """1.15.0 (E3): one command instead of build_docx -> audit -> submission_qc -> capture ->
+    polish -> rework check by hand."""
+    _pipe, st, proj = _load()
+    from . import rebuild
+    rc = rebuild.run(proj, everything=args.all, dry=args.dry_run)
+    if not args.dry_run:
+        st.event("rebuild", f"wf rebuild rc={rc}")
+        st.save()
+    return rc
+
+
+def cmd_guidelines(args) -> int:
+    """1.15.0 (E7): a dated journal guideline snapshot; audits read the latest one."""
+    _pipe, st, proj = _load()
+    from . import guidelines
+    if args.action == "status":
+        print(guidelines.status(proj))
+        return 0
+    if args.from_file is None:
+        print("guidelines refresh needs --from <the newly written extract file>")
+        return 2
+    try:
+        out, archived = guidelines.refresh(proj, paths.resolve_paper_path(args.from_file),
+                                           args.source)
+    except (OSError, ValueError) as exc:
+        print(f"guidelines refresh refused: {exc}")
+        return 2
+    st.event("guidelines_refreshed", f"{out.name}; previous kept as {archived or 'none'}")
+    st.save()
+    print(f"guideline snapshot refreshed -> {out} ({guidelines.status(proj)}); previous: "
+          f"{archived or 'none'}. Audits and checks read this file.")
     return 0
 
 
@@ -2118,6 +2158,24 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("clean", help="report scratch/undeclared files; --apply deletes scratch")
     p.add_argument("--apply", action="store_true")
     p.set_defaults(fn=cmd_clean)
+
+    p = sub.add_parser("rebuild", help="rebuild the submission package outputs an edit affects, "
+                                       "in dependency order (1.15.0)")
+    p.add_argument("--scope", choices=("package",), default="package")
+    p.add_argument("--all", action="store_true", help="rebuild every engine-built upload")
+    p.add_argument("--dry-run", action="store_true", help="list what would be rebuilt")
+    p.add_argument("--wait", action="store_true",
+                   help="block with heartbeat lines (<= 30 s), then failures + one summary line")
+    p.add_argument("--log", type=Path, default=None)
+    p.set_defaults(fn=cmd_rebuild)
+
+    p = sub.add_parser("guidelines", help="journal guideline snapshot: status | refresh --from "
+                                          "FILE [--source URL] (1.15.0)")
+    p.add_argument("action", choices=("status", "refresh"))
+    p.add_argument("--from", dest="from_file", type=Path, default=None,
+                   help="refresh: the newly written extract (from the re-fetched official guide)")
+    p.add_argument("--source", default="", help="refresh: URL(s) of the official guide")
+    p.set_defaults(fn=cmd_guidelines)
 
     p = sub.add_parser("doctor", help="environment and wiring check")
     p.set_defaults(fn=cmd_doctor)

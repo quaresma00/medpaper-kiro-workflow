@@ -74,6 +74,9 @@ def brief(project, rnd: dict, bundle) -> str:
         rules = review_rules(project)
     except Exception:  # noqa: BLE001 - the brief must always print
         rules = []
+    if rnd.get("scope") == "package":  # 1.15.0 (E4/E11): engine-owned items, checklist order
+        from .audit import engine_text
+        rules = [*rules, engine_text()]
     return text + ("\n" + "\n".join(rules) if rules else "")
 
 
@@ -215,6 +218,17 @@ def report_ids(text: str) -> list[str]:
     return seen
 
 
+def preference_ids(text: str) -> list[str]:
+    """Finding ids whose own line is tagged PREFERENCE (1.15.0, E4)."""
+    out = []
+    for line in (text or "").splitlines():
+        m = FINDING_ID_RE.match(line)
+        if m and re.search(r"(?i)\bPREFERENCE\b", line) and not re.search(
+                r"(?i)\b(BLOCKING|MINOR)\b", line) and m.group(1) not in out:
+            out.append(m.group(1))
+    return out
+
+
 def _closure(rnd: dict) -> list[str]:
     """Numbered report findings without a closing entry (1.11.0 rounds only)."""
     if not rnd.get("protocol") or not rnd.get("closed_at"):
@@ -327,11 +341,12 @@ def write_bundle(project: Path, rnd: dict) -> Path:
 
 def close(project: Path, scope: str, findings: dict[str, int], changes: list[dict],
           not_changed: list[dict], finding_list: list[dict] | None = None,
-          report: Path | None = None) -> dict:
+          report: Path | None = None, preference_reason: str = "") -> dict:
     data = load(project)
     if not data[scope] or data[scope][-1].get("closed_at"):
         raise ValueError("no open review round; start one first")
     rnd = data[scope][-1]
+    text = ""
     if rnd.get("protocol"):
         if report is None or not Path(report).is_file():
             raise ValueError("save the reviewer's full report (all sections, numbered F1, F2, ...) "
@@ -348,6 +363,19 @@ def close(project: Path, scope: str, findings: dict[str, int], changes: list[dic
         if not str(c.get("file", "")).strip() or not str(c.get("summary", "")).strip():
             raise ValueError("each change needs a file and a one-line summary")
     finding_list = list(finding_list or [])
+    group = []
+    if preference_reason.strip():
+        # 1.15.0 (E4): every finding the report tags PREFERENCE closes as ONE group with one
+        # reason (not counted in the severity counts; never a protected category).
+        if len(preference_reason.strip()) < 10:
+            raise ValueError("--preference-group needs a reason (>= 10 characters)")
+        listed = {f.get("id") for f in finding_list}
+        group = [i for i in preference_ids(text) if i not in listed]
+        if not group:
+            raise ValueError("--preference-group: the report tags no unlisted finding PREFERENCE")
+        rnd["preference_group"] = {"ids": group, "reason": preference_reason.strip()}
+        not_changed = list(not_changed) + [{"item": i, "reason": preference_reason.strip()}
+                                           for i in group]
     if len(finding_list) != sum(counts.values()):
         raise ValueError(f"list every finding with --finding ID CATEGORY STATUS \"one line\" "
                          f"({sum(counts.values())} counted, {len(finding_list)} listed)")
@@ -358,6 +386,8 @@ def close(project: Path, scope: str, findings: dict[str, int], changes: list[dic
         if f["category"] in PROTECTED and f["status"] == "kept":
             raise ValueError(f"finding {f['id']} ({f['category']}) cannot be kept on your own "
                              "judgement: change it, or mark it 'author' so the user decides")
+    finding_list += [{"id": i, "category": "other", "status": "kept",
+                      "summary": "preference (closed as a group)"} for i in group]
     probe = dict(rnd, finding_list=finding_list, not_changed=not_changed, closed_at="probe")
     open_items = _closure(probe)
     if open_items:

@@ -103,12 +103,28 @@ def limits(target: dict) -> tuple[dict[str, int | None], list[str]]:
             problems.append(f"limits.{key} must be a positive integer or null, got {value!r}")
             continue
         out[key] = value
-    unknown = sorted(set(block) - set(LIMIT_FIELDS) - {"source", "notes"})
+    unknown = sorted(set(block) - set(LIMIT_FIELDS) - {"source", "notes", "estimated"})
     if unknown:
         problems.append("limits has unknown field(s): " + ", ".join(unknown))
     if not str(block.get("source", "")).strip():
         problems.append("limits.source must quote the official rule (or state the guide is silent)")
     return out, problems
+
+
+ESTIMATE_RE = re.compile(r"(?i)\b(estimat\w*|approx\w*|derived|about|roughly|equivalent)\b|~|≈")
+PAGE_RE = re.compile(r"(?i)\bpages?\b")
+
+
+def soft_limits(target: dict) -> set[str]:
+    """1.15.0 (E9): word caps that are NOT an explicit numeric rule of the guide - listed in
+    limits.estimated, or a source that derives them from a page count ('8-10 printed pages,
+    ~3500 words estimated'). They are hints only and never a reason to cut."""
+    block = target.get("limits") if isinstance(target.get("limits"), dict) else {}
+    out = {str(k) for k in (block.get("estimated") or []) if isinstance(k, str)}
+    src = str(block.get("source", ""))
+    if PAGE_RE.search(src) and ESTIMATE_RE.search(src):
+        out |= {"main_text_words"} & {k for k in LIMIT_FIELDS if block.get(k)}
+    return out
 
 
 def word_count_scope(target: dict) -> list[str]:
@@ -321,6 +337,72 @@ def line_numbers(target: dict) -> str:
 def si_format(target: dict) -> str:
     value = str(target.get("si_format", "pdf")).strip().lower()
     return value if value in ("pdf", "docx") else "pdf"
+
+
+# ---------------------------------------------------------------------------
+# 1.15.0 journal switches (E5/E6). Anything that changes package contents applies to a paper
+# pinned before 1.15.0 only after `wf migrate --yes` (or when the switch is set explicitly).
+# ---------------------------------------------------------------------------
+def since_1150(project: Path | None) -> bool:
+    from .state import version_tuple
+    if project is None:
+        return True
+    try:
+        st = json.loads((Path(project) / ".wf/state.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return True
+    pin = str(st.get("engine_pin") or st.get("pipeline_version") or "0")
+    return version_tuple(pin) >= (1, 15, 0)
+
+
+def esm_label(target: dict) -> str:
+    """The journal's name for supplementary files ('Online Resource' by default)."""
+    value = str(target.get("supplementary_label") or "").strip()
+    return value or "Online Resource"
+
+
+def separate_display_files(target: dict, project: Path | None = None) -> bool:
+    """Main figures (TIFF) and main tables (xlsx) also as separate uploads: ON unless the
+    journal forbids it (`separate_display_files`: false | "forbidden")."""
+    raw = target.get("separate_display_files")
+    if raw is None:
+        return since_1150(project)
+    if raw is True or str(raw).strip().casefold() in ("true", "yes", "required"):
+        return True
+    if raw is False or str(raw).strip().casefold() in ("false", "no", "forbidden", "none"):
+        return False
+    return since_1150(project)
+
+
+def display_file_names(target: dict) -> dict[str, str]:
+    raw = target.get("display_file_names") if isinstance(target.get("display_file_names"), dict) else {}
+    return {"figure": str(raw.get("figure") or "Fig{n}.tif"),
+            "table": str(raw.get("table") or "Table{n}.xlsx")}
+
+
+def figure_dpi(target: dict) -> int | None:
+    for key in ("figure_dpi", "halftone_dpi", "line_art_dpi"):
+        v = target.get(key)
+        if isinstance(v, int) and not isinstance(v, bool) and v > 0:
+            return v
+    return None
+
+
+def abbreviation_list(target: dict, project: Path | None = None) -> str:
+    """'none' | 'after_keywords' (default when the journal is silent) | 'keep' (a paper
+    pinned before 1.15.0). Never inside Declarations."""
+    raw = str(target.get("abbreviation_list") or "").strip().casefold()
+    if raw in ("none", "after_keywords"):
+        return raw
+    return "after_keywords" if since_1150(project) else "keep"
+
+
+def reference_rules(target: dict, project: Path | None = None) -> dict:
+    """1.15.0 (E12): render-time reference fixes. `drop_discussion_pages` removes a
+    '; discussion 741-2' tail from a page field (default on for 1.15.0 papers)."""
+    raw = target.get("reference_rules") if isinstance(target.get("reference_rules"), dict) else {}
+    drop = raw.get("drop_discussion_pages")
+    return {"drop_discussion_pages": bool(drop) if isinstance(drop, bool) else since_1150(project)}
 
 
 # ---------------------------------------------------------------------------

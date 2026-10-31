@@ -14,7 +14,7 @@
 
 [meta]
 name = "medpaper"
-version = "1.14.1"
+version = "1.15.0"
 schema = 1
 description = "Medical/clinical research pipeline: idea -> feasibility -> data -> analysis -> artifacts -> manuscript -> submission package."
 
@@ -1104,10 +1104,8 @@ paths = ["07_manuscript/full_manuscript.md", "07_manuscript/supplementary_method
 check = "no_orphans"
 [[stage.gate]]
 check = "temp_clean"
-[[stage.gate]]
-check = "md_sections"
-path = "08_submission/submission_qc.md"
-headings = ["Rendered files inspected", "Citation and cross-reference checks", "Typography and hyperlinks", "Tables and figures", "Defects resolved"]
+# 1.15.0 (E7): submission_qc.md is fully generated (measured blocks + generated statements);
+# the hand-written headings gate was removed (a relaxation, so it applies to every paper).
 # Discharges every look parked by visual_review_mode = "deferred". Non-overridable: a DEFER
 # left outstanding, or a figure whose visual_reviewed flag is still false, blocks the package.
 [[stage.gate]]
@@ -1278,5 +1276,8 @@ globs = [
   "08_submission/*.csl",
   "08_submission/bundle/**",
   "08_submission/final_copy/**",
+  # 1.15.0: dated guideline snapshots (wf guidelines refresh) and validated reference overrides.
+  "08_submission/guidelines_history/*",
+  "06_refs/ref_overrides.json",
 ]
 

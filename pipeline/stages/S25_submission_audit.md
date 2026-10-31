@@ -10,22 +10,25 @@ Details (what the reviewer must inspect, finding format, verdict rules): `refere
 .\.venv\Scripts\python.exe tools/package_review.py verify
 .\.venv\Scripts\python.exe tools/package_review.py reader-copies
 ```
-2. Delegate to the `medpaper-reviewer` agent (writes only its report file). Give it
-   `package_review_freeze.json` and every frozen file, the journal metadata,
-   `guidelines_extract.md` and cached guide, `bundle/manifest.json`, `SUBMISSION_CHECKLIST.md`,
-   `submission_qc.md` and the fresh hash-bound text copies. Never give it the verdict you
-   expect or earlier conclusions; context for yourself comes from `wf handoff`.
-3. Save its report verbatim as `08_submission/independent_submission_audit.md` with headings
-   `Verdict` (incl. `Freeze ID: <freeze_id>`), `Reader comprehension`,
-   `Editorial screening and low-level errors`, `Guideline compliance`,
-   `Required files and omissions`, `Cross-file consistency`, `Formatting and technical checks`,
-   `Issues requiring correction`, `Final recommendation`. Findings: file + location,
-   BLOCKING / MINOR / PREFERENCE. Do not paraphrase.
+2. Write the audit bundle (the FIRST audit is full; after a REVISE it is a re-audit: previous
+   findings RESOLVED/OPEN plus new BLOCKING only; engine-owned formatting is an "Engine
+   issue", never REVISE by itself):
+```
+.\.venv\Scripts\python.exe tools/package_review.py audit-start
+```
+   Give the `medpaper-reviewer` agent the printed MANIFEST path only - no expected verdict,
+   no earlier conclusions, never paraphrase.
+3. It writes `report.md` in that bundle; copy it verbatim (refused if a paper file changed
+   during the audit; `--from <saved reply>` when it could not write):
+```
+.\.venv\Scripts\python.exe tools/package_review.py audit-save
+```
 4. Verify the freeze again, then record the verdict:
 ```
 .\.venv\Scripts\python.exe tools/wf.py decide submission_package_independent_audit "PASS|REVISE|BLOCKED" --why "<concise evidence-based basis>"
 ```
-5. `REVISE`: one S24 review round with these findings, then a new freeze:
+5. `REVISE`: `wf decide` prints the open items; offer the user BOTH routes at once: the
+   author final copy (step 6) or one S24 round with these findings, then a new freeze:
 ```
 .\.venv\Scripts\python.exe tools/wf.py loop --to S24_package_human_review --why "<material audit defects requiring correction and renewed user confirmation>"
 ```

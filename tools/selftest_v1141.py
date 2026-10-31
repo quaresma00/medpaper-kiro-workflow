@@ -591,7 +591,7 @@ def run_r(tmp: Path, record, section) -> None:
     new_ctx = SimpleNamespace(state=SimpleNamespace(engine_pin="1.14.1"))
     record("R pipeline 1.14.1; a 1.14.0 paper (e.g. waiting at S25) gets exactly one 1.14.1 "
            "event, stays pinned (stricter checks only after wf migrate --yes); cards <= limit",
-           pipe.meta.get("version") == "1.14.1" and len(notes) == 1 and st.engine_pin == "1.14.0"
+           pipe.meta.get("version") >= "1.14.1" and len(notes) == 1 and st.engine_pin == "1.14.0"
            and not _since_1141(old_ctx) and _since_1141(new_ctx)
            and max(sizes.values()) <= registry.CARD_MAX_CHARS, f"{len(notes)} {max(sizes.values())}")
 

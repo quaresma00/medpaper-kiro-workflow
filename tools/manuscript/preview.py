@@ -48,7 +48,8 @@ def to_pdf(src: Path, work: Path) -> Path:
                   f"try {{ {body} }} finally {{ $a.Quit() }}")
         env = {**os.environ, "MP_IN": str(src.resolve()), "MP_OUT": str(out.resolve())}
         subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-                       capture_output=True, text=True, env=env, timeout=300)
+                       capture_output=True, text=True, encoding="utf-8", errors="replace",
+                       env=env, timeout=300)
     if not out.is_file():
         raise RuntimeError("cannot convert to PDF: install LibreOffice, or Microsoft Word/Excel")
     return out

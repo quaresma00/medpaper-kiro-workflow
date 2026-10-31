@@ -258,12 +258,18 @@ def journal_limits_met(ctx: Ctx) -> Result:
     margin = float(ctx.target("journal_limit_margin", 1.0))
     warn_share = float(ctx.target("journal_limit_warn_share", 0.97))
     problems, notes, near = [], [], []
+    soft = journalspec.soft_limits(target)
     for key, label, got in (("main_text_words", "main text", counts["main"]),
                             ("abstract_words", "abstract", counts["abstract"])):
         cap = caps[key]
         if cap is None:
             continue
         allowed = int(cap * margin)
+        if key in soft:
+            # 1.15.0 (E9): a cap estimated from a page count is a hint, never a reason to cut.
+            notes.append(f"{label} {got} words (soft hint ~{cap}, estimated from the guide's "
+                         "page count; not a limit)")
+            continue
         (problems if got > allowed else notes).append(
             f"{label} {got}/{cap} words" + (f" (margin {allowed})" if allowed != cap else ""))
         if got <= allowed and got > cap * warn_share:

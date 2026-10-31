@@ -621,10 +621,23 @@ def variant_meaning(project: Path) -> list[str]:
     from . import meaning
     terms = meaning.dictionary_terms(project)
     pairs: list[dict] = []
+    # 1.15.0 (E1a): frozen -> journal copy is judged once; afterwards each check compares the
+    # last copy whose every pair was resolved 'unchanged' with the current one (an accepted
+    # trim is never re-opened by a later one-word edit). Re-freezing resets the anchor.
+    fp = freeze_path(project)
+    anchor = _sha256(fp) if fp.is_file() else ""
+    texts = {}
     for name in ("full_manuscript.md", "supplementary_methods.md"):
         src, var = project / SOURCE_DIR / name, project / VARIANT_DIR / name
         if src.is_file() and var.is_file():
-            pairs += meaning.pairs_for(src.read_text(encoding="utf-8", errors="replace"),
-                                       var.read_text(encoding="utf-8", errors="replace"),
-                                       f"{VARIANT_DIR}/{name}", terms)
-    return meaning.gate(project, "variant", pairs)
+            now = var.read_text(encoding="utf-8", errors="replace")
+            base = meaning.confirmed_text(project, "variant", name, anchor)
+            if base is None:
+                base = src.read_text(encoding="utf-8", errors="replace")
+            texts[name] = now
+            pairs += meaning.pairs_for(base, now, f"{VARIANT_DIR}/{name}", terms)
+    problems = meaning.gate(project, "variant", pairs)
+    if not problems:
+        for name, now in texts.items():
+            meaning.confirm(project, "variant", name, now, anchor)
+    return problems

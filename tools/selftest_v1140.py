@@ -908,7 +908,7 @@ def run_r(tmp: Path, record, section) -> None:
     sizes = {s.id: len((ROOT / "pipeline" / s.card).read_text(encoding="utf-8")) for s in pipe.stages}
     record("R pipeline 1.14.0; a 1.13 paper gets exactly one 1.14.0 migration event and no paper "
            "file changes; every card <= the card limit",
-           pipe.meta.get("version") in ("1.14.0", "1.14.1") and len(notes) == 1
+           pipe.meta.get("version") in ("1.14.0", "1.14.1", "1.15.0") and len(notes) == 1
            and before == after
            and max(sizes.values()) <= registry.CARD_MAX_CHARS, f"{len(notes)} {max(sizes.values())}")
 

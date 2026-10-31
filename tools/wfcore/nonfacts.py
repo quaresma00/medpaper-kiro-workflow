@@ -44,6 +44,26 @@ REGISTRY_RE = re.compile(r"\b(?:NCT\d{8}|CRD\d{8,}|ChiCTR[-\w]*\d+|ISRCTN\d+|DRK
                          r"PRJ[NED][A-Z]?\d+|GSE\d+|SRP\d+|E-MTAB-\d+)\b")
 
 
+REF_HEAD_RE = re.compile(r"(?mi)^[ \t#]*(?:references|reference list|literature cited|"
+                         r"bibliography)[ \t]*:?[ \t]*$")
+AFTER_REFS_RE = re.compile(r"(?mi)^[ \t#]*(?:figure legends|figure captions|legends to figures|"
+                           r"tables?|figures?|supplementary\b.*|online resource\b.*|appendix\b.*)"
+                           r"[ \t]*:?[ \t]*$")
+
+
+def strip_reference_list(text: str) -> str:
+    """1.15.0 (E12): the reference list blanked (page ranges such as '731-40; discussion
+    741-2', volumes and years are verified by refproof, not by number comparisons)."""
+    m = None
+    for m in REF_HEAD_RE.finditer(text or ""):
+        pass
+    if m is None:
+        return text
+    rest = text[m.end():]
+    nxt = AFTER_REFS_RE.search(rest)
+    return text[:m.end()] + "\n" + (rest[nxt.start():] if nxt else "")
+
+
 def strip(text: str) -> str:
     """The text with versions, URLs, DOIs and identifiers blanked."""
     text = URL_RE.sub(" ", text)

@@ -21,7 +21,8 @@ from wfcore import finalcopy, paths  # noqa: E402
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="author final-copy end state")
-    ap.add_argument("command", choices=("record", "check", "status"))
+    ap.add_argument("command", choices=("record", "check", "status", "export-pdf"))
+    ap.add_argument("--docx", type=Path, help="export-pdf: a checked Word file in final_copy/")
     ap.add_argument("--edit", action="append", default=[], help="one manual edit (repeatable)")
     ap.add_argument("--words", default="", help="the author's authorisation, verbatim")
     ap.add_argument("--words-file", help="UTF-8 file holding --words (avoids shell code pages)")
@@ -35,6 +36,12 @@ def main(argv: list[str] | None = None) -> int:
             argtext.verify(args.words, "--words")
             data = finalcopy.record(project, args.edit, args.words)
             print(f"recorded {len(data['edits'])} manual edit(s); now run: final_copy.py check")
+            return 0
+        if args.command == "export-pdf":  # 1.15.0 (E8): PDF provenance from the checked docx
+            if args.docx is None:
+                raise ValueError("export-pdf needs --docx 08_submission/final_copy/<file>.docx")
+            pdf = finalcopy.export_pdf(project, paths.resolve_paper_path(args.docx))
+            print(f"exported {pdf} (provenance recorded; final_copy.py check accepts it)")
             return 0
         if args.command == "status":
             data = finalcopy.load(project)

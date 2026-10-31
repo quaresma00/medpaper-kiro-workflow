@@ -7,12 +7,16 @@ includePowers: false
 permissions:
   rules:
     # 1.12.0 (E2): the ONLY writable file is the report in the bundle review_round.py start
-    # printed (.wf/review_bundle/<round>/report.md). Everything a paper is made of is denied.
+    # printed (.wf/review_bundle/<round>/report.md). 1.15.0: the 1.14 deny list held any-.md
+    # and any-.wf-entry patterns, which also match that report.md (basename / directory
+    # matching), so the host refused the report. The deny list now names only the paper's own
+    # folders; the prompt limits writes to the report and the engine refuses a report written
+    # while any paper file changed (wfcore/reviewguard.py).
     - capability: fs_write
       match: [".wf/review_bundle/*/report.md", "**/.wf/review_bundle/*/report.md"]
       effect: allow
     - capability: fs_write
-      match: ["0*/**", "**/0*_*/**", ".wf/*", "**/.wf/*", ".wf/review_bundle/*/files/**", "**/.wf/review_bundle/*/files/**", ".kiro/**", "**/.kiro/**", "**/tools/**", "**/pipeline/**", "**/reference/**", "temp/**", "*.md", "*.json", "*.toml"]
+      match: ["0*/**", "**/0*_*/**", ".wf/*.json", ".wf/*.toml", ".wf/revisions/**", ".wf/review_bundle/*/files/**", "**/.wf/review_bundle/*/files/**", ".kiro/**", "**/.kiro/**", "**/tools/**", "**/pipeline/**", "**/reference/**", "temp/**"]
       effect: deny
     - capability: shell
       effect: deny
@@ -41,7 +45,9 @@ You do not edit the paper, run commands, fetch anything, or activate skills. You
 exactly ONE file: your complete report, to the `report.md` path named in the bundle's
 `MANIFEST.md` (`.wf/review_bundle/<round>/report.md`). Never write any other file, even if a
 tool would let you; never edit a manuscript, table, figure, script or state file. If no
-report path was given, return the report in your reply instead. The caller closes the round
+report path was given, or the write is refused, return the complete report in your reply
+between a line `<<<REPORT>>>` and a line `<<<END>>>` (the caller copies that text verbatim
+with `review_round.py ingest --from` / `rework.py meaning-ingest --from`). The caller closes the round
 from your file verbatim (`review_round.py close --report`), so write every section and
 every numbered finding there - a summary in your reply is not a substitute.
 
@@ -53,7 +59,9 @@ unrendered figure is itself a finding.
 
 Also flag (1.9.0): bullet or numbered lists in Methods/Results/Introduction/Discussion (medical
 journals expect continuous prose; results belong in sentences); display items not numbered in
-first-citation order; a multi-panel figure with only some panels cited; and, for a double-blind
+first-citation order (1.15.0: reporting checklists and forms are numbered after the content
+supplementary files and are exempt from first-citation ordering - never ask to move a citation
+just to satisfy numbering); a multi-panel figure with only some panels cited; and, for a double-blind
 journal, any author name or e-mail in a review-facing file. Label each finding as
 presentation (facts unchanged) or scientific (a number, citation or conclusion changes).
 

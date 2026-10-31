@@ -157,8 +157,31 @@ class State:
             self._note_v1130(old_version, pipeline_version)
             self._note_v1140(old_version, pipeline_version)
             self._note_v1141(old_version, pipeline_version)
+            self._note_v1150(old_version, pipeline_version)
             self.save()
         return changed
+
+    def _note_v1150(self, old_version: str, new_version: str) -> None:
+        """1.15.0: one event; no file or stage is touched."""
+        if (version_tuple(old_version) >= (1, 15, 0) or version_tuple(new_version) < (1, 15, 0)
+                or self.data.get("v1150_migration_noted")):
+            return
+        self.data["v1150_migration_noted"] = True
+        self.event("requirements_changed",
+                   "1.15.0: meaning checks judge sentence pairs, compare the last confirmed "
+                   "copy with the current one, use one bundle per round and accept author "
+                   "overrides by pair hash; review_round/rework/package_review take a saved "
+                   "reviewer reply (--from); `wf rebuild` rebuilds the package in one command; "
+                   "S25 re-audits check previous findings plus new BLOCKING issues, the author "
+                   "final copy is offered at the first REVISE, preference findings close as a "
+                   "group; supplementary builders (figures PDF, workbook info sheet, Online "
+                   "Resource header); `wf guidelines refresh`; page-derived word caps are hints; "
+                   "AI/LLM-use is recorded as the author's fact; reference-list digits are not "
+                   "compared, ref_overrides.json; submission_qc.md needs no hand-written headings. "
+                   "Stricter checks and package changes (separate figure/table files, generated "
+                   "submission_qc.md, abbreviation list after the keywords, '; discussion' page "
+                   "tails dropped, final-copy PDF/figure coverage, review guard) apply to this "
+                   "paper only after `wf migrate --yes`. Paper files were not modified.")
 
     def _note_v1141(self, old_version: str, new_version: str) -> None:
         """1.14.1: patch release. Event only; no file or stage is touched."""

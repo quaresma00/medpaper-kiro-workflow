@@ -75,11 +75,12 @@ PY_ASSIGN_RE = re.compile(r"\b(\w+)\s*=\s*(?:Path\()?r?[\"']([^\"'\r\n]+)[\"']")
 _ENGINE_STATE_NAMES = ("state.json", "progress.md", "review_rounds.json", "check_receipts.json",
                        "data_sources.json", "hash_cache.json", "final_copy.json",
                        "presentation_deltas.json", "review_coverage.json", "reference_live.json",
-                       "meaning_verdicts.json")
+                       "meaning_verdicts.json", "meaning_confirmed.json")
 ENGINE_STATE = frozenset(os.path.normcase(f".wf/{n}").replace("\\", "/")
                          for n in _ENGINE_STATE_NAMES)
 ENGINE_STATE_DIRS = tuple(os.path.normcase(d).replace("\\", "/")
-                          for d in (".wf/revisions/", ".wf/repro/rerun/", ".wf/review_reports/"))
+                          for d in (".wf/revisions/", ".wf/repro/rerun/", ".wf/review_reports/",
+                                    ".wf/meaning_rounds/", ".wf/review_guard/"))
 COPY_DATA_RE = re.compile(r"(?i)\b(?:copy-item|cpi|cp|copy|robocopy|xcopy|move-item|mv|move|"
                           r"expand-archive|unzip|mklink|hardlink)\b|extractall|\.extract\(|"
                           r"\b7z\s+[xe]\b|\btar\s+-?\w*x|os\.link|shutil\.(?:copy\w*|move)")

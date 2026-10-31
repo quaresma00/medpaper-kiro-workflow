@@ -16,16 +16,20 @@ open questions this prints:
 ```
 Record answers with `tools/declarations.py answer <id> "<value>"`. No registration statement
 unless the journal requires one (a meta-analysis states its PROSPERO ID). Never infer a
-missing item; never draft an AI-use disclosure unless the user asks for that exact content.
+missing item. AI/LLM use: show the user the journal's rule
+(`tools/declarations.py ai-rule`) in the same message and record the factual answer:
+`tools/declarations.py ai --used yes|no [--tool "<tool>" --purpose "<purpose>"] --words "<user's words>"`;
+put the printed statement in `statements.md` (audits read the fact).
 
 ## Do
 1. Write the answers faithfully to `00_input/author_info.json` (administrative; does not touch
    the reproduction proof); `corresponding` = {name, email, affiliation}.
 2. In the journal variant (`08_submission/manuscript/`, never `07_manuscript/`): `title_page.md`
    with the selected title unchanged, and `statements.md` with the user's facts, the
-   declarations the journal requires (its heading names and order from `target_journal.json`)
-   and the central abbreviation list. Each display keeps its own abbreviation definitions
-   unless the journal records `abbreviation_placement=central_required`.
+   declarations the journal requires (its heading names and order from `target_journal.json`);
+   an abbreviation list, if any, as `## Abbreviations` - the builder places it after the
+   keywords (`abbreviation_list`), never inside Declarations. Each display keeps its own
+   abbreviation definitions unless the journal records `abbreviation_placement=central_required`.
 3. Reference count only if the title-page guide requires it (never the library size):
 ```
 .\.venv\Scripts\python.exe tools/manuscript/reference_count.py show

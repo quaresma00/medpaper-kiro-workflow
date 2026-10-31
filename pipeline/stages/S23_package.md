@@ -8,39 +8,38 @@ Details (builder, manifest roles, checklist format, portal to-do): `reference/st
 1. `08_submission/cover_letter.md`; item list from `guidelines_extract.md` only. Sync any
    title-page reference count:
    `.\.venv\Scripts\python.exe tools/manuscript/reference_count.py sync`
-2. Build every prose upload from `08_submission/manuscript/` (never `07_manuscript/`):
+2. Build every prose upload once from `08_submission/manuscript/` (never `07_manuscript/`):
 ```
 .\.venv\Scripts\python.exe tools/manuscript/build_docx.py build --kind manuscript --input project/08_submission/manuscript/full_manuscript.md --output project/08_submission/bundle/manuscript.docx --style-config project/08_submission/docx_style.json --bibliography project/06_refs/refs.bib --csl <journal.csl> --wait
 .\.venv\Scripts\python.exe tools/manuscript/build_docx.py build --kind title_page --input project/08_submission/manuscript/title_page.md --output project/08_submission/bundle/title_page.docx --style-config project/08_submission/docx_style.json
-.\.venv\Scripts\python.exe tools/manuscript/build_docx.py build --kind cover_letter --input project/08_submission/cover_letter.md --output project/08_submission/bundle/cover_letter.docx --style-config project/08_submission/docx_style.json
 ```
-   The builder applies target_journal.json (page numbers, references, legends, line numbers,
-   heading names). No black squares: zero keepNext/keepLines/pageBreakBefore anywhere
-   (`docx_bundle_ready`); figures stay readable. Supplementary Methods -> DOCX (+ `--pdf`).
-3. Write `08_submission/bundle/manifest.json` (every upload, role, rule), then measure:
+   Same for the cover letter. Supplementary Methods: `--kind supplementary --esm-number <n>
+   --pdf` (header "Online Resource n"). Supplementary figures PDF and workbook info sheet:
+   `tools/supplementary.py figures --number <n> --output ...` / `xlsx --input ... --number
+   <n> --output ...`. No black squares (zero keep markers). Keep any helper script you need
+   later in `.wf/scripts/` - never in `temp/` (`wf clean` empties it).
+3. Write `08_submission/bundle/manifest.json` (every upload, role, rule). Main figure TIFFs
+   and table workbooks are added automatically when the journal wants separate files.
+   From now on ONE command rebuilds what an edit affects and re-measures (audit,
+   `submission_qc.md` - fully generated -, capture, polish lint):
 ```
-.\.venv\Scripts\python.exe tools/manuscript/submission_qc.py write
-.\.venv\Scripts\python.exe tools/manuscript/build_docx.py audit --manifest project/08_submission/bundle/manifest.json --style-config project/08_submission/docx_style.json
+.\.venv\Scripts\python.exe tools/wf.py rebuild --wait
 ```
 4. Consolidated visual pass (`wf status` lists what is owed):
 ```
 .\.venv\Scripts\python.exe tools/figures/qc.py --contact-sheet
 ```
-   Load `05_figures/qc/contact_sheet.png` (crop only where in doubt: `qc.py --crop`); fix
-   scripts inside a rework round, re-render, re-run `qc.py --all`. Then record what you saw:
+   Load `05_figures/qc/contact_sheet.png` (crop where in doubt: `qc.py --crop`); fix scripts
+   inside a rework round, re-render, `qc.py --all`. Then record what you saw:
 ```
 .\.venv\Scripts\python.exe tools/figures/qc.py --confirm "Figure 1" --note "<what you saw / changed>"
 .\.venv\Scripts\python.exe tools/wf.py decide figures_visually_confirmed YES --why "<per figure: what you saw>"
 .\.venv\Scripts\python.exe tools/wf.py decide tables_visually_confirmed YES --why "<sheets and upload tables inspected>"
 ```
-   Render each DOCX (`.\.venv\Scripts\python.exe tools/manuscript/preview.py 08_submission/bundle/manuscript.docx`) and inspect pages.
-5. Bind the visible text, write `submission_qc.md` sections (details), record
-   `submission_files_visually_confirmed YES`:
-```
-.\.venv\Scripts\python.exe tools/package_content.py capture
-```
-6. `08_submission/reporting_checklist.md` only if `journal_requires_checklist` is set (or
-   PRISMA for a meta-analysis); format in the details file.
+   Render each DOCX (`tools/manuscript/preview.py 08_submission/bundle/manuscript.docx`) and
+   inspect pages; then record `submission_files_visually_confirmed YES`.
+5. `08_submission/reporting_checklist.md` only if `journal_requires_checklist` is set (or
+   PRISMA for a meta-analysis); it is numbered after the content supplementary files.
 
 ## Outputs
 - `08_submission/cover_letter.md`
@@ -50,9 +49,9 @@ Details (builder, manifest roles, checklist format, portal to-do): `reference/st
 - `08_submission/submission_qc.md`
 
 ## Gate
-bundle complete, DOCX bundle ready (keep-with-next, line numbers), measured checklist
-(WARN never blocks), package baseline, visual debts cleared, reporting checklist, analysis
-reproduces, no orphans. Never recapture the baseline to accept a Word content edit.
+bundle complete, DOCX bundle ready, measured checklist (WARN never blocks), package
+baseline, visual debts cleared, reporting checklist, analysis reproduces, no orphans. Never
+recapture the baseline to accept a Word content edit.
 
 ## Close
 ```

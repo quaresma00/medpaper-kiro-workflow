@@ -92,7 +92,7 @@ def _write_build_receipt(args, project: Path) -> Path:
         if path is not None and path.is_file():
             auxiliaries.append(_receipt_file_record(path, project))
     # Presentation inputs the builder reads besides --input (journal rules, supplementary legends).
-    extra = [journalspec.TARGET]
+    extra = [journalspec.TARGET, "06_refs/ref_overrides.json"]
     if args.kind == "supplementary":
         extra.append("05_figures/legends.md")
     for rel in extra:
@@ -114,6 +114,14 @@ def _write_build_receipt(args, project: Path) -> Path:
         "scientific_freeze_sha256": (
             _file_sha256(scifreeze.freeze_path(project))
             if scifreeze.is_frozen(project) else ""),
+        # 1.15.0 (E3): the call itself, so `wf rebuild` can repeat it for affected outputs.
+        "args": {k: (_receipt_file_record(v, project)["path"] if isinstance(v, Path) else v)
+                 for k, v in (("bibliography", getattr(args, "bibliography", None)),
+                              ("csl", getattr(args, "csl", None)),
+                              ("style_config", getattr(args, "style_config", None)),
+                              ("pdf", bool(getattr(args, "pdf", False))),
+                              ("esm_number", getattr(args, "esm_number", None)))
+                 if v not in (None, False) and not (isinstance(v, Path) and not v.is_file())},
     }
     receipt.parent.mkdir(parents=True, exist_ok=True)
     receipt.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
@@ -1171,12 +1179,15 @@ def _clean_pipeline_code(text: str) -> str:
                   r"(?:[^\s'\"`)]*[\\/])?([^\s'\"`)\\/]+)", r"\1", text)
 
 
-def _info_page(project: Path) -> str:
+def _info_page(project: Path, number: int | None = None) -> str:
     target = journalspec.load(project)
     title_path = project / "07_manuscript/title.md"
     title = re.sub(r"^#\s+", "", title_path.read_text(encoding="utf-8").strip()) \
         if title_path.is_file() else ""
-    lines = ["# Supplementary information", ""]
+    # 1.15.0 (E5): one header for every supplementary file - "Online Resource n" (the
+    # journal's supplementary_label) when the file's number is given.
+    head = f"{journalspec.esm_label(target)} {number}" if number else "Supplementary information"
+    lines = [f"# {head}", ""]
     if title:
         lines += [f"Article title: {title}", ""]
     if target.get("journal"):
@@ -1222,14 +1233,44 @@ def journal_structure(text: str, target: dict) -> str:
     return text
 
 
+ABBREV_HEAD_RE = re.compile(r"(?mi)^(#{1,3})\s+(?:list\s+of\s+)?abbreviations\s*:?\s*$")
+
+
+def place_abbreviations(text: str, mode: str) -> str:
+    """1.15.0 (E6): the abbreviation list is a section of its own directly after the Keywords
+    line ('after_keywords'), or absent ('none'); never inside Declarations. Tables and figures
+    keep defining their own abbreviations."""
+    if mode not in ("none", "after_keywords"):
+        return text
+    m = ABBREV_HEAD_RE.search(text)
+    if not m:
+        return text
+    level = len(m.group(1))
+    nxt = re.compile(rf"(?m)^#{{1,{level}}}\s").search(text, m.end())
+    end = nxt.start() if nxt else len(text)
+    block = text[m.end():end].strip()
+    text = (text[:m.start()].rstrip() + "\n\n" + text[end:].lstrip()).rstrip() + "\n"
+    if mode == "none" or not block:
+        return text
+    section = f"# Abbreviations\n\n{block}\n"
+    kw = re.search(r"(?mi)^Keywords\s*:.*$", text)
+    if kw:
+        return text[:kw.end()] + "\n\n" + section + "\n" + text[kw.end():].lstrip("\n")
+    intro = re.search(r"(?m)^#\s+(?!Abstract)\S", text)
+    if intro:
+        return text[:intro.start()] + section + "\n" + text[intro.start():]
+    return text
+
+
 def prepare_source(kind: str, inputs: list[Path], project: Path, workdir: Path,
-                   style: dict | None = None) -> list[Path]:
+                   style: dict | None = None, esm_number: int | None = None) -> list[Path]:
     """Apply the journal's presentation rules to a temporary copy handed to Pandoc."""
     if kind not in ("manuscript", "supplementary"):
         return inputs
     text = "\n\n".join(p.read_text(encoding="utf-8", errors="replace") for p in inputs)
     target = journalspec.load(project)
     if kind == "manuscript":
+        text = place_abbreviations(text, journalspec.abbreviation_list(target, project))
         text = journal_structure(text, target)
         m = re.search(r"(?mi)^#\s+Figure legends\s*$", text)
         if m:
@@ -1288,7 +1329,7 @@ def prepare_source(kind: str, inputs: list[Path], project: Path, workdir: Path,
     else:
         text = _clean_pipeline_code(text)
         if target:
-            text = _info_page(project) + "\n" + text
+            text = _info_page(project, esm_number) + "\n" + text
         legends = supplementary_legends(project)
         if legends:
             text = text.rstrip() + "\n\n" + legends
@@ -1471,9 +1512,13 @@ def build(args) -> int:
             raise ValueError("; ".join(source_problems))
         with tempfile.TemporaryDirectory(prefix="medpaper_render_") as work:
             workdir = Path(work)
-            rendered = prepare_source(args.kind, args.input, project, workdir, style)
-            run_pandoc(rendered, args.output, args.bibliography,
-                       collapsing_csl(args.csl, workdir))
+            rendered = prepare_source(args.kind, args.input, project, workdir, style,
+                                      esm_number=getattr(args, "esm_number", None))
+            from wfcore import refoverrides  # 1.15.0 (E12): never edits refs.bib
+            bib = refoverrides.render_copy(
+                project, args.bibliography, workdir,
+                journalspec.reference_rules(journalspec.load(project), project)["drop_discussion_pages"])
+            run_pandoc(rendered, args.output, bib, collapsing_csl(args.csl, workdir))
         blind = (journalspec.blinded(journalspec.load(project))
                  and args.kind not in ("title_page", "cover_letter"))
         normalize_docx(args.output, style, args.kind,
@@ -1573,6 +1618,9 @@ def main() -> int:
     p.add_argument("--pdf", action="store_true",
                    help="also export the audited DOCX to PDF (use for supplementary files "
                         "unless target_journal.json sets si_format=docx)")
+    p.add_argument("--esm-number", type=int, default=None,
+                   help="supplementary: header 'Online Resource <n>' (label from "
+                        "target_journal.json supplementary_label) on the information page")
     p.set_defaults(fn=build)
     p = sub.add_parser("audit")
     p.add_argument("--manifest", type=Path, required=True)

@@ -11,21 +11,23 @@ Details (presentation vs science, rework kinds, Word layout edits): `reference/s
 .\.venv\Scripts\python.exe tools/review_round.py start --scope package
 ```
    Give the `medpaper-reviewer` agent the printed bundle path and brief only; it writes its
-   report to `.wf/review_bundle/<round>/report.md`.
+   report to `.wf/review_bundle/<round>/report.md` (could not write: save its reply,
+   `review_round.py ingest --from <file>`). Never paraphrase findings.
 2. Fix on your own judgement. Journal copy, title page, cover letter and statements live in
-   `08_submission/manuscript/` and `08_submission/`; rebuild affected DOCX and re-check.
+   `08_submission/manuscript/` and `08_submission/`; then ONE command rebuilds what the edit
+   affects (DOCX/PDF, audit, QC, capture, polish lint, rework check):
+   `.\.venv\Scripts\python.exe tools/wf.py rebuild --wait`.
    Science (07_manuscript, results, tables, figures, references) goes through
    `tools/rework.py` (`preview`, then `batch --sealed --plan ...`, `status`, `check --quiet`,
-   `mark`, `close`). Science = changed analysis/data/results, a changed reported value, or
-   a new number that cannot be traced to the frozen results. Everything else - new numbers
-   traceable to the results (show the user each with its source), deletions, reviewer-
-   driven wording/structure, label numbers (Online Resource 2) - is presentation: checks
-   only, no S19 return, no new round, this round's 我确认这一版 covers it. An S19 return
-   needs 我确认回退. 1.14.0: wording that may change meaning (negation, causal, hedging,
-   direction, limitation, group/time terms) is MEANING_CHECK: run `medpaper-reviewer` on
-   the printed meaning bundle only; 'meaning changed' is science.
+   `mark`, `close`). Science = changed analysis/data/results, a changed reported value or
+   an untraceable new number; everything else is presentation (checks only, no S19 return;
+   show the user each new number with its source). An S19 return needs 我确认回退. 1.14.0: wording that may change meaning (negation, causal, hedging,
+   direction, limitation, group/time terms) is MEANING_CHECK: ONE meaning bundle per round,
+   only new sentence pairs; run `medpaper-reviewer` on it. 'meaning changed' is science
+   unless the author overrides it (`rework.py meaning-decide --pair <id|hash> --verdict
+   unchanged --words "<author's words>"`).
 3. Close against the saved report; every F-numbered finding once; protected categories
-   changed or `author`:
+   changed or `author`; PREFERENCE items may close as one group (`--preference-group "<why>"`):
 ```
 .\.venv\Scripts\python.exe tools/review_round.py close --scope package --findings critical=<n>,major=<n>,minor=<n> --finding <id> <category> <status> "<one line>" --change <file> "<one line>" --kept "<id>" "<why>"
 ```
