@@ -422,6 +422,11 @@ def audit_figure(fig, stem: str | Path, archetype: str | None = None,
                                if (t.get_text() or "").strip()}),
     }
     report.update(provenance or {})
+    try:  # 1.17.0 (J7): the presentation parameters this render used (journal switch check)
+        from wfcore import renderparams
+        report["presentation"] = renderparams.figure_snapshot()
+    except Exception:  # noqa: BLE001 - outside a paper the defaults are not worth a failure
+        pass
     pop = getattr(fig, "medpaper_population", None)  # 1.16.0: recipes.km_survival
     if isinstance(pop, dict) and pop:
         report["population"] = pop

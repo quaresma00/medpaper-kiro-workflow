@@ -430,7 +430,349 @@ def run_ingest(tmp: Path, record, section) -> None:
            and "guideline snapshot refreshed" in _out(old), _out(al)[-200:] + _out(old)[-200:])
 
 
-GROUPS = [("switch", run_switch), ("ingest", run_ingest)]
+
+
+# ------------------------------------------------------------------------------ J5
+def _fixtures(d: Path, table: dict) -> Path:
+    d.mkdir(parents=True, exist_ok=True)
+    out = {}
+    for i, (url, (status, body, ctype)) in enumerate(table.items()):
+        name = f"r{i}.bin"
+        (d / name).write_bytes(body if isinstance(body, bytes) else
+                               (body if isinstance(body, str) else json.dumps(body)).encode("utf-8"))
+        out[url] = {"status": status, "file": name, "content_type": ctype}
+    (d / "fixtures.json").write_text(json.dumps(out), encoding="utf-8")
+    return d
+
+
+def _nlm_urls(issn: str, uid: str | None) -> dict:
+    import urllib.parse
+    base = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+    q1 = urllib.parse.urlencode({"db": "nlmcatalog", "term": f"{issn}[issn]", "retmode": "json"})
+    out = {f"{base}/esearch.fcgi?{q1}": (200, {"esearchresult": {"idlist": [uid] if uid else []}},
+                                          "application/json")}
+    if uid:
+        q2 = urllib.parse.urlencode({"db": "nlmcatalog", "id": uid, "retmode": "json"})
+        out[f"{base}/esummary.fcgi?{q2}"] = (200, {"result": {uid: {
+            "titlemainlist": [{"title": "BMC surgery."}], "currentindexingstatus": "Y",
+            "elocationlist": [{"elocationvalue": "https://bmcsurg.biomedcentral.com/"}]}}},
+            "application/json")
+    return out
+
+
+def run_lookup(tmp: Path, record, section) -> None:
+    from wfcore import guideingest, journallookup
+    section("1.17.0 J5: wf journal lookup finds the official guide lawfully (recorded responses)")
+    p = _paper(tmp / "ok", "S20_journal")
+    guide = "https://bmcsurg.biomedcentral.com/submission-guidelines"
+    fx = _fixtures(tmp / "fx_ok", {
+        "https://doaj.org/api/search/journals/issn%3A1471-2482": (200, {"results": [{"bibjson": {
+            "title": "BMC Surgery", "publisher": {"name": "BMC"},
+            "ref": {"author_instructions": guide, "journal": "https://bmcsurg.biomedcentral.com/"},
+            "apc": {"has_apc": True}}}]}, "application/json"),
+        "https://api.openalex.org/sources/issn:1471-2482": (200, {
+            "id": "https://openalex.org/S1", "display_name": "BMC Surgery",
+            "homepage_url": "https://bmcsurg.biomedcentral.com/",
+            "host_organization_name": "BioMed Central", "apc_usd": 2990, "is_in_doaj": True},
+            "application/json"),
+        **_nlm_urls("1471-2482", "100968567"),
+        guide: (200, _guide_html(), "text/html; charset=utf-8")})
+    r = _run(p, "tools/wf.py", "journal", "lookup", "--issn", "14712482",
+             env=_env(p, MEDPAPER_HTTP_FIXTURES=fx, LOCALAPPDATA=tmp / "lad"))
+    out = _out(r)
+    idx = guideingest.load_index(p)
+    cache = p / journallookup.LOOKUP_DIR / "1471-2482.json"
+    record("J5 DOAJ author_instructions -> one polite GET -> the official page is stored and "
+           "ingested as guidelines_source.txt; NLM MEDLINE status shown as supplementary",
+           r.returncode == 0 and "L3 已取得官方页面并导入" in out and (p / guideingest.SOURCE).is_file()
+           and idx and idx[-1]["origin"] == "fetched" and idx[-1]["url"] == guide
+           and "目前被 MEDLINE 收录" in out and "BMC Surgery" in out, out[-700:])
+    rec = json.loads(cache.read_text(encoding="utf-8"))
+    record("J5 network answers are cached with their date", rec["looked_up_at"][:4].isdigit()
+           and rec["sources"]["openalex"]["homepage"] and rec["candidates"][0]["url"] == guide)
+    r2 = _run(p, "tools/wf.py", "journal", "lookup", "--issn", "1471-2482", "--no-fetch",
+              env=_env(p, MEDPAPER_OFFLINE=1, LOCALAPPDATA=tmp / "lad"))
+    record("J5 offline, the dated local cache (L0) answers", r2.returncode == 0
+           and "L0 使用本地缓存" in _out(r2) and guide in _out(r2), _out(r2)[-300:])
+    q = _paper(tmp / "blocked", "S20_journal")
+    home = "https://www.sciencedirect.com/journal/journal-of-tests"
+    tpl = home + "/publish/guide-for-authors"
+    blocked_table = {
+        "https://doaj.org/api/search/journals/issn%3A1234-5679": (200, {"results": []},
+                                                                 "application/json"),
+        "https://api.openalex.org/sources/issn:1234-5679": (200, {
+            "id": "https://openalex.org/S2", "display_name": "Journal of Tests",
+            "homepage_url": home, "host_organization_name": "Elsevier BV", "is_in_doaj": False},
+            "application/json"),
+        **_nlm_urls("1234-5679", None),
+        tpl: (403, b"", "text/html")}
+    fx2 = _fixtures(tmp / "fx_403", blocked_table)
+    r3 = _run(q, "tools/wf.py", "journal", "lookup", "--issn", "1234-5679",
+              env=_env(q, MEDPAPER_HTTP_FIXTURES=fx2, LOCALAPPDATA=tmp / "lad"))
+    o3 = _out(r3)
+    record("J5 publisher URL template (Elsevier) -> 403 -> STOP with Chinese instructions naming "
+           "the exact URL and the ingest command; no retry, nothing ingested",
+           r3.returncode == 0 and "403" in o3 and "L4" in o3 and tpl in o3
+           and f"wf guidelines ingest --from <保存的文件> --url {tpl}" in o3
+           and "第三方" in o3 and "Master Journal List" in o3
+           and not (q / guideingest.SOURCE).exists(), o3[-900:])
+    fx3 = _fixtures(tmp / "fx_cap", {**blocked_table, tpl: (
+        200, "<html><body><h1>Just a moment...</h1>Verify you are human (captcha)"
+        "</body></html>", "text/html")})
+    r4 = _run(q, "tools/wf.py", "journal", "lookup", "--issn", "1234-5679", "--refresh",
+              env=_env(q, MEDPAPER_HTTP_FIXTURES=fx3, LOCALAPPDATA=tmp / "lad"))
+    record("J5 a captcha page is recognised as blocked, not ingested", "验证码" in _out(r4)
+           and not (q / guideingest.SOURCE).exists(), _out(r4)[-300:])
+    lad = tmp / "lad2"
+    _w(lad, "medpaper/journal_cache/2222-3333.json",
+       {"issn": "2222-3333", "title": "Cached Journal", "looked_up_at": journallookup._now(),
+        "candidates": [{"url": "https://cached.example.org/authors", "basis": "user cache"}]})
+    r5 = _run(q, "tools/wf.py", "journal", "lookup", "--issn", "2222-3333", "--no-fetch",
+              env=_env(q, MEDPAPER_OFFLINE=1, LOCALAPPDATA=lad))
+    record("J5 the user-level read-only cache under LOCALAPPDATA is read (dated entry)",
+           "user cache" in _out(r5) and "https://cached.example.org/authors" in _out(r5), _out(r5)[-300:])
+    cands = journallookup.template_candidates(ROOT, {
+        "publisher": "MDPI", "homepages": ["https://www.mdpi.com/journal/jcm"], "issn": "2077-0383"})
+    tpl_n = len(journallookup.templates(ROOT))
+    record("J5 the vendored publisher table covers 14+ publishers, each marked verify at runtime",
+           tpl_n >= 14 and all(t.get("verify") == "runtime" for t in journallookup.templates(ROOT))
+           and cands and cands[0]["url"] == "https://www.mdpi.com/journal/jcm/instructions", str(cands))
+    card = (ROOT / "pipeline/stages/S20_journal.md").read_text(encoding="utf-8")
+    record("J5 the S20 card uses lookup -> ingest and stays <= 4000 characters",
+           "wf journal lookup" in card and "guidelines ingest" in card and len(card) <= 4000,
+           str(len(card)))
+
+
+# ------------------------------------------------------------------------------ J6
+DEP = """<?xml version="1.0" encoding="utf-8"?>
+<style xmlns="http://purl.org/net/xbiblio/csl" version="1.0" default-locale="en-US">
+  <info><title>Journal of Tests</title><id>http://www.zotero.org/styles/journal-of-tests</id>
+    <link href="http://www.zotero.org/styles/journal-of-tests" rel="self"/>
+    <link href="http://www.zotero.org/styles/vancouver" rel="independent-parent"/>
+    <issn>1234-5679</issn><eissn>9876-543X</eissn></info></style>
+"""
+PARENT = """<?xml version="1.0" encoding="utf-8"?>
+<style xmlns="http://purl.org/net/xbiblio/csl" class="in-text" version="1.0">
+  <info><title>Vancouver</title><id>http://www.zotero.org/styles/vancouver</id></info>
+  <citation><layout><text variable="citation-number"/></layout></citation>
+  <bibliography><layout><text variable="title"/></layout></bibliography></style>
+"""
+OTHER = PARENT.replace("vancouver", "apa").replace("Vancouver", "APA")
+
+
+def run_csl(tmp: Path, record, section) -> None:
+    sys.path.insert(0, str(ROOT / "tools/refs"))
+    import csl_index
+    from wfcore import cslindex
+    section("1.17.0 J6: the reference style comes from the journal's ISSN (CSL styles index)")
+    zpath = tmp / "styles.zip"
+    zpath.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(zpath, "w") as z:
+        z.writestr("styles-1.0.2/dependent/journal-of-tests.csl", DEP)
+        z.writestr("styles-1.0.2/vancouver.csl", PARENT)
+        z.writestr("styles-1.0.2/apa.csl", OTHER)
+    idx = csl_index.build_index(zpath.read_bytes(), "synthetic")
+    record("J6 the generator maps print and electronic ISSN of a dependent style to its parent",
+           idx["issn"].get("1234-5679") == ["journal-of-tests", "vancouver"]
+           and idx["issn"].get("9876-543X") == ["journal-of-tests", "vancouver"], str(idx["issn"]))
+    ipath = _w(tmp, "index.json", idx)
+    os.environ["MEDPAPER_CSL_INDEX"] = str(ipath)
+    cslindex._CACHE.clear()
+    try:
+        p = _paper(tmp / "csl", "S23_package")
+        _target(p, "Journal of Tests", issn="1234-5679")
+        _w(p, "08_submission/vancouver.csl", PARENT)
+        r = _gate(p, "csl_check", "S23_package", render=False)
+        record("J6 csl_check passes the parent style the index gives the journal ISSN", r.ok
+               and "1234-5679" in r.detail, r.detail)
+        (p / "08_submission/vancouver.csl").unlink()
+        _w(p, "08_submission/apa.csl", OTHER)
+        r = _gate(p, "csl_check", "S23_package", render=False)
+        record("J6 counterexample: another journal's style passed 1.16.0 (csl_check was a manual "
+               "tool); now it fails at S23", not r.ok and "vancouver" in r.detail, r.detail)
+        _target(p, "Journal of Tests", issn="1234-5679",
+                csl={"reason": "the guide's own example reference matches APA 7 exactly"})
+        r = _gate(p, "csl_check", "S23_package", render=False)
+        record("J6 a style with a recorded reason passes and says so", r.ok and "reason" in r.detail,
+               r.detail)
+        _target(p, "Journal of Tests", issn="1234-5679")
+        _w(p, "08_submission/apa.csl", DEP)
+        r = _gate(p, "csl_check", "S23_package", render=False)
+        record("J6 a CSL naming the journal ISSN itself passes", r.ok, r.detail)
+        _pin(p, "1.16.0")
+        _w(p, "08_submission/apa.csl", OTHER)
+        r = _gate(p, "csl_check", "S23_package", render=False)
+        record("J6 a paper pinned to 1.16.0 gets csl_check only after wf migrate", r.ok, r.detail)
+        q = _paper(tmp / "fetch", "S20_journal")
+        _target(q, "Journal of Tests", issn="1234-5679")
+        raw = "https://raw.githubusercontent.com/citation-style-language/styles/v1.0.2/"
+        fx = _fixtures(tmp / "fx_csl", {raw + "dependent/journal-of-tests.csl": (200, DEP, "text/xml"),
+                                        raw + "vancouver.csl": (200, PARENT, "text/xml")})
+        f = _run(q, "tools/refs/csl_index.py", "fetch", "--issn", "1234-5679",
+                 env=_env(q, MEDPAPER_HTTP_FIXTURES=fx, MEDPAPER_CSL_INDEX=ipath))
+        tj = json.loads((q / "08_submission/target_journal.json").read_text(encoding="utf-8"))
+        record("J6 fetch downloads the parent from the v1.0.2 branch (cached), installs it and "
+               "records csl.style_id / csl.issn in target_journal.json",
+               f.returncode == 0 and (q / "08_submission/vancouver.csl").is_file()
+               and (q / "08_submission/cache/csl/journal-of-tests.csl").is_file()
+               and tj["csl"]["style_id"] == "journal-of-tests" and tj["csl"]["issn"] == "1234-5679"
+               and "citationstyles.org" in _out(f), _out(f)[-300:])
+    finally:
+        os.environ.pop("MEDPAPER_CSL_INDEX", None)
+        cslindex._CACHE.clear()
+    real = cslindex.load(ROOT)
+    att = (ROOT / "reference/CSL_STYLES_ATTRIBUTION.md").read_text(encoding="utf-8")
+    record("J6 the vendored index and its CC BY-SA 3.0 attribution ship with the engine; S23 gates "
+           "csl_check since 1.17.0",
+           len(real.get("issn", {})) >= 20 and "CC BY-SA 3.0" in att and "citationstyles.org" in att
+           and any(g.get("check") == "csl_check" and g.get("since") == "1.17.0"
+                   for g in _stage_gates("S23_package")), str(len(real.get("issn", {}))))
+
+
+def _stage_gates(sid: str) -> list[dict]:
+    from wfcore import registry
+    return registry.load().stage(sid).gate
+
+
+# ------------------------------------------------------------------------------ J7
+FIG_SCRIPT = """import matplotlib
+matplotlib.use("Agg")
+from wfcore import paths
+from figures.style import apply_style, figure, save
+P = paths.project_dir(check_engine=False)
+apply_style()
+fig, panels = figure(width="single", height_mm=60, panels=(1, 1), letters=False)
+_, ax = panels[0]
+ax.plot([0, 1, 2, 3], [1.0, 0.9, 0.8, 0.7])
+ax.set_xlabel("Year of follow-up")
+ax.set_ylabel("Survival")
+save(fig, P / "05_figures/out/Figure1", width="single", tiff=False)
+"""
+R_FIG = """source(file.path(Sys.getenv("MEDPAPER_ROOT"), "tools/figures/R/medfig.R"))
+d <- data.frame(x = c(1, 2, 3), y = c(2, 1, 3))
+p <- ggplot2::ggplot(d, ggplot2::aes(x, y)) + ggplot2::geom_point() +
+  ggplot2::labs(x = "Dose", y = "Response") + theme_medpaper()
+save_medpaper(p, "05_figures/out/Figure3", width = "single")
+"""
+
+
+def run_render(tmp: Path, record, section) -> None:
+    from wfcore import journalepoch, renderparams
+    section("1.17.0 J7: figures and tables carry the presentation parameters they were rendered with")
+    p = _paper(tmp / "fig", "S20_journal")
+    _w(p, "01_protocol/journal_profile.json", {
+        "status": "provisional", "journal_or_type": "Journal A type", "font_min_pt": 7,
+        "figure_width_mm": {"single": 84, "1.5": 129, "double": 174}, "panel_label_case": "lower",
+        "line_art_dpi": 300, "number_format": {"thousands": ","}, "spelling": "british",
+        "heading_names": {}, "source": "journal type default"})
+    _w(p, "05_figures/code/fig1.py", FIG_SCRIPT)
+    r = _run(p, "tools/wf.py", "run-script", "05_figures/code/fig1.py", cwd=p)
+    side = p / "05_figures/qc/Figure1.artist.json"
+    art = json.loads(side.read_text(encoding="utf-8")) if side.is_file() else {}
+    record("J7 a Python figure sidecar records the presentation parameters it used",
+           r.returncode == 0 and (art.get("presentation") or {}).get("line_art_dpi") == 300
+           and art["presentation"]["panel_label_case"] == "lower", _out(r)[-400:])
+    import shutil
+    if shutil.which("Rscript"):
+        _w(p, "05_figures/code/fig3.R", R_FIG)
+        rr = _run(p, "tools/wf.py", "run-script", "05_figures/code/fig3.R", cwd=p)
+        rside = p / "05_figures/qc/Figure3.artist.json"
+        rart = json.loads(rside.read_text(encoding="utf-8")) if rside.is_file() else {}
+        record("J7 an R figure sidecar (save_medpaper) records the presentation parameters it used",
+               (rart.get("presentation") or {}).get("panel_label_case") == "lower"
+               and (rart.get("presentation") or {}).get("line_art_dpi") == 300,
+               _out(rr)[-400:])
+        (p / "05_figures/qc/Figure3.artist.json").unlink(missing_ok=True)
+    else:
+        record("J7 R figure sidecar: Rscript available", False, "Rscript missing")
+    from figures import qc
+    record("J7 the sidecar schema accepts the presentation block", not any(
+        "unknown key" in x for x in qc._schema_problems(art, "Figure1")) if art else False)
+    sys.path.insert(0, str(ROOT / "tools"))
+    from tables import threeline
+    old = {k: os.environ.get(k) for k in ("MEDPAPER_PROJECT", "MEDPAPER_SCRIPT")}
+    os.environ.update(MEDPAPER_PROJECT=str(p), MEDPAPER_SCRIPT="04_tables/code/t1.py")
+    try:
+        with redirect_stdout(io.StringIO()):
+            threeline.write_table(p / "04_tables/main/Table1.xlsx", "Table 1", "Table 1. Cohort",
+                                  ["Characteristic", "Value"], [["Age", "60"]], ["Values are years."])
+    finally:
+        for k, v in old.items():
+            os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+    tabs = json.loads((p / renderparams.TABLES).read_text(encoding="utf-8"))["tables"]
+    record("J7 the table builder records number format and spelling per workbook",
+           tabs.get("04_tables/main/Table1.xlsx", {}).get("params", {}).get("spelling") == "british"
+           and tabs["04_tables/main/Table1.xlsx"]["script"] == "04_tables/code/t1.py", str(tabs))
+    pres = {"font_min_pt": 7, "figure_width_mm": {"single": 84, "1.5": 129, "double": 174},
+            "panel_label_case": "lower", "line_art_dpi": 300, "number_format": {"thousands": ","},
+            "spelling": "british", "heading_names": {}, "in_figure_title": None}
+    _target(p, "Journal A", presentation=pres)
+    r = _gate(p, "presentation_params_confirmed", "S20_journal")
+    record("J7 parameters equal to the render pass", r.ok, r.detail)
+    _target(p, "Journal A", presentation={**pres, "line_art_dpi": 600, "panel_label_case": "upper"})
+    r = _gate(p, "presentation_params_confirmed", "S20_journal")
+    record("J7 counterexample: figures rendered at 300 dpi / lower-case panels passed 1.16.0 with a "
+           "600 dpi / upper-case journal ('journal replaces provisional'); now one instruction to "
+           "re-render with wf rebuild", not r.ok and "Figure1" in r.detail and "wf rebuild" in
+           " ".join(r.hints) and "line_art_dpi 300 -> 600" in r.detail, r.detail)
+    dry = _run(p, "tools/wf.py", "rebuild", "--dry-run", cwd=p)
+    record("J7 wf rebuild --dry-run lists the presentation re-render (no science rewind)",
+           "re-render 05_figures/code/fig1.py" in _out(dry), _out(dry)[-300:])
+    rb = _run(p, "tools/wf.py", "rebuild", cwd=p)
+    art2 = json.loads(side.read_text(encoding="utf-8"))
+    r = _gate(p, "presentation_params_confirmed", "S20_journal")
+    record("J7 wf rebuild re-runs the figure script with the journal's parameters; the gate then "
+           "passes for the figure", art2["presentation"]["line_art_dpi"] == 600
+           and "Figure1" not in r.detail and "04_tables/main/Table1.xlsx" not in r.detail,
+           _out(rb)[-300:] + " | " + r.detail)
+    _pin(p, "1.16.0")
+    _target(p, "Journal A", presentation={**pres, "line_art_dpi": 1200})
+    r = _gate(p, "presentation_params_confirmed", "S20_journal")
+    record("J7 a paper pinned to 1.16.0 keeps the 1.16 behaviour until wf migrate", r.ok, r.detail)
+    q = _paper(tmp / "epoch2", "S20_journal")
+    _w(q, "01_protocol/journal_profile.json", {"journal_or_type": "x", "font_min_pt": 7,
+                                               "spelling": "british"})
+    _w(q, journalepoch.HISTORY, {"schema": 1, "epochs": [
+        {"epoch": 1, "journal": "Journal A", "started_at": "2026-01-01T00:00:00Z"},
+        {"epoch": 2, "journal": "Journal B", "started_at": journalepoch._now()}]})
+    part = {k: v for k, v in pres.items() if k != "spelling"}
+    _target(q, "Journal B", 2, presentation=part)
+    r = _gate(q, "presentation_params_confirmed", "S20_journal")
+    from wfcore import presentparams
+    record("J7 after a switch the presentation block must be complete: nothing is inherited from "
+           "the provisional journal_profile.json", not r.ok and "spelling" in r.detail
+           and presentparams.params(q)["spelling"] is None, r.detail)
+    _target(q, "Journal B", 2, presentation=pres)
+    _w(q, "05_figures/qc/Figure2.artist.json", {"figure": "Figure2", "script": "05_figures/code/f2.R"})
+    r = _gate(q, "presentation_params_confirmed", "S20_journal")
+    record("J7 after a switch a figure rendered without recorded parameters must be re-rendered",
+           not r.ok and "Figure2" in r.detail and "rendered before 1.17.0" in r.detail, r.detail)
+
+
+def run_release(tmp: Path, record, section) -> None:
+    from wfcore import registry
+    from wfcore.state import State
+    section("1.17.0 release: version, one migration event, pinned paper policy")
+    q = tmp / "old"
+    q.mkdir(parents=True, exist_ok=True)
+    st = State(q, ".wf").create("medpaper", "1.16.0", "S23_package")
+    before = sorted(x.name for x in q.rglob("*") if x.is_file() and ".wf" not in x.parts)
+    st.migrate_pipeline("1.17.0", ["S23_package"])
+    st.migrate_pipeline("1.17.0", ["S23_package"])
+    notes = [e for e in st.data["events"] if e["kind"] == "requirements_changed"
+             and str(e.get("detail", "")).startswith("1.17.0")]
+    after = sorted(x.name for x in q.rglob("*") if x.is_file() and ".wf" not in x.parts)
+    pipe = registry.load()
+    sizes = {s.id: len((ROOT / "pipeline" / s.card).read_text(encoding="utf-8")) for s in pipe.stages}
+    record("R pipeline 1.17.0; a 1.16.0 paper gets exactly one 1.17.0 event, stays pinned (gate pin "
+           "unchanged without a journal switch) and no paper file changes; cards <= limit",
+           pipe.meta.get("version") == "1.17.0" and len(notes) == 1 and st.engine_pin == "1.16.0"
+           and st.gate_pin("S23_package") == "1.16.0" and before == after
+           and max(sizes.values()) <= registry.CARD_MAX_CHARS, f"{len(notes)} {max(sizes.values())}")
+
+
+GROUPS = [("switch", run_switch), ("ingest", run_ingest), ("lookup", run_lookup), ("csl", run_csl),
+          ("render", run_render), ("release", run_release)]
 
 
 if __name__ == "__main__":  # quick subset run: python tools/selftest_v1170.py [groups]

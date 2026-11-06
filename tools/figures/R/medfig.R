@@ -974,10 +974,16 @@ save_medpaper <- function(plot, stem, width = "single", height_mm = NULL, dpi = 
     # file.rename replaces an existing target, so the old file is never removed first.
     if (!file.rename(staged[i], finals[i])) stop("could not publish ", finals[i], call. = FALSE)
   }
+  # 1.17.0 (J7): the journal presentation parameters this render used (wf run-script exports
+  # them as MEDPAPER_PRESENTATION); a journal switch compares them with the new journal's.
+  pres <- medpaper_presentation()
+  pres_keys <- intersect(c("figure_width_mm", "line_art_dpi", "font_min_pt", "panel_label_case"), names(pres))
+  audit$presentation <- if (length(pres_keys)) pres[pres_keys] else structure(list(), names = character(0))
   keys <- c("figure", "archetype", "engine", "n_axes", "min_font_pt", "max_font_pt", "min_line_pt",
             "text_clipped_at_edge", "axes_tightbbox_overlaps", "glyph_warnings",
             "tick_label_collisions", "interior_voids", "elements", "figure_text",
-            "script", "script_sha256", "source_hashes", "render_hashes", "population")
+            "script", "script_sha256", "source_hashes", "render_hashes", "population",
+            "presentation")
   .mf_write_json(audit[keys], sidecar)
   unlink(marker)
 

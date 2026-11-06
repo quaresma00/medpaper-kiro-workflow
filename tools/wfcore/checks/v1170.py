@@ -95,3 +95,61 @@ def journal_layer_clean(ctx: Ctx) -> Result:
                        "journal from its own guide."])
     return Result(True, name, f"journal epoch {ep}: submission layer, guideline snapshot and "
                               "evidence are all from this epoch")
+
+
+def _journal_issns(tj: dict) -> list[str]:
+    from .. import cslindex
+    return cslindex.issns(" ".join(str(tj.get(k) or "") for k in ("issn", "eissn", "issn_print",
+                                                                   "issn_electronic")))
+
+
+def _science_python() -> str:
+    from .. import paths
+    for cand in (paths.repo_root() / ".venv/Scripts/python.exe",
+                 paths.repo_root() / ".venv/bin/python"):
+        if cand.is_file():
+            return str(cand)
+    return sys.executable
+
+
+@check("csl_check")
+def csl_check(ctx: Ctx) -> Result:
+    name = "csl_check"
+    if not since_1170(ctx):
+        return _pinned(name)
+    from .. import cslindex, paths
+    tj = _json(ctx.p("08_submission/target_journal.json"))
+    csl = tj.get("csl") if isinstance(tj.get("csl"), dict) else {}
+    files = [ctx.p(csl["file"])] if csl.get("file") else ctx.glob("08_submission/*.csl")
+    files = [f for f in files if f.is_file()]
+    if len(files) != 1:
+        return Result(False, name, ("no CSL file in 08_submission/" if not files else
+                                    f"{len(files)} CSL files in 08_submission/; name the one in use "
+                                    "in target_journal.json \"csl\": {\"file\": ...}"),
+                      [f"tools/refs/csl_index.py fetch --issn {tj.get('issn', '<ISSN>')}"])
+    try:
+        ok, why = cslindex.matches(paths.repo_root(), files[0], _journal_issns(tj))
+    except Exception as exc:  # noqa: BLE001 - an unreadable CSL is a failure, not a crash
+        return Result(False, name, f"{files[0].name} is not a readable CSL file ({exc})")
+    reason = str(csl.get("reason", "")).strip()
+    if not ok and len(reason) < 20:
+        return Result(False, name, why + "; use the journal's style (tools/refs/csl_index.py fetch "
+                      "--issn ...) or record target_journal.json \"csl\": {\"reason\": \"<why this "
+                      "style, e.g. the guide's own example>\"}")
+    detail = why if ok else f"{why}; accepted with the recorded reason: {reason[:120]}"
+    if ctx.spec.get("render", True) and ctx.p("06_refs/refs.bib").is_file():
+        tool = paths.repo_root() / "tools/manuscript/csl_check.py"
+        env = {**os.environ, "MEDPAPER_PROJECT": str(ctx.project), "PYTHONIOENCODING": "utf-8"}
+        try:
+            proc = subprocess.run([_science_python(), "-B", str(tool), "--csl", str(files[0])],
+                                  capture_output=True, text=True, encoding="utf-8",
+                                  errors="replace", env=env, timeout=600)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return Result(False, name, f"CSL render check could not run: {exc}")
+        out = (proc.stdout or "") + (proc.stderr or "")
+        if proc.returncode:
+            defects = [ln.strip() for ln in out.splitlines() if "DEFECT" in ln or "csl_check:" in ln]
+            return Result(False, name, f"{detail}; render: " + "; ".join(defects[:5] or [out[-300:]]),
+                          ["Fix with 08_submission/csl_patch.json or refs.bib braces, then rebuild."])
+        detail += "; render checks clean"
+    return Result(True, name, detail)

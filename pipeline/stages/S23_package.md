@@ -50,7 +50,8 @@ Details (builder, manifest roles, checklist format, portal to-do): `reference/st
 
 ## Gate
 bundle complete, DOCX bundle ready, measured checklist (WARN never blocks), package
-baseline, visual debts cleared, reporting checklist, analysis reproduces, no orphans. Never
+baseline, visual debts cleared, reporting checklist, analysis reproduces, no orphans, CSL of
+the journal ISSN (csl_check; tools/refs/csl_index.py fetch --issn <ISSN>). Never
 recapture the baseline to accept a Word content edit.
 
 ## Close

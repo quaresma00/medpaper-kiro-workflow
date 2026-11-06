@@ -169,6 +169,21 @@ def plan(project: Path, everything: bool = False) -> tuple[list[dict], list[str]
     return todo, notes
 
 
+def presentation_rerenders(project: Path) -> tuple[list[str], list[str]]:
+    """(paper scripts to re-run, displays without a recorded script) whose render parameters
+    differ from the journal's current ones (1.17.0, J7; renderparams.mismatches)."""
+    try:
+        from . import presentparams, renderparams
+        stale = renderparams.mismatches(project, require=presentparams.later_epoch(project))
+    except Exception:  # noqa: BLE001 - a broken record must not stop the package rebuild
+        return [], []
+    scripts = sorted({m["script"] for m in stale if m.get("script")
+                      and (Path(project) / m["script"]).is_file()})
+    orphans = sorted(m["display"] for m in stale if not (m.get("script")
+                                                         and (Path(project) / m["script"]).is_file()))
+    return scripts, orphans
+
+
 def run(project: Path, everything: bool = False, dry: bool = False) -> int:
     project = Path(project)
     tools = Path(__file__).resolve().parents[1]
@@ -176,15 +191,27 @@ def run(project: Path, everything: bool = False, dry: bool = False) -> int:
     st = _state(project)
     in_round = bool(st.get("active_revision_round"))
     todo, notes = plan(project, everything)
+    scripts, orphans = presentation_rerenders(project)
     for n in notes:
         print(n)
     if dry:
+        for s in scripts:
+            print(f"would re-render {s} (presentation parameters of this journal; facts unchanged)")
+        for d in orphans:
+            print(f"cannot re-render {d}: no script recorded - run its script with wf run-script")
         for rec in todo:
             print(f"would rebuild {rec['output']} ({'; '.join(rec['_why'])[:160]})")
         print(f"rebuild dry run: {len(todo)} output(s) affected")
         return 0
     log = _Log(project / ".wf/logs/rebuild.log")
     try:
+        # 1.17.0 (J7): displays rendered with another journal's parameters are re-rendered first.
+        for s in scripts:
+            log.run(f"re-render {s} (presentation)", [py, str(tools / "wf.py"), "run-script", s],
+                    project)
+        for d in orphans:
+            log.failures.append(f"FAIL re-render {d}: no script recorded; run its script with "
+                                "wf run-script")
         journal_copy = project / "08_submission/manuscript"
         snap = [p for p in (project / "07_manuscript/prepolish/facts.json",
                             project / "08_submission/manuscript/prepolish/facts.json") if p.is_file()]

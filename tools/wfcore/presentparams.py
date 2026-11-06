@@ -46,6 +46,20 @@ def confirmed(project: Path) -> dict:
     return block if isinstance(block, dict) else {}
 
 
+def later_epoch(project: Path) -> bool:
+    """1.17.0 (J7): after a journal switch nothing is inherited from the provisional profile."""
+    try:
+        from . import journalepoch
+        return journalepoch.number(Path(project)) > 1
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _layers(project: Path) -> list[dict]:
+    return [confirmed(project)] if later_epoch(project) else [provisional(project),
+                                                               confirmed(project)]
+
+
 def params(project: Path | None = None) -> dict:
     if project is None:
         raw = os.environ.get("MEDPAPER_PROJECT")
@@ -60,7 +74,7 @@ def params(project: Path | None = None) -> dict:
                                       "double": float(tg.get("column_width_mm_double", 180.0))}
         except Exception:  # noqa: BLE001 - defaults stand
             pass
-        for layer in (provisional(project), confirmed(project)):
+        for layer in _layers(project):
             for key in KEYS:
                 if layer.get(key) is None:
                     continue

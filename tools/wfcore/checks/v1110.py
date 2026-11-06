@@ -319,9 +319,31 @@ def presentation_params_confirmed(ctx: Ctx) -> Result:
                        'rest from the guide: "presentation": {"font_min_pt", "figure_width_mm", '
                        '"panel_label_case", "line_art_dpi", "number_format", "spelling", '
                        '"heading_names"}.'])
-    problems = pp.problems({**{k: v for k, v in prov.items() if k in pp.KEYS}, **conf}, pp.TARGET)
+    from .v1170 import since_1170
+    strict = since_1170(ctx)
+    later = strict and pp.later_epoch(ctx.project)
+    if later:
+        # 1.17.0 (J7): after a journal switch the block is complete - nothing inherited from the
+        # provisional profile chosen for an earlier journal.
+        missing = [k for k in pp.KEYS if k not in conf]
+        problems = ([f"after a journal switch the presentation block must be complete (no "
+                     f"inheritance from {pp.PROVISIONAL}); missing: " + ", ".join(missing)]
+                    if missing else []) + pp.problems(conf, pp.TARGET)
+    else:
+        problems = pp.problems({**{k: v for k, v in prov.items() if k in pp.KEYS}, **conf},
+                               pp.TARGET)
     if problems:
         return Result(False, "presentation_params_confirmed", "; ".join(problems[:6]))
+    if strict:
+        from .. import renderparams
+        stale = renderparams.mismatches(ctx.project, require=later)
+        if stale:
+            return Result(False, "presentation_params_confirmed",
+                          f"{len(stale)} display(s) rendered with other presentation parameters "
+                          "than this journal's: " + "; ".join(
+                              f"{m['display']}: {', '.join(m['diff'])}" for m in stale[:6]),
+                          ["Re-render them for this journal: `wf rebuild` (presentation re-render; "
+                           "facts unchanged, no science rewind)."])
     changed = sorted(k for k in pp.KEYS if k in conf and prov.get(k) != conf.get(k))
     if changed:
         return Result(True, "presentation_params_confirmed",

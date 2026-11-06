@@ -1104,6 +1104,11 @@ keep_with_next = true
 [[stage.gate]]
 check = "figure_print_font"
 since = "1.11.0"
+# 1.17.0 (J6): the CSL in use belongs to the journal (ISSN index) or carries a recorded reason,
+# plus the render checks of tools/manuscript/csl_check.py.
+[[stage.gate]]
+check = "csl_check"
+since = "1.17.0"
 # S23 pre-audit: the same measured checks S25 confirms (final-DOCX word counts, references,
 # display items), so the independent audit is a confirmation rather than a first discovery.
 [[stage.gate]]

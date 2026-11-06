@@ -77,7 +77,8 @@ def style(project: Path | None = None) -> dict:
     # 1.11.0 (#2a): the provisional journal profile (S06/S07) applies from the first build;
     # the chosen journal (S20) overrides it.
     from . import presentparams
-    layers = [presentparams.provisional(project)]
+    # 1.17.0 (J7): after a journal switch the provisional profile is not inherited.
+    layers = [] if presentparams.later_epoch(project) else [presentparams.provisional(project)]
     if isinstance(target, dict):
         pres = target.get("presentation")
         layers.append(pres if isinstance(pres, dict) else {})

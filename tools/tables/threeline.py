@@ -194,6 +194,11 @@ def write_workbook(path: str | Path, tables: list[dict]) -> Path:
     wb.save(p)
     from wfcore import determinism
     determinism.normalize(p)
+    try:  # 1.17.0 (J7): the number format and spelling this build used
+        from wfcore import renderparams
+        renderparams.record_table(p)
+    except Exception:  # noqa: BLE001 - a record failure never breaks a table build
+        pass
     print(f"wrote {p}  ({len(tables)} sheet(s))")
     return p
 
