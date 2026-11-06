@@ -13,6 +13,12 @@ from decimal import Decimal, InvalidOperation
 from .. import xlsxlite
 from . import Ctx, Result, check
 
+
+def _pin_for(ctx) -> str:
+    """1.17.0: the stage's gate pin (`wf journal switch` adopts the current set for S20-S25)."""
+    from ..state import pin_for
+    return pin_for(ctx.state, getattr(getattr(ctx, "stage", None), "id", None))
+
 RESULTS_GLOB = "03_analysis/results/*.json"
 ALLOWLIST = "03_analysis/results/number_allowlist.tsv"
 
@@ -282,7 +288,7 @@ def _since_1160(ctx: Ctx) -> bool:
     """Stricter 1.16.0 checks reach a paper pinned earlier only after `wf migrate --yes`."""
     from ..state import version_tuple
     try:
-        return version_tuple(ctx.state.engine_pin) >= (1, 16, 0)
+        return version_tuple(_pin_for(ctx)) >= (1, 16, 0)
     except Exception:  # noqa: BLE001
         return True
 

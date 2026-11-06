@@ -46,7 +46,7 @@ SECTIONS = ("Verdict", "Reader comprehension", "Editorial screening and low-leve
             "Formatting and technical checks", "Issues requiring correction",
             "Final recommendation")
 
-FULL_BRIEF = """S25 independent audit ({aid}, FULL - first audit of this paper). Read every file
+FULL_BRIEF = """S25 independent audit ({aid}, FULL - first audit for this journal). Read every file
 listed below in normal submission order before any QA file, as a first-time reader, an editor
 and a journal-compliance reviewer. Report in exactly these sections: {sections}. Under
 Verdict write `Freeze ID: {freeze}`. Number every finding (F1, F2, ...), name file and
@@ -91,6 +91,38 @@ def history(project: Path) -> list[Path]:
     return sorted(root.glob("A*.md")) if root.is_dir() else []
 
 
+EPOCH_INDEX = ".wf/audits/epochs.json"
+
+
+def _epoch_index(project: Path) -> dict:
+    try:
+        data = json.loads((Path(project) / EPOCH_INDEX).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def epoch_history(project: Path) -> list[Path]:
+    """1.17.0 (J1): earlier audits of the CURRENT journal epoch only. An audit of an earlier
+    journal (by its recorded journal/epoch, or for legacy audits by date) never turns the first
+    audit of a new journal into a re-check of the old findings."""
+    from . import journalepoch
+    idx = _epoch_index(project)
+    name = journalepoch.norm(journalepoch.target_name(project))
+    ep = journalepoch.number(project)
+    start = journalepoch.started_at(project)
+    out = []
+    for h in history(project):
+        rec = idx.get(h.name)
+        if isinstance(rec, dict):
+            if int(rec.get("epoch") or 1) == ep and (not name or not rec.get("journal")
+                                                     or journalepoch.norm(rec["journal"]) == name):
+                out.append(h)
+        elif start is None or h.stat().st_mtime >= start - 1:
+            out.append(h)
+    return out
+
+
 def findings(text: str) -> list[str]:
     """Finding lines (BLOCKING / MINOR / PREFERENCE) of an audit report, verbatim."""
     out = []
@@ -100,6 +132,21 @@ def findings(text: str) -> list[str]:
                                              re.match(r"^[-*]\s", s) or s.startswith("|")):
             out.append(s)
     return out
+
+
+def guideline_files(project: Path) -> list[str]:
+    """1.17.0 (J1): the journal's original guide for the auditor - the line-numbered
+    guidelines_source.txt and the cached originals of this journal epoch (all cache files for
+    snapshots taken before 1.17.0)."""
+    from . import guideingest, journalepoch
+    project = Path(project)
+    originals = [f"08_submission/cache/{e['file']}" for e in guideingest.entries(
+        project, "guidelines", journalepoch.number(project))]
+    if not originals:
+        originals = [p.relative_to(project).as_posix() for p in
+                     sorted((project / "08_submission/cache").glob("*"))
+                     if p.is_file() and p.name != "index.json"]
+    return ["08_submission/guidelines_source.txt", *originals]
 
 
 def open_items(text: str) -> list[str]:
@@ -123,6 +170,12 @@ def _archive_current(project: Path, current_freeze: str) -> None:
     dest = Path(project) / HISTORY_DIR / f"A{len(history(project)) + 1:03d}_{fid[:12]}.md"
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(text, encoding="utf-8")
+    from . import journalepoch
+    idx = _epoch_index(project)
+    idx[dest.name] = {"journal": journalepoch.target_name(project),
+                      "epoch": journalepoch.number(project), "freeze": fid}
+    (Path(project) / EPOCH_INDEX).write_text(json.dumps(idx, indent=2, ensure_ascii=False) + "\n",
+                                             encoding="utf-8")
 
 
 def start(project: Path, files: list[str]) -> tuple[Path, str]:
@@ -131,9 +184,9 @@ def start(project: Path, files: list[str]) -> tuple[Path, str]:
     project = Path(project)
     fid = freeze_id(project)
     _archive_current(project, fid)
-    past = history(project)
+    past = epoch_history(project)
     mode = "recheck" if past else "full"
-    aid = f"A{len(past) + 1:03d}"
+    aid = f"A{len(history(project)) + 1:03d}"
     out = project / BUNDLE_DIR / aid
     if out.exists():
         shutil.rmtree(out)
@@ -149,8 +202,12 @@ def start(project: Path, files: list[str]) -> tuple[Path, str]:
                   f"{'used: ' + fact['tool'] + ' for ' + fact['purpose'] if fact['used'] else 'not used'}"
                   f". Statement: {fact['statement']}", ""]
     from .guidelines import status as _gstatus
-    lines += [f"Guideline basis: 08_submission/guidelines_extract.md ({_gstatus(project)}).", "",
-              "## Files", ""]
+    from .journalepoch import banner
+    lines += [f"Guideline basis: 08_submission/guidelines_extract.md ({_gstatus(project)}), "
+              "checked against the journal's own text: 08_submission/guidelines_source.txt "
+              "(line-numbered L0001...) and the cached original guide files listed below. Judge "
+              "compliance from the original, not from the extract alone.",
+              f"{banner(project) or ''}", "", "## Files", ""]
     if mode == "recheck":
         prev = past[-1].read_text(encoding="utf-8", errors="replace")
         items = findings(prev)

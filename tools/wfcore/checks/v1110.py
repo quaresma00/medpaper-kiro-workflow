@@ -17,6 +17,12 @@ from pathlib import Path
 from .. import clinical
 from . import Ctx, Result, check
 
+
+def _pin_for(ctx) -> str:
+    """1.17.0: the stage's gate pin (`wf journal switch` adopts the current set for S20-S25)."""
+    from ..state import pin_for
+    return pin_for(ctx.state, getattr(getattr(ctx, "stage", None), "id", None))
+
 ALLOW_HINT = (f"A genuinely needed term: add it with a reason to {clinical.ALLOW_REL} "
               '({"terms": [{"term": "...", "reason": ">= 15 chars", "scope": "methods|all"}]}); '
               "never edit reference/ or the engine.")
@@ -152,7 +158,7 @@ def display_abbreviations_defined(ctx: Ctx) -> Result:
     placement = str(target.get("abbreviation_placement", "self_contained")).strip().casefold()
     from ..state import version_tuple
     if placement in ("central", "local_required") and \
-            version_tuple(ctx.state.engine_pin) < (1, 11, 0):
+            version_tuple(_pin_for(ctx)) < (1, 11, 0):
         # A paper that chose its placement under the pre-1.11 rule keeps it (no churn of
         # frozen legends); `wf migrate` adopts self-contained displays.
         from .artifacts import abbreviations_centralized

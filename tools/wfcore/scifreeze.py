@@ -414,11 +414,12 @@ def clear_journal_downstream(project: Path, archive: Path | None = None) -> list
     return removed
 
 
-def reset_journal(project: Path) -> list[str]:
+def reset_journal(project: Path, archive: Path | None = None) -> list[str]:
     """Start S20 from a blank submission area while leaving the scientific freeze intact.
 
     The old submission tree is archived under 08_submission/journal_archives/, not deleted.
-    Returns the original paths of the files that were moved aside.
+    Returns the original paths of the files that were moved aside. `archive` (1.17.0): the
+    folder `wf journal switch` also moves the journal layer of .wf/ into.
     """
     ok, problems, _ = verify_freeze(project)
     if not ok:
@@ -430,13 +431,18 @@ def reset_journal(project: Path) -> list[str]:
     if root.exists():
         children = [p for p in root.iterdir() if p.resolve() != archives.resolve()]
         if children:
-            archive = new_archive_dir(project)
+            archive = archive or new_archive_dir(project)
             for child in children:
                 files = [child] if child.is_file() else [p for p in child.rglob("*") if p.is_file()]
                 removed.extend(p.relative_to(project).as_posix() for p in files)
                 _archive(project, child.relative_to(project).as_posix(), archive)
     root.mkdir(parents=True, exist_ok=True)
     return removed
+
+
+def _epoch(project: Path) -> int:
+    from . import journalepoch
+    return journalepoch.number(project)
 
 
 def open_variant(project: Path, journal: str, *, force: bool = False) -> tuple[Path, list[str]]:
@@ -487,6 +493,8 @@ def open_variant(project: Path, journal: str, *, force: bool = False) -> tuple[P
         "from_freeze": freeze_path(project).name,
         "freeze_sha256": _sha256(freeze_path(project)),
         "files": copied,
+        # 1.17.0 (J2): journal_variant_ready compares journal and epoch with target_journal.json.
+        "journal_epoch": _epoch(project),
         "note": "Journal-specific adaptation only: word caps, abstract shape, reference style, "
                 "title page, required statements. Numbers, citations and artifact references "
                 "must survive - see variant_delta().",

@@ -14,6 +14,12 @@ from .. import docxaudit, journalspec
 from . import Ctx, Result, check
 
 
+def _pin_for(ctx) -> str:
+    """1.17.0: the stage's gate pin (`wf journal switch` adopts the current set for S20-S25)."""
+    from ..state import pin_for
+    return pin_for(ctx.state, getattr(getattr(ctx, "stage", None), "id", None))
+
+
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 PKG_REL = "http://schemas.openxmlformats.org/package/2006/relationships"
 NS = {"w": W, "rel": PKG_REL}
@@ -498,7 +504,7 @@ def _footnote_keep_allowed(ctx: Ctx, spec: dict) -> bool:
     pinned to 1.14.0 keeps the D3 exception until `wf migrate --yes`."""
     from ..state import version_tuple
     return bool(spec.get("keep_table_footnotes")) or \
-        version_tuple(ctx.state.engine_pin) < (1, 14, 1)
+        version_tuple(_pin_for(ctx)) < (1, 14, 1)
 
 
 @check("docx_bundle_ready")
@@ -520,7 +526,7 @@ def docx_bundle_ready(ctx: Ctx) -> Result:
         problems.append("01_protocol/artifact_plan.json is missing or invalid")
     spec = docxaudit.audit_spec(ctx.project)
     from ..state import version_tuple as _vt
-    v1141 = _vt(ctx.state.engine_pin) >= (1, 14, 1)  # stricter upload checks since 1.14.1
+    v1141 = _vt(_pin_for(ctx)) >= (1, 14, 1)  # stricter upload checks since 1.14.1
     for item in manifest.get("items", []):
         role = str(item.get("role", "")).casefold()
         raw = str(item.get("file", ""))
@@ -532,7 +538,7 @@ def docx_bundle_ready(ctx: Ctx) -> Result:
             problems.append(f"supplementary_pdf: {path.name} is not an existing PDF")
         if path.suffix.casefold() == ".docx":
             from ..state import version_tuple
-            strict = version_tuple(ctx.state.engine_pin) >= (1, 13, 0)
+            strict = version_tuple(_pin_for(ctx)) >= (1, 13, 0)
             problems.extend(_audit_docx(path, style, role, planned,
                                         journalspec.legend_cap(journalspec.load(ctx.project))
                                         or journalspec.NO_CAP, spec, strict_keep=strict,

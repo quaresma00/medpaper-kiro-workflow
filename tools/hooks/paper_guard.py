@@ -216,6 +216,8 @@ class Guard:
         # 1.14.1 (P1): an older paper attempt in a subfolder of this paper stays isolated.
         self.nested = [Path(os.path.abspath(str(n))) for n in paths.nested_papers(self.paper)]
         self.archive = self.paper / paths.ARCHIVE_DIR
+        # 1.17.0 (J3): archived journal layers are hidden from discovery (the engine reads them).
+        self.journal_archive = self.paper / "08_submission" / "journal_archives"
         env_temp = os.environ.get("MEDPAPER_GUARD_TEMP")
         self.temp = Path(env_temp) if env_temp else (temp or Path(tempfile.gettempdir()))
         self._memo: dict[str, str] = {}
@@ -275,6 +277,8 @@ class Guard:
         if _within(p, self.paper):
             if any(_within(p, n) for n in self.nested):
                 return "other_paper"
+            if _within(p, self.journal_archive):
+                return "journal_archive"
             if _within(p, self.archive):
                 return "paper_state"
             rel = os.path.relpath(_norm(p), _norm(self.paper)).replace("\\", "/")
@@ -313,6 +317,9 @@ class Guard:
         "holds_papers": "this folder holds other papers; listing or searching it exposes them",
         "papers_root": "it is inside the central papers root, which holds other papers",
         "archive": "it is an archive folder; archived papers are never read",
+        "journal_archive": "it is the archive of a previous target journal; its rules and files "
+                           "must not be reused for the current journal (`wf journal shortlist` / "
+                           "`wf journal restore` read what is still needed)",
         "temp": "it is the system temp folder; logs and scratch live in this paper "
                 "(.wf/logs/, temp/) - only engine-managed medpaper_* sandboxes are allowed there",
     }
@@ -354,20 +361,27 @@ class Guard:
     def _nested_scope(self, name: str, args) -> str | None:
         """1.14.1 (P1): a whole-workspace search would read an older paper attempt kept in a
         subfolder; the search has to name this paper's folders or exclude that subfolder."""
-        if not self.nested or not re.search(r"(?i)grep|search", name or ""):
+        hidden = [*self.nested]
+        try:
+            if self.journal_archive.is_dir() and any(self.journal_archive.iterdir()):
+                hidden.append(self.journal_archive)
+        except OSError:
+            pass
+        if not hidden or not re.search(r"(?i)grep|search", name or ""):
             return None
         if not isinstance(args, dict):
             return None
         inc = str(args.get("includePattern") or args.get("include_pattern") or "")
         exc = str(args.get("excludePattern") or args.get("exclude_pattern") or "")
-        rels = [os.path.relpath(_norm(n), _norm(self.paper)).replace("\\", "/") for n in self.nested]
+        rels = [os.path.relpath(_norm(n), _norm(self.paper)).replace("\\", "/") for n in hidden]
         if all(r.casefold() in exc.replace("\\", "/").casefold() for r in rels):
             return None
         head = inc.replace("\\", "/").lstrip("./")
         if head and not head.startswith(("*", "{", "[")):
             return None  # scoped to one of this paper's folders (check_path judges it)
-        return (f"search of the whole workspace: it holds an older paper attempt in "
-                f"{', '.join(r + '/' for r in rels[:3])}, which stays isolated - give an "
+        return (f"search of the whole workspace: it holds an older paper attempt or a previous "
+                f"journal's archive in {', '.join(r + '/' for r in rels[:3])}, which stays "
+                f"isolated - give an "
                 f"includePattern under this paper's folders (e.g. 07_manuscript/**) or an "
                 f"excludePattern for {rels[0]}/**")
 

@@ -16,6 +16,12 @@ from xml.etree import ElementTree as ET
 
 from . import docxaudit, journalspec
 
+
+def _pin_for(ctx) -> str:
+    """1.17.0: the stage's gate pin (`wf journal switch` adopts the current set for S20-S25)."""
+    from .state import pin_for
+    return pin_for(ctx.state, getattr(getattr(ctx, "stage", None), "id", None))
+
 CHECKLIST_REL = "08_submission/bundle/SUBMISSION_CHECKLIST.md"
 QC_REL = "08_submission/submission_qc.md"
 MANIFEST_REL = "08_submission/bundle/manifest.json"
@@ -237,7 +243,7 @@ def render_full(ctx, rows: list[dict]) -> str:
 def _since_1150(ctx) -> bool:
     from .state import version_tuple
     try:
-        return version_tuple(ctx.state.engine_pin) >= (1, 15, 0)
+        return version_tuple(_pin_for(ctx)) >= (1, 15, 0)
     except Exception:  # noqa: BLE001
         return True
 
@@ -246,7 +252,7 @@ def _since_1141(ctx) -> bool:
     """Stricter measurements apply to a paper pinned before 1.14.1 only after wf migrate."""
     from .state import version_tuple
     try:
-        return version_tuple(ctx.state.engine_pin) >= (1, 14, 1)
+        return version_tuple(_pin_for(ctx)) >= (1, 14, 1)
     except Exception:  # noqa: BLE001
         return True
 

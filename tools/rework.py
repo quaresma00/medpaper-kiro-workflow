@@ -188,7 +188,9 @@ def _read_batch_plan(path: Path, kinds: list[str], review_stage: str, pipe,
             # Validated at batch time (1.9.0), not discovered at seal.
             raise ValueError(
                 f"items[{index}]: journal-switch replaces the whole submission tree and cannot be "
-                "scoped in place: rework.py batch --rewind --plan ... (then reset-journal at S20). "
+                "scoped in place: wf journal switch --to \"<new>\" --confirm-old \"<old>\" --why "
+                "\"...\" (1.17.0; rework.py batch --rewind with to_journal/confirm_old in the "
+                "item runs the same command). "
                 "For CSL / target_journal.json formatting fields use kind journal-format")
         request = str(item.get("request", "")).strip()
         sources = item.get("affected_sources")
@@ -1100,6 +1102,19 @@ def resolve_route(kind: str, current: str, pipe) -> str:
     return ROUTES[kind]
 
 
+def _journal_switch_item(plan_path: Path) -> dict | None:
+    """The journal-switch item of a batch plan, if any (1.17.0: handled by wf journal switch)."""
+    try:
+        plan = json.loads(plan_path.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return None
+    for item in plan.get("items", []) if isinstance(plan, dict) else []:
+        if isinstance(item, dict) and KIND_ALIASES.get(item.get("kind"), item.get("kind")) \
+                == "journal-switch":
+            return item
+    return None
+
+
 def _pipeline(state: State):
     """The paper's effective pipeline: config targets plus its overrides (skips included)."""
     return registry.load(state.config(), overrides.load(state.dir))
@@ -1179,6 +1194,21 @@ def _main() -> int:
         if args.command == "batch":
             if args.plan is None:
                 raise ValueError("batch requires --plan <revision-plan.json>")
+            switch = _journal_switch_item(args.plan.resolve())
+            if switch is not None:
+                # 1.17.0 (J3): a journal switch is one command, not a rewind round.
+                from wfcore import journalepoch
+                missing = [k for k in ("to_journal", "confirm_old") if not switch.get(k)]
+                if missing:
+                    raise ValueError("kind journal-switch runs `wf journal switch`; the item needs "
+                                     + ", ".join(missing) + " (or run wf journal switch --to "
+                                     "\"<new>\" --confirm-old \"<old>\" --why \"...\" directly)")
+                for line in journalepoch.switch(project, pipe, state, switch["to_journal"],
+                                                switch["confirm_old"],
+                                                str(switch.get("request", "")),
+                                                str(switch.get("outcome") or "rejected")):
+                    print(line)
+                return 0
             if args.rewind:
                 return _cmd_batch_rewind(args, project, pipe, state, kinds)
             if args.priority and state.data.get("active_revision_round"):

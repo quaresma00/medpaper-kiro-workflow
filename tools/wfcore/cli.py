@@ -86,7 +86,8 @@ def non_overridable(check: str, stage_id: str, state=None) -> bool:
     if check in FINAL_BOUNDARY_GATES.get(stage_id, ()):
         from .state import version_tuple
         try:
-            return version_tuple(str(state.engine_pin)) >= (1, 16, 0)
+            from .state import pin_for
+            return version_tuple(pin_for(state, stage_id)) >= (1, 16, 0)
         except Exception:  # noqa: BLE001
             return True
     return False
@@ -639,6 +640,10 @@ def cmd_status(args) -> int:
         }, indent=2, ensure_ascii=False))
         return 0
 
+    from . import journalepoch  # 1.17.0 (J3): the journal epoch is the first line
+    epoch_line = journalepoch.banner(proj)
+    if epoch_line:
+        print(epoch_line)
     if warning:
         print(warning)
     print(BAR)
@@ -740,7 +745,10 @@ def handoff_lines(pipe, st, proj: Path) -> list[str]:
     stage = pipe.stage(st.current)
     details = paths.repo_root() / "reference" / "stage_details" / Path(stage.card_path()).name
     fork = paths.is_fork_root(paths.repo_root())
-    out = [f"paper: {proj}  (this workspace only; never read or write another paper)",
+    from . import journalepoch  # 1.17.0 (J3): the journal epoch is the first line
+    epoch_line = journalepoch.banner(proj)
+    out = [*([epoch_line] if epoch_line else []),
+           f"paper: {proj}  (this workspace only; never read or write another paper)",
            f"engine: {paths.repo_root()}" + (" (project-local fork)" if fork else " (read-only)")
            + _fork_suffix(proj),
            *[f"data: {d}" for d in _data_lines(proj)],
@@ -1216,16 +1224,48 @@ def cmd_rebuild(args) -> int:
     return rc
 
 
+def _ingest(st, proj: Path, args) -> int:
+    """1.17.0 (J4): a guide the user saved (HTML/PDF/DOCX/TXT) becomes the guideline source."""
+    from . import guideingest
+    try:
+        entry = guideingest.ingest(proj, paths.resolve_paper_path(args.from_file), args.url or "",
+                                   args.title or "", args.kind)
+    except (OSError, ValueError) as exc:
+        print(f"导入被拒绝：{exc}")
+        return 2
+    st.event("guidelines_ingested", f"{entry['kind']} {entry['file']} ({entry['format']}, "
+                                    f"{entry['lines']} lines) from {entry['url']}")
+    st.save()
+    day = entry["ingested_at"][:10]
+    print(f"已保存原文：08_submission/cache/{entry['file']}（{entry['format']}，sha256 "
+          f"{entry['sha256'][:12]}，{day}，journal epoch {entry['epoch']}）")
+    if entry["kind"] == "indexing":
+        print(f"收录证据已保存（不并入投稿指南）。target_journal.json：scie_source_url = "
+              f"{entry['url']}，scie_verified_at = {day}；JCR 分区同样写明来源与日期。")
+        return 0
+    n = len(guideingest.source_lines(proj))
+    print(f"已转为带行号的纯文本：08_submission/guidelines_source.txt（{entry['lines']} 行，"
+          f"全文共 L0001-L{n:04d}）")
+    print(f"下一步：guidelines_extract.md 每条要求注明出处行号（如 L0012 或 L0040-L0046）；"
+          f"target_journal.json guidelines_url = {entry['url']}，guidelines_fetched_at = {day}。"
+          "同一期刊的其他指南页面（图表、参考文献、伦理声明）也逐个导入。")
+    return 0
+
+
 def cmd_guidelines(args) -> int:
-    """1.15.0 (E7): a dated journal guideline snapshot; audits read the latest one."""
+    """1.15.0 (E7): a dated journal guideline snapshot; audits read the latest one.
+    1.17.0 (J4): `ingest --from <saved guide> --url <official URL>`; `refresh --from` with
+    --url (or a non-Markdown file) is the same import."""
     _pipe, st, proj = _load()
     from . import guidelines
     if args.action == "status":
         print(guidelines.status(proj))
         return 0
     if args.from_file is None:
-        print("guidelines refresh needs --from <the newly written extract file>")
+        print("guidelines ingest/refresh needs --from <file>")
         return 2
+    if args.action == "ingest" or args.url or args.from_file.suffix.casefold() not in (".md", ""):
+        return _ingest(st, proj, args)
     try:
         out, archived = guidelines.refresh(proj, paths.resolve_paper_path(args.from_file),
                                            args.source)
@@ -1236,6 +1276,45 @@ def cmd_guidelines(args) -> int:
     st.save()
     print(f"guideline snapshot refreshed -> {out} ({guidelines.status(proj)}); previous: "
           f"{archived or 'none'}. Audits and checks read this file.")
+    return 0
+
+
+def cmd_journal(args) -> int:
+    """1.17.0 (J3/J5): journal epochs - switch after a rejection, look up the official guide."""
+    pipe, st, proj = _load()
+    from . import argtext, journalepoch
+    for opt in ("why", "to", "confirm_old"):
+        bad = argtext.suspicious(getattr(args, opt, "") or "")
+        if bad:
+            print(f"refusing: --{opt.replace('_', '-')} {bad}; pass it with --why-file <utf-8 file>")
+            return 2
+    try:
+        if args.action == "switch":
+            lines = journalepoch.switch(proj, pipe, st, args.to, args.confirm_old, args.why,
+                                        args.outcome)
+        elif args.action == "restore":
+            if not args.answer:
+                print("restore needs --answer restore|keep --why \"<用户原话>\"")
+                return 2
+            lines = journalepoch.restore(proj, args.answer, args.why)
+            st.event("journal_restore_answer", f"{args.answer}: {args.why[:200]}")
+            st.save()
+        elif args.action == "shortlist":
+            lines = [journalepoch.shortlist(proj)]
+        else:
+            if not args.issn:
+                print("lookup needs --issn <ISSN> (print or electronic)")
+                return 2
+            from . import journallookup
+            rec, lines = journallookup.lookup(proj, paths.repo_root(), args.issn, args.title,
+                                              refresh=args.refresh, fetch=not args.no_fetch)
+            st.event("journal_lookup", f"{rec.get('issn')}: "
+                                       f"{(rec.get('fetch') or {}).get('result', 'metadata only')}")
+            st.save()
+    except (journalepoch.SwitchError, ValueError, OSError) as exc:
+        print(f"{'换刊' if args.action == 'switch' else args.action} 被拒绝：{exc}")
+        return 2
+    print("\n".join(lines))
     return 0
 
 
@@ -2199,13 +2278,36 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--log", type=Path, default=None)
     p.set_defaults(fn=cmd_rebuild)
 
-    p = sub.add_parser("guidelines", help="journal guideline snapshot: status | refresh --from "
-                                          "FILE [--source URL] (1.15.0)")
-    p.add_argument("action", choices=("status", "refresh"))
+    p = sub.add_parser("guidelines", help="journal guideline snapshot: status | ingest --from "
+                                          "FILE --url URL [--title T] [--kind indexing] (1.17.0) "
+                                          "| refresh --from EXTRACT.md [--source URL]")
+    p.add_argument("action", choices=("status", "ingest", "refresh"))
     p.add_argument("--from", dest="from_file", type=Path, default=None,
-                   help="refresh: the newly written extract (from the re-fetched official guide)")
+                   help="ingest: the guide saved in the browser (HTML/PDF/DOCX/TXT); refresh: a "
+                        "newly written extract (.md)")
+    p.add_argument("--url", default="", help="ingest: the official page URL the file came from")
+    p.add_argument("--title", default="", help="ingest: page title (optional)")
+    p.add_argument("--kind", choices=("guidelines", "indexing"), default="guidelines",
+                   help="ingest: indexing = an exported Master Journal List / JCR page (evidence)")
     p.add_argument("--source", default="", help="refresh: URL(s) of the official guide")
     p.set_defaults(fn=cmd_guidelines)
+
+    p = sub.add_parser("journal", help="journal epochs (1.17.0): switch --to NEW --confirm-old OLD "
+                                       "--why W [--outcome rejected|withdrawn|other] | lookup "
+                                       "--issn ISSN [--title T] | shortlist | restore --answer "
+                                       "restore|keep --why W")
+    p.add_argument("action", choices=("switch", "lookup", "shortlist", "restore"))
+    p.add_argument("--to", default="")
+    p.add_argument("--confirm-old", dest="confirm_old", default="")
+    p.add_argument("--why", default="")
+    p.add_argument("--outcome", choices=("rejected", "withdrawn", "other"), default="rejected")
+    p.add_argument("--issn", default="")
+    p.add_argument("--title", default="")
+    p.add_argument("--refresh", action="store_true", help="lookup: ignore the local caches")
+    p.add_argument("--no-fetch", dest="no_fetch", action="store_true",
+                   help="lookup: metadata only, no GET of the guide page")
+    p.add_argument("--answer", choices=("restore", "keep"), default=None)
+    p.set_defaults(fn=cmd_journal)
 
     p = sub.add_parser("doctor", help="environment and wiring check")
     p.set_defaults(fn=cmd_doctor)

@@ -44,6 +44,7 @@ def main() -> int:
             copies = write_text_copies(project, [str(i.get("file", "")) for i in manifest.get("items", [])])
             files = [FREEZE_RE_REL, *[str(i.get("file", "")) for i in manifest.get("items", [])],
                      "08_submission/target_journal.json", "08_submission/guidelines_extract.md",
+                     *audit.guideline_files(project),
                      "08_submission/bundle/manifest.json", "08_submission/bundle/SUBMISSION_CHECKLIST.md",
                      "08_submission/submission_qc.md", *copies]
             out, mode = audit.start(project, list(dict.fromkeys(files)))

@@ -27,6 +27,15 @@ def version_tuple(value: str) -> tuple[int, ...]:
     return tuple(out) or (0,)
 
 
+def pin_for(state, sid: str | None = None) -> str:
+    """The pinned gate set a check applies for one stage (State.gate_pin; a bare object with
+    only engine_pin - as some tests pass - keeps that)."""
+    fn = getattr(state, "gate_pin", None)
+    if callable(fn):
+        return str(fn(sid))
+    return str(getattr(state, "engine_pin", "0"))
+
+
 # 1.14.0 (E): decisions that judge the results; each stores a hash of what it judged.
 SCIENTIFIC_DECISIONS = {
     "analysis_converged": ("results", "03_analysis/analysis_manifest.json"),
@@ -159,8 +168,32 @@ class State:
             self._note_v1141(old_version, pipeline_version)
             self._note_v1150(old_version, pipeline_version)
             self._note_v1160(old_version, pipeline_version)
+            self._note_v1170(old_version, pipeline_version)
             self.save()
         return changed
+
+    def _note_v1170(self, old_version: str, new_version: str) -> None:
+        """1.17.0: one event; no file or stage is touched."""
+        if (version_tuple(old_version) >= (1, 17, 0) or version_tuple(new_version) < (1, 17, 0)
+                or self.data.get("v1170_migration_noted")):
+            return
+        self.data["v1170_migration_noted"] = True
+        self.event("requirements_changed",
+                   "1.17.0: new commands work now - `wf journal switch` (one command after a "
+                   "rejection: archives the previous journal's whole layer incl. .wf audits, "
+                   "package review rounds, helper scripts and stray CSL files, loops to S20, "
+                   "carries journal-independent facts and adopts the current gate set for "
+                   "S20-S25), `wf journal lookup --issn` (DOAJ/OpenAlex/NLM + publisher URL "
+                   "templates, one polite GET, otherwise save the page and ingest), `wf "
+                   "guidelines ingest --from <file> --url <URL>` (line-numbered "
+                   "guidelines_source.txt), tools/refs/csl_index.py (CSL by ISSN). Fixes apply "
+                   "now: the first S25 audit of a journal is full (audits of an earlier journal "
+                   "never make it a re-check) and the audit bundle carries the original guide; "
+                   "S20+ handoff notes of an earlier journal do not count. Stricter checks apply "
+                   "only after `wf migrate --yes`: journal_variant_ready compares journal and "
+                   "epoch (a warning before), journal_layer_clean at S20, guideline line "
+                   "citations, csl_check at S23, render parameters vs the journal's. Paper files "
+                   "were not modified.")
 
     def _note_v1160(self, old_version: str, new_version: str) -> None:
         """1.16.0: one event; no file or stage is touched."""
@@ -331,11 +364,21 @@ class State:
     def engine_pin(self) -> str:
         return str(self.data.get("engine_pin") or self.data.get("pipeline_version") or "0")
 
+    def gate_pin(self, sid: str | None) -> str:
+        """The gate set a stage is judged by: the paper's pin, or for S20-S25 the engine version
+        `wf journal switch` adopted for the new journal epoch (1.17.0, J3)."""
+        pin = self.engine_pin
+        jp = self.data.get("journal_gate_pin") or {}
+        if sid and sid in (jp.get("stages") or []) and version_tuple(str(jp.get("version", "0"))) \
+                > version_tuple(pin):
+            return str(jp["version"])
+        return pin
+
     def pin_excludes(self, sid: str, since: str | None) -> bool:
         """A gate added after the paper's pinned engine does not re-judge a completed stage."""
         if not since or self.status_of(sid) not in ("done", "skipped"):
             return False
-        return version_tuple(self.engine_pin) < version_tuple(since)
+        return version_tuple(self.gate_pin(sid)) < version_tuple(since)
 
     def migrate_pin(self, engine_version: str) -> list[str]:
         """`wf migrate`: adopt the engine's full gate set; returns the recorded migration notes."""
@@ -524,7 +567,9 @@ class State:
             fh.write(f"\n## {stage} - {entry['at']}\n\n{note}\n")
 
     def notes_for(self, stage: str) -> list[dict]:
-        return [h for h in self.data.get("handoff", []) if h.get("stage") == stage]
+        # 1.17.0 (J2): S20+ notes of an earlier journal epoch do not count for the new journal.
+        return [h for h in self.data.get("handoff", []) if h.get("stage") == stage
+                and not h.get("journal_epoch_superseded")]
 
     def complete(self, sid: str, next_sid: str | None,
                  skipped: list[tuple[str, str, str]] | None = None,

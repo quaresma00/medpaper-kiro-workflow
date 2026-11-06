@@ -2154,7 +2154,7 @@ def run_codex_integration() -> None:
                f"card must name `{agent}` so the work is not done in the main context")
 
     record("pipeline and skill versions agree",
-           pipe["meta"]["version"] == "1.16.0" and 'version: "2.6.1"' in skill,
+           pipe["meta"]["version"] == "1.17.0" and 'version: "2.6.1"' in skill,
            f'pipeline={pipe["meta"]["version"]}, skill=2.6.1 (Kiro adapter revision)')
     record("all 25 stage cards exist",
            len(pipe["stage"]) == 25 and
@@ -2723,9 +2723,14 @@ def run_journal_eligibility(proj: Path) -> None:
         f"# Guidelines\n\nSource: {guidelines_url}\n\n"
         "## Word limits\n3500\n## Reference style\nVancouver\n"
         "## Figure requirements\nTIFF\n## Table requirements\nEditable\n"
-        "## Required statements\nEthics and funding\n## Submission items\nDOCX and figures\n",
+        "## Required statements\nEthics and funding\n## Submission items\nDOCX and figures\n"
+        "Source lines L0001-L0008.\n",
         encoding="utf-8")
     (target_dir / "cache/guidelines.html").write_text("<html>fixture</html>", encoding="utf-8")
+    # 1.17.0 (J4): the extract cites the line-numbered official text (wf guidelines ingest).
+    (target_dir / "guidelines_source.txt").write_text(
+        "# guidelines_source.txt - journal epoch 1: Fixture Clinical Journal\n"
+        + "".join(f"L{i:04d}  rule {i}\n" for i in range(1, 9)), encoding="utf-8")
 
     load_all()
     pipe = registry.load()
@@ -5189,7 +5194,7 @@ def run_v160(tmp: Path) -> None:
            any(g["check"] == "reader_review_coverage" for g in s18["gate"])
            and "review_round.py start --scope manuscript" in (ROOT / "pipeline/stages/S18_independent_review.md")
            .read_text(encoding="utf-8"))
-    record("pipeline version is 1.16.0", pipe.meta.get("version") == "1.16.0")
+    record("pipeline version is 1.17.0", pipe.meta.get("version") == "1.17.0")
 
 
 def run_v170(tmp: Path) -> None:
@@ -5880,6 +5885,8 @@ def main() -> int:
         selftest_v1150.run(tmp / "v1150_root", record, section)
         import selftest_v1160
         selftest_v1160.run(tmp / "v1160_root", record, section)
+        import selftest_v1170
+        selftest_v1170.run(tmp / "v1170_root", record, section)
         run_new_wiring()
         section("isolation")
         record("selftest did not touch the real papers root or user home",

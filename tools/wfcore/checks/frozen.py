@@ -7,6 +7,8 @@ user releases S19, and every stage after it refuses to proceed if those bytes mo
 """
 from __future__ import annotations
 
+import json
+
 from .. import scifreeze
 from . import Ctx, Result, check
 
@@ -156,6 +158,32 @@ def journal_variant_ready(ctx: Ctx) -> Result:
              "longer traces to the reviewed text.",
              'Re-open it: scientific_freeze.py open-variant --journal "<name>" --force'],
         )
+    # 1.17.0 (J2): no silent in-place switch - the variant, target_journal.json and the journal
+    # epoch must name the same journal (a warning for papers pinned earlier).
+    from .. import journalepoch
+    from .v1170 import since_1170
+    target = journalepoch.target_name(ctx.project)
+    ep = journalepoch.number(ctx.project)
+    problems = []
+    if target and journalepoch.norm(target) != journalepoch.norm(meta["journal"]):
+        problems.append(f"the variant is for '{meta['journal']}' but target_journal.json names "
+                        f"'{target}' (journal switched in place)")
+    if journalepoch.current(ctx.project):
+        if meta.get("journal_epoch") != ep:
+            problems.append(f"variant.json journal_epoch {meta.get('journal_epoch')} != current "
+                            f"journal epoch {ep}")
+        try:
+            tj_ep = json.loads(ctx.read("08_submission/target_journal.json")).get("journal_epoch")
+        except (OSError, ValueError, AttributeError):
+            tj_ep = None
+        if tj_ep != ep:
+            problems.append(f"target_journal.json journal_epoch {tj_ep} != current journal epoch {ep}")
+    if problems:
+        return Result(False, "journal_variant_ready", "; ".join(problems),
+                      [f'After a rejection: wf journal switch --to "<new journal>" --confirm-old '
+                       f'"{meta["journal"]}" --why "..." (archives the old journal layer), then '
+                       'open a fresh variant for the new journal.'],
+                      severity="fail" if since_1170(ctx) else "warn")
     return Result(True, "journal_variant_ready",
                   f"variant for {meta['journal']} opened {meta.get('opened_at', '?')} "
                   f"({len(meta.get('files', []))} file(s))")

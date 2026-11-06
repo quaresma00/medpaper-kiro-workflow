@@ -657,6 +657,29 @@ def deepread_cited(ctx: Ctx) -> Result:
     return Result(True, "deepread_cited", f"all {len(sel)} deep-read paper(s) engaged in the Discussion")
 
 
+def _guideline_line_problems(ctx: Ctx, text: str) -> list[str]:
+    """1.17.0 (J4): the extract cites the line-numbered official text it was taken from."""
+    from .. import guideingest, journalepoch
+    lines = guideingest.source_lines(ctx.project)
+    if not lines:
+        return ["no 08_submission/guidelines_source.txt (wf journal lookup, or wf guidelines "
+                "ingest --from <saved guide> --url <official URL>)"]
+    out = []
+    ep = guideingest.source_epoch(ctx.project)
+    if journalepoch.current(ctx.project) and ep != journalepoch.number(ctx.project):
+        out.append(f"guidelines_source.txt belongs to journal epoch {ep}, not the current "
+                   f"{journalepoch.number(ctx.project)} - ingest this journal's guide")
+    cited = guideingest.cited_lines(text)
+    if len(set(cited)) < 6:
+        out.append(f"guidelines_extract.md cites {len(set(cited))} guideline line(s); cite the "
+                   "source line of every requirement (L0012 or L0040-L0046)")
+    missing = sorted({n for n in cited if n not in lines})
+    if missing:
+        out.append("guidelines_extract.md cites line(s) not in guidelines_source.txt: "
+                   + ", ".join(f"L{n:04d}" for n in missing[:6]))
+    return out
+
+
 @check("guidelines_sourced")
 def guidelines_sourced(ctx: Ctx) -> Result:
     tj, gx = "08_submission/target_journal.json", "08_submission/guidelines_extract.md"
@@ -713,6 +736,9 @@ def guidelines_sourced(ctx: Ctx) -> Result:
     for need in ("Word limits", "Reference style", "Figure", "Table", "Required statements", "Submission items"):
         if need.lower() not in text.lower():
             problems.append(f"guidelines_extract.md does not cover: {need}")
+    from .v1170 import since_1170
+    if since_1170(ctx):
+        problems += _guideline_line_problems(ctx, text)
     if problems:
         return Result(
             False,
