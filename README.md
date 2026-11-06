@@ -2,7 +2,16 @@
 
 一套面向医学与临床研究的 Kiro 工作流。它把“研究想法”推进为经过数据、文献、统计结果、图表、人工复核和期刊规则共同校验的投稿包，而不是只让 AI 一次性写出一篇看似完整的论文。
 
-当前版本：`1.16.0`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE + R 4.3+
+当前版本：`1.17.0`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE + R 4.3+
+
+## 1.17.0 变化（换刊无残留、指南检索与导入、参考文献格式按 ISSN、按新刊参数重渲染）
+
+- **换刊一条命令**：`wf journal switch --to "<新刊>" --confirm-old "<旧刊>" --why "..." [--outcome rejected]`，S20 之后任何时候都能用（含 S25 完成或被拒稿后）。旧刊的投稿包、指南快照、S25 审计、包审阅轮次（按 epoch 分组保留）、辅助脚本和 06_refs 等处的 CSL 一起归档；旧 S20+ 交接记录不再算数；研究设计、数据来源、伦理/知情同意/数据可用性评估、作者的 AI 使用答复、作者名单直接沿用不再询问；旧刊做过的图表降级和展示层改动只问一次是否恢复（`wf journal restore`）；`wf journal shortlist` 给出旧的后备梯队（须用新证据重新核实）；S20-S25 采用当前引擎门禁。结束时提示关闭对话、新开对话输入“继续 medpaper”；`wf status`/`wf handoff` 首行显示期刊 epoch；代理不能浏览或搜索归档。
+- **新刊必须用新规则**：新门禁 `journal_layer_clean`（08_submission 下不能有早于本 epoch 的文件，指南快照和 SCIE/JCR/诚信证据须在本 epoch 内）；`journal_variant_ready` 核对期刊名与 epoch；新刊的第一次 S25 审计一定是完整审计，审计包附官方指南原文和带行号文本。
+- **指南检索**：`wf journal lookup --issn <ISSN>` 依次查本地缓存、DOAJ（作者须知链接）、OpenAlex 与 NLM Catalog（主页、MEDLINE 收录）和出版商网址模板表，只发一次礼貌请求；遇到 403/验证码就停下，告诉用户确切网址：浏览器另存为网页（仅 HTML）或打印为 PDF，然后 `wf guidelines ingest --from <文件> --url <网址>`。原文存 cache（sha256、日期），转成带行号的 `guidelines_source.txt`，`guidelines_extract.md` 须注明行号。MJL 页面导出 PDF 后用 `--kind indexing` 作为 SCIE/JCR 证据。不登录、不绕过验证、不用第三方代理。
+- **参考文献格式**：随引擎提供由 CSL 样式库（citationstyles.org，CC BY-SA 3.0）生成的 ISSN→样式索引（15008 个 ISSN）；`tools/refs/csl_index.py fetch --issn` 下载父样式并写入 target_journal.json；`csl_check` 成为 S23 门禁（样式须对应期刊 ISSN 或写明理由，渲染检查无缺陷）。
+- **按新刊参数重渲染**：R/Python 图和表格记录渲染时的展示参数；换刊后 presentation 块必须写全（不继承暂定值），参数与渲染时不同就阻断，`wf rebuild` 重新出图（展示层，不回退科学阶段）。
+- **在途论文**：新命令和修复立即可用；更严格的检查（期刊名/epoch 核对、journal_layer_clean、指南行号、csl_check、渲染参数）在 `wf migrate --yes` 后适用，`wf journal switch` 则对 S20-S25 直接采用当前门禁；只记一条迁移事件，论文文件不改。
 
 ## 1.16.0 变化（五位审阅专家的反例逐条落实，不增加阶段）
 

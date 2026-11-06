@@ -44,8 +44,10 @@ the chosen journal's current official instructions.
    It reports; you save the file in step 4.
    Give it:
    - `08_submission/package_review_freeze.json` and every frozen file listed there;
-   - the selected journal metadata, `guidelines_extract.md`, and the cached official author
-     instructions;
+   - the selected journal metadata, `guidelines_extract.md`, the line-numbered
+     `guidelines_source.txt` and the cached official author instructions (1.17.0: listed in
+     the bundle by `package_review.py audit-start`; judge compliance from the original). The
+     first audit of each journal epoch is a full audit;
    - `bundle/manifest.json`, `SUBMISSION_CHECKLIST.md`, and `submission_qc.md` (both measured
      by `submission_qc.py`; the same rows already passed at S23, so this audit confirms);
    - hash-bound text copies of every DOCX/XLSX upload for the read-only reviewer, regenerated

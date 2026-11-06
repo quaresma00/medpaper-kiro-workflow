@@ -41,10 +41,26 @@ then freeze its actual author instructions and Word-format rules.
    journals are fully acceptable and should outrank prestige targets with poor odds.
 4. Present the shortlist and wait for the user's choice. Do not default to the highest
    impact factor.
-5. Fetch the chosen journal's current official author instructions, snapshot the raw page
-   under `project/08_submission/cache/`, and write `target_journal.json` with the required
-   SCIE, JCR, integrity and retrieval fields.
-6. Write `guidelines_extract.md` with sourced sections for word limits, abstract, keywords,
+5. Get the chosen journal's current official author instructions lawfully (1.17.0):
+   `wf journal lookup --issn <ISSN> [--title "<journal>"]` tries the dated local caches, the
+   DOAJ record (`author_instructions`), OpenAlex and the NLM Catalog (homepage, current MEDLINE
+   status) plus the vendored publisher URL table `reference/publisher_guideline_urls.json`
+   (candidates, verified at runtime), then ONE polite GET. A real guide page is stored in
+   `08_submission/cache/` (sha256, date, URL in `cache/index.json`) and converted to the
+   line-numbered `08_submission/guidelines_source.txt`. On 403, a captcha or an empty page it
+   stops and prints the exact URL: the user opens it in the browser and saves it ("web page,
+   HTML only", or print to PDF, or the publisher's PDF guide / Word template), then
+   `wf guidelines ingest --from <file> --url <official URL>`. Ingest every guide page the
+   journal splits its rules over (figures, references, ethics). Never log in for the agent,
+   never bypass bot protection, never use a third-party reader proxy; LetPub-style summaries
+   are leads only. SCIE/JCR evidence: the user exports the Master Journal List page as PDF and
+   ingests it with `--kind indexing`; NLM MEDLINE status is supplementary. Then write
+   `target_journal.json` with the required SCIE, JCR, integrity and retrieval fields and
+   `"csl": {"style_id", "issn"}` from the CSL index the lookup prints
+   (`tools/refs/csl_index.py fetch --issn <ISSN>` installs the parent style).
+6. Write `guidelines_extract.md` with sourced sections; since 1.17.0 every requirement cites
+   the `guidelines_source.txt` line(s) it comes from (`L0012`, `L0040-L0046`); the gate checks
+   that the cited lines exist. Sections for word limits, abstract, keywords,
    references, figures and legends, tables, supplements, statements, cover letter, required
    upload items and formatting.
    Record the journal's abbreviation-placement rule. Set `abbreviation_placement` in
@@ -119,18 +135,41 @@ This copies the frozen manuscript, supplementary Methods and statements into
 `08_submission/manuscript/`. From here on that copy is what S21 completes, S22 polishes and
 S23 renders to DOCX; every gate that reads "the manuscript" resolves there automatically.
 
+## Switching journals (rejection, withdrawal) - 1.17.0
 If the user later picks a different journal, do **not** overwrite S20 files in place and do
 not merely call `open-variant --force`: that would leave the old journal's cache, bundle,
-cover letter and approvals nearby. First route back to S20 and clear the whole submission area:
+cover letter, audits and approvals nearby. One command does the whole switch from any stage at
+or after S20 (also after S25 or a rejection):
 ```
-.\.venv\Scripts\python.exe tools/wf.py loop --to S20_journal --why "switching target journal"
-.\.venv\Scripts\python.exe tools/manuscript/scientific_freeze.py reset-journal --confirm-journal "<old journal>"
+.\.venv\Scripts\python.exe tools/wf.py journal switch --to "<new journal>" --confirm-old "<old journal>" --why "<rejection / reason>" --outcome rejected
 ```
-Then repeat S20 from the shortlist with fresh official evidence and call `open-variant` for the
-new journal. `07_manuscript/` and its freeze are never touched. `open-variant --force` is only
+It records `.wf/journal_history.json` (epoch, journal, outcome, dates), runs the equivalent of
+`wf loop --to S20_journal` and `scientific_freeze.py reset-journal --confirm-journal "<old
+journal>"`, and also archives `.wf/audits/`, the package review bundles/reports, the
+package review rounds (grouped by epoch in `.wf/review_rounds.json`), the previous epoch's
+helper scripts in `.wf/scripts/` and CSL files outside `08_submission/`, all into one archive
+folder. Old S20+ handoff notes no longer count; the new S20 needs its own note. Journal-
+independent facts are carried and never re-asked (study design, data source, ethics/consent/
+data-availability assessment, the author's AI-use answer, author list); only journal wording
+is regenerated. Display moves and presentation edits made for the old journal are listed once:
+ask the user ONE question and record it with `wf journal restore --answer restore|keep --why
+"<the user's words>"`. `wf journal shortlist` prints the archived fallback ladder as a
+starting point only - re-verify every candidate with fresh evidence. S20-S25 adopt the current
+engine's gate set (an event says so); completed science stages keep their pin. Gates then
+require a fresh guideline snapshot (`journal_layer_clean`: nothing under `08_submission/`
+older than the epoch, evidence dated in this epoch), the epoch in `target_journal.json` and
+the variant (`journal_variant_ready`), a complete `presentation` block and re-rendered
+displays (`presentation_params_confirmed`; `wf rebuild` re-renders). The first S25 audit of
+the new journal is a full audit. After the switch tell the user: 请关闭本对话，新开一个对话，
+输入“继续 medpaper”. Never list or search the journal archives; the engine reads them.
+Then repeat S20 for the new journal and call `open-variant` for it. `07_manuscript/` and its freeze are never touched. `open-variant --force` is only
 for rebuilding the current S20 variant; it clears S21+ downstream files as well as the variant.
 
-## CSL check (1.9.0)
+## CSL check (1.9.0; an S23 gate since 1.17.0)
+`csl_check` (S23) passes when the CSL in `08_submission/` names the journal ISSN, or is the
+parent style the vendored ISSN index (`reference/csl_issn_index.json`, from the CSL styles
+project, CC BY-SA 3.0) gives that ISSN, or `target_journal.json` `"csl": {"reason": ...}`
+explains the choice (e.g. the guide's own example); the render checks below must be clean.
 ```
 .\.venv\Scripts\python.exe tools/manuscript/csl_check.py --csl project/08_submission/journal.csl --example "<official example reference>"
 ```
