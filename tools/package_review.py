@@ -45,6 +45,10 @@ def main() -> int:
             files = [FREEZE_RE_REL, *[str(i.get("file", "")) for i in manifest.get("items", [])],
                      "08_submission/target_journal.json", "08_submission/guidelines_extract.md",
                      *audit.guideline_files(project),
+                     # 1.18.0 (K6): the requirement list and the matrix, judged row by row.
+                     "08_submission/guideline_requirements.json",
+                     "08_submission/compliance_matrix.md", "08_submission/compliance_matrix.json",
+                     "08_submission/compliance_evidence.json",
                      "08_submission/bundle/manifest.json", "08_submission/bundle/SUBMISSION_CHECKLIST.md",
                      "08_submission/submission_qc.md", *copies]
             out, mode = audit.start(project, list(dict.fromkeys(files)))

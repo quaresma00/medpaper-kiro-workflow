@@ -73,6 +73,62 @@ CHECKLIST_ORDER = ("Reporting checklists and forms are numbered after the conten
                    "list are verified against PubMed by the engine, not by you.")
 
 
+MATRIX_FULL = """Compliance (1.18.0): 08_submission/guideline_requirements.json lists the journal's
+requirements with verbatim quotes and line numbers; 08_submission/compliance_matrix.md has one
+row per requirement. Under "Guideline compliance" write one line per matrix row:
+`- <row id>: agree|disagree - <reason>` (check each row against guidelines_source.txt and the
+package itself, not against the matrix's own evidence). Then read guidelines_source.txt and the
+cached originals for obligations (must, required, should, maximum, no more than ...) that the
+list lacks; report each under "Required files and omissions" as
+`- MISSING L00nn: "<quote>" - BLOCKING`. A missing or contradicted requirement is BLOCKING.
+CANNOT_ASSESS and portal rows are user/portal items: list them, they are never a reason for
+REVISE by themselves."""
+
+MATRIX_RECHECK = """Compliance (1.18.0): re-check ONLY the matrix rows in open_rows.md
+(`- <row id>: agree|disagree - <reason>` each) plus any NEW missing requirement
+(`- MISSING L00nn: "<quote>" - BLOCKING`). CANNOT_ASSESS/portal rows are user items, not REVISE."""
+
+
+def required_rows(project: Path, matrix: dict) -> list[str]:
+    """Matrix rows the current audit must judge: all (full audit) or the open ones (re-audit,
+    rows_required.json in the latest bundle)."""
+    ids = [str(r.get("id")) for r in matrix.get("rows") or []]
+    bundle = latest_bundle(project)
+    data = None
+    if bundle is not None and (bundle / "rows_required.json").is_file():
+        try:
+            data = json.loads((bundle / "rows_required.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = None
+    if isinstance(data, list):
+        return [i for i in ids if i in set(map(str, data))]
+    return ids
+
+
+def _matrix_rows(project: Path, out: Path, mode: str, prev_text: str) -> str:
+    """Write rows_required.json (+ open_rows.md for a re-audit); return the brief paragraph."""
+    from . import compliance
+    try:
+        data = json.loads((Path(project) / compliance.MATRIX_JSON).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    rows = data.get("rows") or []
+    ids = [str(r.get("id")) for r in rows]
+    if mode != "recheck":
+        (out / "rows_required.json").write_text(json.dumps(ids) + "\n", encoding="utf-8")
+        return MATRIX_FULL
+    from .checks.v1180 import row_verdicts
+    got = row_verdicts(prev_text, ids)
+    open_ids = [r["id"] for r in rows if got.get(r["id"], ("none",))[0] != "agree"
+                or r.get("status") in ("FAIL", "WARN")]
+    (out / "rows_required.json").write_text(json.dumps(open_ids) + "\n", encoding="utf-8")
+    lines = ["# Open compliance rows (re-check only these)", ""]
+    lines += [f"- {r['id']} [{r['status']}] {r.get('lines')}: {r.get('quote')} | previous verdict: "
+              f"{got.get(r['id'], ('none',))[0]}" for r in rows if r["id"] in open_ids] or ["- none"]
+    (out / "open_rows.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return MATRIX_RECHECK
+
+
 def engine_text() -> str:
     return ("Engine-owned formatting (report under a separate heading 'Engine issues'; never a "
             "reason for REVISE by itself): " + "; ".join(ENGINE_OWNED) + ". " + CHECKLIST_ORDER)
@@ -208,13 +264,18 @@ def start(project: Path, files: list[str]) -> tuple[Path, str]:
               "(line-numbered L0001...) and the cached original guide files listed below. Judge "
               "compliance from the original, not from the extract alone.",
               f"{banner(project) or ''}", "", "## Files", ""]
+    prev = past[-1].read_text(encoding="utf-8", errors="replace") if mode == "recheck" else ""
+    para = _matrix_rows(project, out, mode, prev)
+    if para:
+        lines[3:3] = [para, ""]
     if mode == "recheck":
-        prev = past[-1].read_text(encoding="utf-8", errors="replace")
         items = findings(prev)
         (out / "previous_findings.md").write_text(
             f"# Findings of the previous audit ({past[-1].name})\n\n" + "\n".join(
                 f"- {x}" for x in items) + "\n", encoding="utf-8")
         lines.append(f"- {out / 'previous_findings.md'} (check each: RESOLVED or OPEN)")
+        if (out / "open_rows.md").is_file():
+            lines.append(f"- {out / 'open_rows.md'} (compliance rows to re-check)")
     lines += [f"- {project / rel}" for rel in files if (project / rel).is_file()]
     from .reviewitems import write as _write_items  # 1.16.0: cases a gate could not decide
     listed = _write_items(project, out)

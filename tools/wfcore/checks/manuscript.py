@@ -527,6 +527,7 @@ def docx_bundle_ready(ctx: Ctx) -> Result:
     spec = docxaudit.audit_spec(ctx.project)
     from ..state import version_tuple as _vt
     v1141 = _vt(_pin_for(ctx)) >= (1, 14, 1)  # stricter upload checks since 1.14.1
+    v1180 = _vt(_pin_for(ctx)) >= (1, 18, 0)
     for item in manifest.get("items", []):
         role = str(item.get("role", "")).casefold()
         raw = str(item.get("file", ""))
@@ -545,6 +546,8 @@ def docx_bundle_ready(ctx: Ctx) -> Result:
                                         allow_footnote_keep=_footnote_keep_allowed(ctx, spec)))
             if v1141 and path.is_file():  # 1.14.1 (B5), since 1.14.1 for a pinned paper
                 problems.extend(f"{path.name}: {p}" for p in docxaudit.docprops_problems(path))
+            if v1180:  # 1.18.0 (K7): tracked changes, comments, placeholders, highlights
+                problems.extend(docxaudit.preflight_problems(path))
         if v1141 and path.suffix.casefold() == ".pdf" and path.is_file() and (
                 role == "supplementary_pdf" or path.with_suffix(".docx").is_file()):
             # 1.14.1 (B4): an engine-exported PDF carries the journal's language.

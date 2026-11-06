@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "08_submission/guideline_requirements.json (medpaper 1.18.0)",
+  "description": "The chosen journal's author guidelines as a checked requirement list. Quotes are verbatim from 08_submission/guidelines_source.txt at the cited lines. Gate: guideline_requirements_mapped (S20). Matrix: compliance_matrix_complete (S23/S25).",
+  "type": "object",
+  "required": ["schema", "journal", "article_type", "requirements"],
+  "properties": {
+    "schema": {"const": 1},
+    "journal": {"type": "string"},
+    "journal_epoch": {"type": "integer", "minimum": 1},
+    "article_type": {"type": "string"},
+    "requirements": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "category", "quote", "lines", "rule", "enforcement", "article_type"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,23}$"},
+          "category": {"$ref": "#/$defs/category"},
+          "quote": {"type": "string", "minLength": 8},
+          "lines": {"oneOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}],
+                    "description": "L0012, L0040-L0046 or a list of them"},
+          "rule": {"type": "object", "properties": {
+            "field": {"type": "string", "description": "typed field of target_journal.json, dotted (limits.abstract_words); docx_style.<key> for docx_style.json"},
+            "value": {},
+            "check": {"type": "string", "description": "engine measurement: word_limits, reference_limit, display_items, keywords, abstract, title_page, running_title, highlights, cover_letter, required_uploads, figure_files, orcid, csl, declarations_order, page_numbers, ai_statement, reference_format"}}},
+          "enforcement": {"enum": ["auto", "builder", "manual", "portal", "n.a."]},
+          "article_type": {"type": "string", "description": "the article type it applies to, or 'all'"},
+          "reason": {"type": "string", "description": "required for n.a."}
+        }
+      }
+    },
+    "not_mentioned": {"type": "array", "items": {"type": "object", "required": ["category", "searched"],
+      "properties": {"category": {"$ref": "#/$defs/category"},
+                     "searched": {"type": "array", "minItems": 2, "items": {"type": "string"}}}}},
+    "not_applicable": {"type": "array", "items": {"type": "object", "required": ["lines", "reason"],
+      "properties": {"lines": {"type": "string"}, "reason": {"type": "string", "minLength": 8}}}}
+  },
+  "$defs": {
+    "category": {"enum": ["word_limits", "abstract_structure", "keywords", "title_page", "running_title",
+      "highlights", "section_headings", "references", "citations", "figures", "tables", "supplementary",
+      "declarations", "ethics_consent", "data_availability", "ai_disclosure", "conflicts_of_interest",
+      "funding", "author_contributions", "cover_letter", "required_uploads", "layout", "language",
+      "blinding", "reporting_checklist", "article_type_rules"]}
+  }
+}

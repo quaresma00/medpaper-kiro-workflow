@@ -395,7 +395,10 @@ def switch(project: Path, pipe, st, to: str, confirm_old: str, why: str,
              f"旧期刊资料已归档于：{rel_archive}/（含投稿包、指南快照、S25 审计、包审阅轮次、"
              f"辅助脚本和 CSL；共 {len(removed) + len(moved)} 项）。之后的命令不再显示这个路径。",
              f"S20-S25 采用当前引擎 {engine} 的门禁（已记录为事件）；已完成的科学阶段保持原门禁。",
-             f"旧的 S20+ 交接记录已标记为 epoch {old_no}（{marked} 条），新 S20 需要新的交接记录。"]
+             f"旧的 S20+ 交接记录已标记为 epoch {old_no}（{marked} 条），新 S20 需要新的交接记录。",
+             "新期刊的投稿要求清单（08_submission/guideline_requirements.json）和合规矩阵必须根据"
+             "新期刊自己的 guidelines_source.txt 逐条重新建立；旧刊的清单、矩阵和证据已随旧资料"
+             "归档，不得沿用。"]
     if carried:
         lines.append("沿用、不再询问：" + "；".join(carried) + "。只重写与期刊有关的措辞。")
     if items:
@@ -405,6 +408,7 @@ def switch(project: Path, pipe, st, to: str, confirm_old: str, why: str,
                   else f"  - {it['file']} 的期刊阶段改动" for it in items]
     lines += ["旧刊短名单/后备梯队：`wf journal shortlist`（只作起点，须用新证据重新核实）。",
               "新对话中：wf status -> wf journal lookup --issn <ISSN> -> 被拦截时 wf guidelines "
-              "ingest --from <文件> --url <官方URL> -> 写 S20 文件 -> open-variant -> wf rebuild",
+              "ingest --from <文件> --url <官方URL> -> 写 S20 文件（含要求清单）-> open-variant "
+              "-> wf rebuild",
               RESTART]
     return lines

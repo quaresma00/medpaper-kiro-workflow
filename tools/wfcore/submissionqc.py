@@ -267,6 +267,8 @@ def write(ctx) -> list[dict]:
                   encoding="utf-8")
     from .revision import record_derived
     record_derived(ctx.project, [ctx.project / CHECKLIST_REL, qc])  # 1.14.1 (B2)
+    from . import compliance  # 1.18.0 (K4): the compliance matrix, regenerated with the QC
+    compliance.write(ctx, rows)
     return rows
 
 

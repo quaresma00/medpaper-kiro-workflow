@@ -21,14 +21,18 @@ Details (typed-field JSON, docx_style.json template, evidence rules, switching j
    `figure_dpi`, `word_count_scope`, `declarations_order`, `main_text_headings`, `keywords`,
    `legend_style`, `supplementary_aliases`, `reference_separator`, `si_format`,
    `abbreviation_placement` (`self_contained` unless `central_required` + source),
-   `line_numbers`, `journal_requires_checklist` only if required, `csl` {style_id, issn} from
-   the lookup (`tools/refs/csl_index.py fetch --issn <ISSN>`), `presentation` {font_min_pt,
-   figure_width_mm, panel_label_case, line_art_dpi, number_format, spelling, heading_names,
-   in_figure_title} (complete after a journal switch; a change is a re-render via
-   `wf rebuild`, never science).
-6. `08_submission/guidelines_extract.md` citing `guidelines_source.txt` lines (`L0012`) and
-   `08_submission/docx_style.json` (fallbacks listed under `fallbacks`). Over the display
-   limit? `08_submission/display_reallocation.json` as a presentation rework round.
+   `line_numbers`, `journal_requires_checklist` only if required, `csl` {style_id, issn}
+   (`tools/refs/csl_index.py fetch --issn <ISSN>`), `presentation` (complete after a journal
+   switch; a change is a re-render via `wf rebuild`, never science), and since 1.18.0
+   `abstract`, `title_page`, `highlights`/`key_points`, `cover_letter`, `required_uploads`,
+   `figure`, `orcid_required` (absent = journal silent).
+6. `08_submission/guidelines_extract.md` citing `guidelines_source.txt` lines (`L0012`),
+   `08_submission/docx_style.json` (fallbacks under `fallbacks`) and
+   `08_submission/guideline_requirements.json` (`reference/guideline_requirements.schema.json`):
+   every rule for this article type with verbatim `quote`, `lines`, `category`, `rule`,
+   `enforcement` auto|builder|manual|portal|n.a.; silent categories in `not_mentioned` (terms
+   searched), other article types' lines in `not_applicable`. Over the display limit?
+   `08_submission/display_reallocation.json` as a presentation rework round.
 7. Open the variant (all journal edits go to `08_submission/manuscript/`, never `07_manuscript/`):
 ```
 .\.venv\Scripts\python.exe tools/manuscript/scientific_freeze.py open-variant --journal "<chosen journal>"
@@ -37,14 +41,12 @@ Details (typed-field JSON, docx_style.json template, evidence rules, switching j
    command; then the user opens a new chat). Never edit S20 files in place for a new journal.
 
 ## Outputs
-- `08_submission/journal_shortlist.md`
-- `08_submission/target_journal.json`
-- `08_submission/guidelines_extract.md`
-- `08_submission/docx_style.json`
-- `08_submission/manuscript/` (journal variant)
+- `08_submission/journal_shortlist.md`, `target_journal.json`, `guidelines_extract.md`,
+  `docx_style.json`, `guideline_requirements.json`, `manuscript/` (journal variant)
 
 ## Gate
-guidelines sourced (cited lines), journal layer clean, docx style, display plan fits,
+guidelines sourced (cited lines), requirement list mapped (every obligation line covered,
+quotes verbatim, numbers = typed fields), journal layer clean, docx style, display plan fits,
 presentation params confirmed, freeze intact and variant ready (non-overridable). Never state
 indexing, fees or rules from memory.
 

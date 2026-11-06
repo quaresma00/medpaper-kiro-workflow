@@ -14,7 +14,7 @@
 
 [meta]
 name = "medpaper"
-version = "1.17.0"
+version = "1.18.0"
 schema = 1
 description = "Medical/clinical research pipeline: idea -> feasibility -> data -> analysis -> artifacts -> manuscript -> submission package."
 
@@ -956,6 +956,11 @@ check = "guidelines_sourced"
 [[stage.gate]]
 check = "journal_layer_clean"
 since = "1.17.0"
+# 1.18.0 (K2): the guide as a checked requirement list (verbatim quotes, lines, typed fields,
+# every obligation sentence covered).
+[[stage.gate]]
+check = "guideline_requirements_mapped"
+since = "1.18.0"
 [[stage.gate]]
 check = "docx_style_config"
 # 1.10.0: re-check the display count against this journal before any further writing.
@@ -1113,6 +1118,14 @@ since = "1.17.0"
 # display items), so the independent audit is a confirmation rather than a first discovery.
 [[stage.gate]]
 check = "submission_checklist_measured"
+# 1.18.0 (K3/K4): typed journal fields (abstract, title page, highlights, cover letter, uploads,
+# figure files, ORCID) and one compliance-matrix row per guideline requirement.
+[[stage.gate]]
+check = "journal_fields_met"
+since = "1.18.0"
+[[stage.gate]]
+check = "compliance_matrix_complete"
+since = "1.18.0"
 [[stage.gate]]
 check = "reference_provenance"
 live = true
@@ -1235,6 +1248,14 @@ check = "bundle_matches_freeze"
 [[stage.gate]]
 check = "submission_audit_matches_freeze"
 path = "08_submission/independent_submission_audit.md"
+# 1.18.0 (K4/K6): manual rows need evidence; the audit judges every (open) matrix row.
+[[stage.gate]]
+check = "compliance_matrix_complete"
+final = true
+since = "1.18.0"
+[[stage.gate]]
+check = "audit_rows_judged"
+since = "1.18.0"
 [[stage.gate]]
 check = "submission_checklist_measured"
 [[stage.gate]]
@@ -1315,5 +1336,10 @@ globs = [
   # 1.17.0: line-numbered official guide (wf guidelines ingest) and table render parameters.
   "08_submission/guidelines_source.txt",
   "04_tables/render_params.json",
+  # 1.18.0: requirement list (S20), compliance matrix and manual evidence (S23).
+  "08_submission/guideline_requirements.json",
+  "08_submission/compliance_matrix.json",
+  "08_submission/compliance_matrix.md",
+  "08_submission/compliance_evidence.json",
 ]
 

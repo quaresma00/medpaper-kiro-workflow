@@ -1262,6 +1262,22 @@ def place_abbreviations(text: str, mode: str) -> str:
     return text
 
 
+def _running_title(text: str, target: dict, project: Path) -> str:
+    """1.18.0 (K3): running_title_position "manuscript" puts the title page's running title on
+    the manuscript's first page, after the title (a paper pinned earlier: after wf migrate)."""
+    from wfcore import journalfields
+    from wfcore.checks.v1180 import since_1180_project
+    if ("running_title_position" not in target or journalspec.running_title_position(target)
+            != "manuscript" or not since_1180_project(project)):
+        return text
+    front = text.split("\n# Abstract", 1)[0]
+    value = journalfields.running_title_value(project)
+    if not value or journalfields.RUNNING_RE.search(front):
+        return text
+    head, sep, rest = text.partition("\n\n")
+    return f"{head}\n\nRunning title: {value}{sep or chr(10) * 2}{rest}"
+
+
 def prepare_source(kind: str, inputs: list[Path], project: Path, workdir: Path,
                    style: dict | None = None, esm_number: int | None = None) -> list[Path]:
     """Apply the journal's presentation rules to a temporary copy handed to Pandoc."""
@@ -1272,6 +1288,7 @@ def prepare_source(kind: str, inputs: list[Path], project: Path, workdir: Path,
     if kind == "manuscript":
         text = place_abbreviations(text, journalspec.abbreviation_list(target, project))
         text = journal_structure(text, target)
+        text = _running_title(text, target, project)
         m = re.search(r"(?mi)^#\s+Figure legends\s*$", text)
         if m:
             head, legends = text[:m.start()], text[m.start():]

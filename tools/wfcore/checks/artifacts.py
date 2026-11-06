@@ -681,6 +681,12 @@ def bundle_complete(ctx: Ctx) -> Result:
     stray = sorted(on_disk - listed)
     if stray:
         problems.append(f"{len(stray)} file(s) in the bundle are not in the manifest: {', '.join(stray[:5])}")
+    from .v1180 import since_1180
+    if since_1180(ctx):  # 1.18.0 (K3): the journal's required_uploads vs the manifest roles
+        from .. import journalfields, journalspec
+        status, detail = journalfields.uploads_check(ctx.project, journalspec.load(ctx.project))
+        if status == "FAIL":
+            problems.append(detail)
     if problems:
         return Result(False, "bundle_complete", "; ".join(problems[:8]))
     return Result(True, "bundle_complete", f"{len(items)} bundle item(s), each present and traced to a guideline rule")

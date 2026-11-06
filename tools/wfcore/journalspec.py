@@ -381,6 +381,10 @@ def display_file_names(target: dict) -> dict[str, str]:
 
 
 def figure_dpi(target: dict) -> int | None:
+    fig = target.get("figure") if isinstance(target.get("figure"), dict) else {}
+    v = fig.get("min_dpi")  # 1.18.0 (K3): figure {formats, min_dpi, max_mb, colour}
+    if isinstance(v, int) and not isinstance(v, bool) and v > 0:
+        return v
     for key in ("figure_dpi", "halftone_dpi", "line_art_dpi"):
         v = target.get(key)
         if isinstance(v, int) and not isinstance(v, bool) and v > 0:

@@ -1318,6 +1318,30 @@ def cmd_journal(args) -> int:
     return 0
 
 
+def cmd_compliance(args) -> int:
+    """1.18.0 (K4/K5): regenerate the compliance matrix or print the user's Chinese summary."""
+    pipe, st, proj = _load()
+    from . import compliance, requirements
+    from .checks import Ctx
+    if args.action == "summary":
+        lines = compliance.summary_zh(proj)
+        print("\n".join(lines) if lines else "还没有合规矩阵：先建立 08_submission/guideline_requirements.json，"
+              "再运行 wf compliance write")
+        return 0
+    if not (proj / requirements.REQ_REL).is_file():
+        print(f"compliance: {requirements.REQ_REL} missing - write the requirement list at S20 first")
+        return 2
+    ctx = Ctx(pipe, st, proj, pipe.stage(st.current), {"check": "compliance_matrix_complete"})
+    rows = compliance.write(ctx)
+    counts = {s: sum(1 for r in rows if r["status"] == s) for s in compliance.STATUSES}
+    for r in rows:
+        if r["status"] in ("FAIL", "WARN", "CANNOT_ASSESS"):
+            print(f"  [{r['status']}] {r['id']} {r['category']}: {r['evidence'][:110]}")
+    print(f"wrote {compliance.MATRIX_MD} and {compliance.MATRIX_JSON}: "
+          + ", ".join(f"{s} {n}" for s, n in counts.items()))
+    return 2 if counts["FAIL"] else 0
+
+
 def cmd_archetype(args) -> int:
     """Print one archetype instead of making the agent read the whole registry.
 
@@ -2308,6 +2332,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="lookup: metadata only, no GET of the guide page")
     p.add_argument("--answer", choices=("restore", "keep"), default=None)
     p.set_defaults(fn=cmd_journal)
+
+    p = sub.add_parser("compliance", help="compliance matrix (1.18.0): write (regenerate "
+                                          "08_submission/compliance_matrix.md/.json from the "
+                                          "requirement list) | summary (Chinese, for the user)")
+    p.add_argument("action", choices=("write", "summary"))
+    p.set_defaults(fn=cmd_compliance)
 
     p = sub.add_parser("doctor", help="environment and wiring check")
     p.set_defaults(fn=cmd_doctor)

@@ -241,3 +241,20 @@ Before the user submits, list for them what the portal will ask beyond the files
 .\.venv\Scripts\python.exe tools/wf.py advance --note "submission package built and visually verified; Word typography/link/heading audit passed; ready for user package review"
 ```
 
+## Compliance matrix (1.18.0)
+`wf rebuild` (submission_qc.py write) and `wf compliance write` generate
+`08_submission/compliance_matrix.md/.json` from `guideline_requirements.json`: auto rows from
+measurements, builder rows from current build receipts, portal rows as CANNOT_ASSESS on the
+portal to-do list, n.a. rows with their reason. Manual rows need the location in
+`08_submission/compliance_evidence.json`: `{"R07": {"file": "08_submission/manuscript/full_manuscript.md",
+"where": "Methods, paragraph 2"}}` or `{"R09": {"status": "cannot_assess", "reason": "..."}}`;
+they WARN at S23 until filled and FAIL at S25. `compliance_matrix_complete` fails on a stale
+matrix or any FAIL row. `journal_fields_met` checks the 1.18.0 typed fields (abstract
+structure, title page, running title, highlights/key points, cover letter items, required
+uploads vs manifest roles, figure format/dpi/size/colour, ORCID).
+Highlights in a separate file: `08_submission/manuscript/highlights.md` (`# Highlights`, one
+`- ` bullet per point), built with `build_docx.py build --kind statements --input
+project/08_submission/manuscript/highlights.md --output project/08_submission/bundle/highlights.docx
+--style-config project/08_submission/docx_style.json`, manifest role `highlights`.
+DOCX preflight (docx_bundle_ready, 1.18.0): no tracked changes, comments, placeholders (XXX,
+TBD, TODO, [citation needed], lorem ipsum, ??) or highlighted text in any upload.

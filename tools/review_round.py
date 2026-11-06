@@ -123,6 +123,12 @@ def _main() -> int:
                 print("List these as PENDING AUTHOR DECISIONS in the summary (the user decides each):")
                 for f in pend:
                     print(f"  {f['id']} [{f['category']}] {f['summary']}")
+            if scope == "package":  # 1.18.0 (K5): the compliance summary goes into that message
+                from wfcore import compliance
+                zh = compliance.summary_zh(project)
+                if zh:
+                    print("Include this compliance summary unchanged in the message to the user:")
+                    print("\n".join(f"  {x}" for x in zh))
             print("Now give the user ONE summary and ask: another review round, or confirm with "
                   f"the exact sentence '{rr.CONFIRM_PHRASES[0]}'?")
             return 0

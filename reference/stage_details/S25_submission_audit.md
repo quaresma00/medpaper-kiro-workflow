@@ -143,3 +143,14 @@ the chosen journal's current official instructions.
 ## 1.16.0: final boundaries cannot be forced
 
 From engine 1.16.0 (`wf migrate --yes` for older pins) `wf advance --force` cannot pass S24/S25 when the package freeze or package content does not match, the audit is bound to another freeze, the audit decision is not PASS or PASS_AUTHOR_FINAL_COPY, the author final copy is not verified, or the user's package confirmation ('我确认这一版', S24 review round) is missing (1.16.0 (N9), `cli.FINAL_BOUNDARY_GATES`). After REVISE the only author route is the existing author final-copy channel; otherwise fix, re-freeze at S24 and re-audit. Items the deterministic checks could not decide (for example a Results sentence combining several results) arrive in the bundle as `reviewer_items.md`; judge each one in the report.
+
+## Compliance rows (1.18.0)
+The bundle holds `guidelines_source.txt`, the cached originals, `guideline_requirements.json`,
+`compliance_matrix.md/.json` and `compliance_evidence.json`. The auditor writes one line per
+matrix row (`- R07: agree|disagree - <reason>`) and one line per obligation of the original
+text missing from the list (`- MISSING L0042: "<quote>" - BLOCKING`). `audit_rows_judged`
+fails when a row has no verdict, or when PASS is recorded although a row is disagreed with or
+a requirement is missing. A re-audit of the same journal judges only the rows in
+`open_rows.md` (previously disagreed or unjudged, or FAIL/WARN now). CANNOT_ASSESS and
+portal rows are user/portal items and never cause REVISE by themselves; engine-owned
+formatting stays under "Engine issues".

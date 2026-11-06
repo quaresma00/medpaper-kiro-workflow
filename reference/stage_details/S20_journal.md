@@ -201,3 +201,49 @@ explains the choice (e.g. the guide's own example); the render checks below must
 .\.venv\Scripts\python.exe tools/wf.py check
 .\.venv\Scripts\python.exe tools/wf.py advance --note "target=<journal>; current SCIE/JCR verified; Word rules frozen; journal deltas=<...>"
 ```
+
+## Requirement list (1.18.0) - `08_submission/guideline_requirements.json`
+Written after `guidelines_source.txt` exists, for the chosen article type; schema
+`reference/guideline_requirements.schema.json`. One entry per rule:
+`{id, category, quote, lines, rule, enforcement, article_type}`.
+- `quote` is copied verbatim from the cited lines (whitespace and typographic quotes are
+  normalised); `lines` is `L0012`, `L0040-L0046` or a list.
+- `category` is one of the 26 fixed categories (word_limits, abstract_structure, keywords,
+  title_page, running_title, highlights, section_headings, references, citations, figures,
+  tables, supplementary, declarations, ethics_consent, data_availability, ai_disclosure,
+  conflicts_of_interest, funding, author_contributions, cover_letter, required_uploads, layout,
+  language, blinding, reporting_checklist, article_type_rules). A category the guide is
+  silent on goes in `not_mentioned` with the terms you searched (>= 2; the gate fails when a
+  searched term does occur in the guide).
+- `enforcement`: `auto` = the engine measures `rule.field` / `rule.check` (fields:
+  limits.main_text_words, limits.abstract_words, limits.reference_limit, limits.display_items,
+  limits.main_figures, limits.main_tables, keywords.*, abstract.*, title_page.*,
+  running_title_position, highlights.*/key_points.*, cover_letter.must_state,
+  required_uploads, figure.*, figure_dpi, orcid_required, csl, declarations_order; checks:
+  word_limits, reference_limit, display_items, keywords, abstract, title_page, running_title,
+  highlights, cover_letter, required_uploads, figure_files, orcid, csl, declarations_order,
+  page_numbers, ai_statement, reference_format); `builder` = a builder applies the typed
+  field (main_text_headings, legend_style, reference_separator, line_numbers, docx_style.*,
+  figure.formats, running_title_position, ...); `manual` = you record the evidence location at
+  S23; `portal` = the user does it in the submission system; `n.a.` + `reason`.
+- Lines of other article types or sections that do not apply: `not_applicable`
+  `[{"lines": "L0040-L0052", "reason": "Case reports only"}]`.
+
+`guideline_requirements_mapped` fails when a category is missing, a quote is not at its
+lines, a number in an auto/builder quote differs from the typed field (`rule.value` too), an
+auto rule names nothing the engine measures, or a guide sentence with must / required /
+should / mandatory / please ensure / not exceed / maximum / no more than / at least /
+limited to / are expected to / have to is covered by no requirement and no n.a. range (the
+uncovered line numbers are listed). Typed fields with no requirement are a warning
+(fallback). A journal switch archives the list; build the new one from the new guide only.
+
+Typed fields added in 1.18.0 (`tools/wfcore/journalfields.py` has the formats):
+`abstract {structured, headings[], per_section_words, total_words}`, `title_page {elements[],
+title_max_chars, title_max_words, running_title_max_chars}`, `running_title_position`
+(`manuscript` puts the title page's running title on the first manuscript page),
+`highlights` or `key_points {required, n_min, n_max, max_chars, label, placement}`,
+`cover_letter {must_state[]}`, `required_uploads[]` (strings or `{item, role}`; `{portal:
+true}` for portal-only), `figure {formats[], min_dpi, max_mb, colour}` (separate figure
+files are converted from the TIFF masters to the first format the engine can write: TIFF,
+PNG, PDF, EPS, JPEG; CMYK/greyscale on request), `orcid_required` (true | "corresponding" |
+"portal").

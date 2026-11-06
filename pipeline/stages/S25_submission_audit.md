@@ -12,7 +12,10 @@ Details (what the reviewer must inspect, finding format, verdict rules): `refere
 ```
 2. Write the audit bundle (the FIRST audit is full; after a REVISE it is a re-audit: previous
    findings RESOLVED/OPEN plus new BLOCKING only; engine-owned formatting is an "Engine
-   issue", never REVISE by itself):
+   issue", never REVISE by itself). It carries the original guide, the requirement list and
+   the compliance matrix: the auditor judges every (open) row agree/disagree and reports
+   obligations missing from the list (`MISSING L00nn`, BLOCKING); CANNOT_ASSESS/portal rows
+   are user items, not REVISE:
 ```
 .\.venv\Scripts\python.exe tools/package_review.py audit-start
 ```
@@ -45,8 +48,9 @@ Details (what the reviewer must inspect, finding format, verdict rules): `refere
 - `08_submission/independent_submission_audit.md`
 
 ## Gate
-audit matches the freeze, decision PASS or PASS_AUTHOR_FINAL_COPY, final copy verified,
-analysis reproduces, reporting checklist, live references. Do not repeat an audit of an
+audit matches the freeze, every matrix row judged (a disagreement or missing requirement
+blocks PASS), manual rows have evidence, decision PASS or PASS_AUTHOR_FINAL_COPY, final copy
+verified, analysis reproduces, reporting checklist, live references. Do not repeat an audit of an
 unchanged freeze.
 
 ## Close

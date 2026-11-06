@@ -733,3 +733,49 @@ def blinding_problems(path, ids: list[str]) -> list[str]:
             problems.append(f"{path.name}: author identity in {part} ({where}): "
                             + ", ".join(sorted(set(hits))[:3]))
     return problems
+
+
+# 1.18.0 (K7): pre-submission preflight of every DOCX upload.
+PLACEHOLDER_RES = (
+    (re.compile(r"(?<![A-Za-z])X{3,}(?![A-Za-z])"), "XXX"),
+    (re.compile(r"\bTBD\b"), "TBD"), (re.compile(r"\bTODO\b"), "TODO"),
+    (re.compile(r"(?i)\[\s*citation needed\s*\]"), "[citation needed]"),
+    (re.compile(r"(?i)\blorem ipsum\b"), "lorem ipsum"), (re.compile(r"\?\?"), "??"),
+)
+
+
+def preflight_problems(path) -> list[str]:
+    """Tracked changes, comments, placeholders and highlighted text in a DOCX upload."""
+    import zipfile as _zip
+    path = Path(path)
+    if not path.is_file() or path.suffix.casefold() != ".docx":
+        return []
+    out: list[str] = []
+    try:
+        with _zip.ZipFile(path) as zf:
+            parts = {n: zf.read(n).decode("utf-8", errors="replace") for n in zf.namelist()
+                     if n.startswith("word/") and n.endswith(".xml")}
+    except (OSError, _zip.BadZipFile) as exc:
+        return [f"{path.name}: unreadable DOCX ({exc})"]
+    body = "".join(v for n, v in parts.items() if not n.endswith(("styles.xml", "settings.xml",
+                                                                    "numbering.xml", "fontTable.xml")))
+    tracked = len(re.findall(r"<w:(?:ins|del|moveFrom|moveTo)\b", body))
+    if tracked:
+        out.append(f"{path.name}: {tracked} tracked change(s) - accept or reject all before upload")
+    comments = len(re.findall(r"<w:comment\b", parts.get("word/comments.xml", ""))) + \
+        len(re.findall(r"<w:commentReference\b", body))
+    if comments:
+        out.append(f"{path.name}: comment(s) present - delete every comment before upload")
+    text = "\n".join("".join(re.findall(r"<w:t(?:\s[^>]*)?>([^<]*)</w:t>", p))
+                     for p in re.findall(r"<w:p[ >].*?</w:p>", body, re.S))
+    hits = [label for rx, label in PLACEHOLDER_RES if rx.search(text)]
+    if hits:
+        out.append(f"{path.name}: placeholder text {', '.join(hits)} - replace it with the final "
+                   "content")
+    marked = ["".join(re.findall(r"<w:t(?:\s[^>]*)?>([^<]*)</w:t>", r))
+              for r in re.findall(r"<w:r[ >](?:(?!</w:r>).)*?<w:highlight\b.*?</w:r>", body, re.S)]
+    marked = [m for m in marked if m.strip()]
+    if marked:
+        out.append(f"{path.name}: highlighted text (often a placeholder): '{marked[0][:40]}'"
+                   + (f" and {len(marked) - 1} more" if len(marked) > 1 else ""))
+    return out

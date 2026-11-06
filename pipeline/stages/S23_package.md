@@ -5,8 +5,8 @@ consolidated visual pass (every look deferred at S10/S11 comes due here).
 Details (builder, manifest roles, checklist format, portal to-do): `reference/stage_details/S23_package.md`.
 
 ## Do
-1. `08_submission/cover_letter.md`; item list from `guidelines_extract.md` only. Sync any
-   title-page reference count:
+1. `08_submission/cover_letter.md` (states every `cover_letter.must_state` item); highlights
+   if required. Sync any title-page reference count:
    `.\.venv\Scripts\python.exe tools/manuscript/reference_count.py sync`
 2. Build every prose upload once from `08_submission/manuscript/` (never `07_manuscript/`):
 ```
@@ -21,10 +21,12 @@ Details (builder, manifest roles, checklist format, portal to-do): `reference/st
 3. Write `08_submission/bundle/manifest.json` (every upload, role, rule). Main figure TIFFs
    and table workbooks are added automatically when the journal wants separate files.
    From now on ONE command rebuilds what an edit affects and re-measures (audit,
-   `submission_qc.md` - fully generated -, capture, polish lint):
+   `submission_qc.md`, `compliance_matrix.md`, capture, polish lint):
 ```
 .\.venv\Scripts\python.exe tools/wf.py rebuild --wait
 ```
+   Every manual matrix row: file + paragraph/line in `08_submission/compliance_evidence.json`,
+   then `wf compliance write`.
 4. Consolidated visual pass (`wf status` lists what is owed):
 ```
 .\.venv\Scripts\python.exe tools/figures/qc.py --contact-sheet
@@ -49,10 +51,9 @@ Details (builder, manifest roles, checklist format, portal to-do): `reference/st
 - `08_submission/submission_qc.md`
 
 ## Gate
-bundle complete, DOCX bundle ready, measured checklist (WARN never blocks), package
-baseline, visual debts cleared, reporting checklist, analysis reproduces, no orphans, CSL of
-the journal ISSN (csl_check; tools/refs/csl_index.py fetch --issn <ISSN>). Never
-recapture the baseline to accept a Word content edit.
+bundle complete, DOCX ready (no tracked changes/comments/placeholders), measured checklist,
+journal fields met, compliance matrix (no FAIL), package baseline, visual debts, reporting
+checklist, reproduces, no orphans, journal CSL. Never recapture the baseline for a Word edit.
 
 ## Close
 ```

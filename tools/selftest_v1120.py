@@ -302,6 +302,16 @@ def run_b(tmp: Path, record, section) -> None:
     # 1.17.0 adds two gate lines for new checks (journal_layer_clean at S20, csl_check at S23).
     new_1140 += sum(1 for v in names.values() for c in v if c in {
         "journal_layer_clean", "csl_check"})
+    # 1.18.0 adds five gate lines for new checks (requirement list at S20, journal fields and the
+    # compliance matrix at S23, the matrix and the row verdicts at S25).
+    new_1140 += sum(1 for v in names.values() for c in v if c in {
+        "guideline_requirements_mapped", "journal_fields_met", "compliance_matrix_complete",
+        "audit_rows_judged"})
+    # 1.18.0 adds five gate lines for new checks (requirement list at S20, journal fields and the
+    # compliance matrix at S23, the matrix and the row verdicts at S25).
+    new_1140 += sum(1 for v in names.values() for c in v if c in {
+        "guideline_requirements_mapped", "journal_fields_met", "compliance_matrix_complete",
+        "audit_rows_judged"})
     record("B4 duplicate gate lines merged (confirmation inside review_round_approved; SI clean "
            "inside docx_bundle_ready; limits/reference count as checklist rows); fewer gate "
            f"entries than 1.11.0 (287 -> {total - new_1140} + {new_1140} new in 1.14.0)",
