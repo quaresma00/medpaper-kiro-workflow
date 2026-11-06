@@ -2,7 +2,16 @@
 
 一套面向医学与临床研究的 Kiro 工作流。它把“研究想法”推进为经过数据、文献、统计结果、图表、人工复核和期刊规则共同校验的投稿包，而不是只让 AI 一次性写出一篇看似完整的论文。
 
-当前版本：`1.15.0`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE + R 4.3+
+当前版本：`1.16.0`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE + R 4.3+
+
+## 1.16.0 变化（五位审阅专家的反例逐条落实，不增加阶段）
+
+- **结果语境**：Results/Abstract 中的数字若能对上结构化结果，同一句里明写的效应量类型（HR/OR/RR/AUC…）、时间窗（1-year、30-day、at 5 years）和显示字典标签（人群、暴露、对照、结局）必须与该结果一致；只有明确矛盾才失败，缺少语境词不失败，合并多个结果或有歧义的句子列入下一次审阅包的 `reviewer_items.md` 交审阅者判断。
+- **小整数**：0–10 只在非结果语境下豁免；跟在 n=、%、效应量、CI/区间端点、均数/中位数、患者/事件计数旁的小整数必须来自结果 JSON（Methods 中的方案常数不受影响）。
+- **表格分母**：普通 n (%)/n/N (%) 单元格须等于分子/列分母（列标题 N = …，或 proportion 记录），列人群须一致；无分母来源 S10 警告、S12 失败；CI 和加权列不按此规则判断。
+- **图中统计数字**：图内打印的 HR/CI/AUC/P/n/% 必须来自该图自己的 source_results；R 和 Python 图都有渲染回执，脚本或结果改了必须重新出图。Python KM 图默认画分析导出的曲线表，log-rank P 来自分析，无删失不画删失标记。
+- **其他**：PROSPERO 按资格（合格的系统综述尽早、在数据提取前注册；范围综述等只写理由，绝不编造或倒填编号）；复杂连接写 `02_data/join_log.json` 并核对计数；baseline_counts 把 None/NaN/NA/NaT 计为缺失；S24/S25 终审门禁 `--force` 不能跳过；S09 前的一次总览绑定到所看图表的哈希；科学依赖要求 Python 3.12+。
+- **在途论文**：修复立即生效（旧锁定论文的 Python KM 旧调用保留旧行为并提示）；更严格的检查在 `wf migrate --yes` 之后才适用于该论文（含当前阶段）；只记一条迁移事件，论文文件不改；分析辅助代码哈希不变，不需要重跑复现。
 
 ## 1.15.0 变化（投稿包阶段提速，稿件质量不降）
 
@@ -458,9 +467,10 @@ python bootstrap.py
 引擎目录只用于维护。新建论文后，把论文文件夹作为工作区在 Kiro 里打开：
 
 ```powershell
-python tools/wf.py new sarcopenia-mortality   # 建 <论文根目录>/sarcopenia-mortality/ 并选中
-python tools/wf.py papers                     # 列出所有论文及各自阶段
-python tools/wf.py use other-paper            # 切换（用户级标记）
+python tools/wf.py init                       # 在当前打开的文件夹就地建论文（推荐）
+python tools/wf.py data add G:/data/x         # 数据原地登记（只读，不复制）
+python tools/wf.py new sarcopenia-mortality --central   # 仅在想放到论文根目录时使用
+python tools/wf.py papers                     # 列出所有论文及各自阶段（不再有全局“选中”）
 ```
 
 把研究思路文件放进该论文的 `00_input/`，在该论文工作区的 Kiro 对话里说：
@@ -475,12 +485,13 @@ python tools/wf.py use other-paper            # 切换（用户级标记）
 
 同一对话里启动一次后，后续直接说"修改 Methods……""这版 Word 的标题格式不对"即可。磁盘上的阶段状态和活动修订轮次负责约束后续操作，不必每条消息重复触发。
 
-### 两个 hook
+### hook
 
 | Hook | 触发 | 作用 |
 |---|---|---|
 | `medpaper-status` | SessionStart | 自动打印当前阶段、门禁状态、上次交接笔记 |
 | `medpaper-skill-guard` | PreToolUse | 拒绝激活会替代阶段的技能（`write-paper`、`orchestrate`、`make-figures` 等） |
+| 论文守卫（`wf init` 写入论文自己的 `.kiro/`） | 写入、删除、改名、浏览/搜索文件夹 | 论文隔离 + 冻结源保护；读文件和运行命令不触发；报告文件夹用 `wf config --user report_dirs add <目录>` 声明 |
 
 第二个很关键：steering 规则会在上下文压缩时被摘要掉，hook 不会。被 BLOCKED 的技能是真的激活不了。
 
@@ -522,10 +533,15 @@ python tools\wf.py check
 python tools\wf.py advance --note "本阶段完成了什么、做了什么决定、还有什么问题"
 python tools\wf.py doctor
 python tools\wf.py tree -v
+python tools\wf.py rebuild --wait            # 投稿包按依赖一键重建并重新测量
+python tools\wf.py migrate --yes             # 在途论文采用新版引擎的全部门禁
+python tools\review_round.py start           # 审阅轮次；审阅者写 .wf/review_bundle/<轮次>/report.md
 .venv\Scripts\python.exe tools\selftest.py
 ```
 
 日常使用时，研究者通常只需要在 Kiro 对话中描述任务和回答关键问题；这些命令主要用于安装、排错或人工检查流程状态。
+
+发布与完整性：每个版本有 git 标签（如 `v1.16.0`），`wf doctor` 校验引擎与标签一致（完整性守卫）；发布前在本地跑完整 selftest。仓库为私有，不设 PR CI（R/Word 依赖在本机）。
 
 ## 主要文件放在哪里
 

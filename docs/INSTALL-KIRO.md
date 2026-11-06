@@ -1,6 +1,6 @@
 # medpaper on Kiro
 
-A 20-stage medical research paper pipeline with enforced gates. The workflow is not a
+A 25-stage medical research paper pipeline with enforced gates. The workflow is not a
 prompt: it lives in `pipeline/` and a CLI hands the agent one stage at a time, so it does
 not decay as the context window compacts.
 
@@ -15,7 +15,9 @@ python tools/install_adapters.py --global    # so `/` finds the skill from any w
 
 Open the folder as the workspace in Kiro. `bootstrap.py` creates `.venv`, installs the
 pinned dependencies, wires the adapters, then runs `doctor` and the self test. Python 3.11+
-is required for the driver (`tomllib`); the driver itself has no third-party dependencies.
+is enough for the driver (`tomllib`; no third-party dependencies), but the pinned science
+packages (NumPy 2.5, SciPy 1.18) need Python 3.12+: with `uv` the bootstrap creates a 3.13
+environment, without it run `bootstrap.py` with Python 3.12 or newer.
 
 `--global` matters if you work in more than one folder. A workspace-level skill is only
 discoverable in that workspace, so typing `/` elsewhere will not find it. The global copy
@@ -42,6 +44,8 @@ and restart Kiro.
 | `.kiro/steering/medpaper-pipeline.md` | Steering with `inclusion: always` - present in every session |
 | `.kiro/skills/medpaper-pipeline/SKILL.md` | Skill, activated on demand when the task matches |
 | `.kiro/hooks/medpaper-status.json` | `SessionStart` hook running `wf status --brief`, so a new session opens already knowing the stage |
+| `.kiro/hooks/medpaper-skill-guard.json` | `PreToolUse` hook refusing skills that would replace a stage |
+| paper `.kiro/` (written by `wf init`) | the paper's own steering, status/skill hooks and one guard for writes and folder searches |
 
 The steering file also pulls in reference material with `#[[file:...]]` links, so the figure
 and table standards load when they become relevant instead of sitting in context all session.
@@ -96,8 +100,9 @@ S10 tables, S11 figures, S13 reference library. The gates are the safety net.
 **Supervised** suits the stages where judgement matters and you will want to intervene per
 hunk: S06 go/no-go, S08 Methods, S09 Results, S14 Introduction, S16 Discussion, S19 polish.
 
-Four stages need your input and will stop to ask regardless: S01 intake, S17 front matter
-(authors, affiliations, ethics), S18 journal choice, and both go/no-go decisions.
+Stages that need your input stop to ask regardless: S01 intake, the go/no-go decisions
+(S02, S06), S19 scientific review, S20 journal choice, S21 author and administrative facts
+and S24 package confirmation (approval is the exact sentence '我确认这一版').
 
 ## Commands
 
@@ -111,7 +116,11 @@ Four stages need your input and will stop to ask regardless: S01 intake, S17 fro
 | `wf loop --to S05_analysis --why "..."` | Reopen an earlier stage |
 | `wf clean [--apply]` | Report scratch and undeclared files |
 | `wf config set intro_words_max 600` | Override a target for this paper |
-| `wf doctor` | Environment and wiring check |
+| `wf rebuild --wait` | Rebuild the affected submission files and re-measure in one command |
+| `wf migrate [--yes]` | Show / adopt the gates of a newer engine for this paper |
+| `wf config --user report_dirs add <dir>` | Declare a folder for your own .md/.txt reports |
+| `tools/review_round.py start / close / decide` | Review rounds; the reviewer writes `.wf/review_bundle/<round>/report.md` |
+| `wf doctor` | Environment and wiring check (engine matches its release tag) |
 
 Prefix each with `python tools/wf.py`.
 
@@ -151,7 +160,10 @@ acts on the wrong paper, that header tells you why in one line.
 ## Verify the install
 
 ```powershell
-python tools/wf.py doctor                        # expect: 20/20 stage cards, 36/36 gate checks
-.venv\Scripts\python.exe tools\selftest.py       # expect: 78/78
-.venv\Scripts\python.exe tools\selftest.py --online   # 81/81, exercises the live APIs
+python tools/wf.py doctor                        # expect: OK, 25 stage cards, every gate check known
+.venv\Scripts\python.exe tools\selftest.py       # expect: all checks passed (1.16.0: 1089)
+.venv\Scripts\python.exe tools\selftest.py --online   # also exercises the live APIs
 ```
+
+Releases are tagged (`v1.16.0`) and gated by this full local self test plus the integrity
+guard in `wf doctor`; there is no PR CI (private repository; R and Word run locally).

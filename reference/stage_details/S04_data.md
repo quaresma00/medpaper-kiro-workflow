@@ -109,6 +109,13 @@ write_results("dataset_summary", {
    later appears in the manuscript must exist in a results JSON, dates included.
    Reconcile its `n_rows` against records received and explicit post-acquisition exclusions
    in `acquisition_manifest.json`. Complex joins require a substantive reconciliation note.
+   1.16.0: a join declared `complex_join` (repeated visits, many-to-many, aggregation) also
+   writes `02_data/join_log.json` with `analysis.joinlog.JoinLog` (Python) or
+   `join_log_step()`/`write_join_log()` from `tools/R/medjoin.R`: per step the rows and unique
+   analysis units before/after, the key, the aggregation rule, unmatched and excluded units.
+   The verifier checks the counts add up (no units created, units lost = unmatched + excluded,
+   a many-to-one lookup does not multiply rows, one row per unit after an aggregation, the
+   last step ends at `n_rows`). `one_record_per_analysis_row` needs none of this.
 7. Run the standalone verifier, then delete scratch files from `project/temp/`:
 ```powershell
 .\.venv\Scripts\python.exe tools\data_manifest.py verify

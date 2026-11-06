@@ -52,7 +52,9 @@ Write the Results from the final tables and figures (1.10.0: S09 runs after S10/
 - Effects as the protocol's Statistical reporting plan says (estimate + interval, then P); `effects_with_intervals` warns on P-value-only sentences.
 - Body text is continuous paragraphs (1.9.0). Lists only where a sentence truly cannot carry the content (rarely more than one short list per section); every result, count, criterion, covariate and sensitivity finding is written as a sentence. `prose_not_lists` fails above `body_list_items_max` items or `body_list_share_max` of the blocks.
 - ONE section file this stage.
-- Every number traceable to results JSON.
+- Every number traceable to results JSON, told in its own context (1.16.0): the measure, time
+  window and dictionary labels of the result it comes from; a small integer next to n=, %, a CI
+  or an effect measure is a finding. Sentences combining results go to the reviewer list.
 - Every figure/table citation matches `artifact_plan.json` exactly, including
   supplementary numbering.
 - No claim about a result you did not compute. If a reviewer would ask "where is the

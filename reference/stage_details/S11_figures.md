@@ -92,8 +92,19 @@ fig, panels = figure(width="double", height_mm=90, panels=(1, 2))   # SubFigure 
 save(fig, PROJECT / "05_figures/out/Figure1", width="double", archetype="box_jitter")
 ```
    One SubFigure is one logical panel; never place panels with `add_axes`/`subplots_adjust`.
+   1.16.0: Python figures carry the same render receipt as R ones (script, `source_results`
+   hashes, output hashes); render them with `wf run-script 05_figures/code/<script>.py` so
+   the script is identified. `recipes.km_survival` draws the curve table the analysis
+   exported (`curve=`, same layout as R `curve_table_km()`); refitting needs `refit=True` and
+   `analysis_n`; `logrank_p` comes from the results JSON (never computed in the figure);
+   censoring marks only where censoring occurred; `min_at_risk` truncation is optional (off).
 3. Both renderers write PNG (preview) + LZW TIFF (print master) at the exact column width from
    the paper's targets, and the artist sidecar `05_figures/qc/<stem>.artist.json`.
+   1.16.0 (`figure_statistics_bound`): statistics printed as text in a figure (effect
+   estimates with CI, AUC, P, n, percentages; not tick labels, panel letters, years or legend
+   keys) must match a value in that figure's own `source_results`, and the receipt must be
+   fresh: a changed script or result means re-render. Pass the values from the JSON into the
+   plotting script; never type them.
 4. **Deterministic QC first.** Fix everything code can detect before spending a look:
 ```
 .\.venv\Scripts\python.exe tools/figures/qc.py --all

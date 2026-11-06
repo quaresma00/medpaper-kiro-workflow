@@ -102,6 +102,13 @@ write_table(
   footnote as whole sentences, never split one sentence over rows.
 - Every numeric cell must trace to `03_analysis/results/*.json` (gate:
   `numbers_have_provenance source=tables`). Do not retype from the Results prose.
+- 1.16.0 (`table_percent_denominators`): a plain unweighted `n (x%)` or `n/N (x%)` cell must be
+  n / its column denominator within the displayed rounding. Give the denominator in the column
+  header (`Group A (N = 123)` or `(n = 123)`), or record the proportion with
+  `analysis.results.proportion(numerator, denominator, population)`; when records exist, the
+  column's population (header label, or the records with that N) must be the record's. No
+  denominator source: warning here, failure at S12. CI cells, weighted rates and columns or
+  titles marked "weighted" are not judged by this rule.
 - Titles are self-contained and short. Footnotes carry abbreviations, units and the
   estimation method in one sentence; longer method explanations go to Methods.
 - 1.11.0 presentation standard at build: row/column labels from the display dictionary

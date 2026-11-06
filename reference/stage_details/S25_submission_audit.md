@@ -137,3 +137,7 @@ the chosen journal's current official instructions.
 .\.venv\Scripts\python.exe tools/wf.py check
 .\.venv\Scripts\python.exe tools/wf.py advance --note "independent final submission audit=PASS; frozen package unchanged; remaining portal-only user tasks=<none or list>"
 ```
+
+## 1.16.0: final boundaries cannot be forced
+
+From engine 1.16.0 (`wf migrate --yes` for older pins) `wf advance --force` cannot pass S24/S25 when the package freeze or package content does not match, the audit is bound to another freeze, the audit decision is not PASS or PASS_AUTHOR_FINAL_COPY, the author final copy is not verified, or the user's package confirmation ('我确认这一版', S24 review round) is missing (1.16.0 (N9), `cli.FINAL_BOUNDARY_GATES`). After REVISE the only author route is the existing author final-copy channel; otherwise fix, re-freeze at S24 and re-audit. Items the deterministic checks could not decide (for example a Results sentence combining several results) arrive in the bundle as `reviewer_items.md`; judge each one in the report.
