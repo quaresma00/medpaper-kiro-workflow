@@ -14,7 +14,7 @@
 
 [meta]
 name = "medpaper"
-version = "1.15.0"
+version = "1.16.0"
 schema = 1
 description = "Medical/clinical research pipeline: idea -> feasibility -> data -> analysis -> artifacts -> manuscript -> submission package."
 
@@ -461,6 +461,11 @@ check = "tables_threeline"
 [[stage.gate]]
 check = "numbers_have_provenance"
 source = "tables"
+# 1.16.0 (N3): plain n (%) cells agree with their column denominator and population.
+[[stage.gate]]
+check = "table_percent_denominators"
+missing = "warn"
+since = "1.16.0"
 # 1.11.0: clinical labels, no engineering language, presentation standard, concise footnotes.
 [[stage.gate]]
 check = "clinical_labels_used"
@@ -504,6 +509,10 @@ check = "outputs_exist"
 check = "figures_match_plan"
 [[stage.gate]]
 check = "figures_qc_pass"
+# 1.16.0 (N5): statistics printed in a figure come from its own source_results; fresh receipt.
+[[stage.gate]]
+check = "figure_statistics_bound"
+since = "1.16.0"
 [[stage.gate]]
 check = "legend_no_results_restatement"
 # 1.11.0: in-figure text (render sidecar) and legends read clinically; flow-diagram units;
@@ -562,6 +571,10 @@ check = "decision_recorded"
 name = "displays_seen_before_results"
 allowed = ["YES"]
 since = "1.14.0"
+# 1.16.0 (N10b): that look is bound to the display hashes it saw.
+[[stage.gate]]
+check = "displays_seen_current"
+since = "1.16.0"
 # 1.14.0 (B): the writer gets every result - clinical label, comparison, measure, CI level.
 [[stage.gate]]
 check = "writer_results_mapped"
@@ -620,6 +633,15 @@ check = "numbers_have_provenance"
 path = "07_manuscript/results.md"
 [[stage.gate]]
 check = "numbers_cross_match"
+# 1.16.0: table n (%) denominators blocking here (a missing source too); the look before
+# Results still covers the current displays.
+[[stage.gate]]
+check = "table_percent_denominators"
+missing = "fail"
+since = "1.16.0"
+[[stage.gate]]
+check = "displays_seen_current"
+since = "1.16.0"
 
 # 1.12.0 (F1): blocking here - every display reads on its own before the prose builds on it.
 [[stage.gate]]
@@ -1247,6 +1269,8 @@ globs = [
   # 1.10.0: variable crosswalk, raw spot check (+ its script), reference coverage and
   # uncited reasons, display reallocation, declarations assessment.
   "02_data/variable_crosswalk.json",
+  # 1.16.0 (N7): per-step counts of a join declared complex (analysis.joinlog.JoinLog / tools/R/medjoin.R).
+  "02_data/join_log.json",
   "03_analysis/spot_check.json",
   "03_analysis/spot_check/*",
   "06_refs/coverage.json",

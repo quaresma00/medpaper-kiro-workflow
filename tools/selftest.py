@@ -125,8 +125,6 @@ def build_fixture(proj: Path) -> None:
     axB.set_ylabel("Grip strength (kg)")
     significance(axB, 1, 2, max(v.max() for v in vals) + 0.3, "***")
     sfB.suptitle("Grip strength by group")
-    save(fig, proj / "05_figures/out/Figure1", width="double")
-
     plan = {
         "main_figures": [{"id": "Figure 1", "slug": "primary",
                           "title": "Discrimination and grip strength",
@@ -161,6 +159,13 @@ def build_fixture(proj: Path) -> None:
         json.dumps(plan, indent=2), encoding="utf-8")
     (proj / "05_figures/code").mkdir(parents=True, exist_ok=True)
     (proj / "05_figures/code/fig1_primary.py").write_text("# fixture\n", encoding="utf-8")
+    # 1.16.0 (N5): the Python render receipt names the plotting script and binds the
+    # source_results the plan declares, so the figure is saved after both exist.
+    os.environ["MEDPAPER_SCRIPT"] = "05_figures/code/fig1_primary.py"
+    try:
+        save(fig, proj / "05_figures/out/Figure1", width="double")
+    finally:
+        os.environ.pop("MEDPAPER_SCRIPT", None)
 
     (proj / "05_figures/legends.md").write_text(
         "# Figure legends\n\n## Figure 1.\nDiscrimination and grip strength. (A) Receiver "
@@ -2149,7 +2154,7 @@ def run_codex_integration() -> None:
                f"card must name `{agent}` so the work is not done in the main context")
 
     record("pipeline and skill versions agree",
-           pipe["meta"]["version"] == "1.15.0" and 'version: "2.6.1"' in skill,
+           pipe["meta"]["version"] == "1.16.0" and 'version: "2.6.1"' in skill,
            f'pipeline={pipe["meta"]["version"]}, skill=2.6.1 (Kiro adapter revision)')
     record("all 25 stage cards exist",
            len(pipe["stage"]) == 25 and
@@ -5184,7 +5189,7 @@ def run_v160(tmp: Path) -> None:
            any(g["check"] == "reader_review_coverage" for g in s18["gate"])
            and "review_round.py start --scope manuscript" in (ROOT / "pipeline/stages/S18_independent_review.md")
            .read_text(encoding="utf-8"))
-    record("pipeline version is 1.15.0", pipe.meta.get("version") == "1.15.0")
+    record("pipeline version is 1.16.0", pipe.meta.get("version") == "1.16.0")
 
 
 def run_v170(tmp: Path) -> None:
@@ -5706,7 +5711,7 @@ def run_reporting_checklist(tmp: Path) -> None:
                        if re.search(r"\bOSF\b|osf\.io|pre-?regist|trial registration|ClinicalTrials|ChiCTR", t, re.I))
     s03 = cards["S03_protocol"]
     record("non-meta studies carry no registration requirement; meta-analysis prompts PROSPERO",
-           not reg_words and "need no registration" in s03 and "PROSPERO before screening" in s03,
+           not reg_words and "need no registration" in s03 and "PROSPERO" in s03 and "before data extraction" in s03,
            str(reg_words))
     pdoc = tomllib.loads((ROOT / "pipeline/pipeline.toml").read_text(encoding="utf-8"))
     heads = [g.get("headings", []) for s in pdoc["stage"] for g in s.get("gate", [])
@@ -5873,6 +5878,8 @@ def main() -> int:
         selftest_v1141.run(tmp / "v1141_root", record, section)
         import selftest_v1150
         selftest_v1150.run(tmp / "v1150_root", record, section)
+        import selftest_v1160
+        selftest_v1160.run(tmp / "v1160_root", record, section)
         run_new_wiring()
         section("isolation")
         record("selftest did not touch the real papers root or user home",

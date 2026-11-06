@@ -256,8 +256,61 @@ def _verified_keys(ctx: Ctx) -> set[str]:
     return {k for k in bib_keys(ctx.read(BIB)) if (ver.get(k, {}) or {}).get("verified") is True}
 
 
+# 1.16.0 (N2): a small integer (0-10) is a convention only outside a result context. Attached to
+# n/N=, %, an effect measure, a CI or interval endpoint, a mean/median/IQR, a count of
+# patients/reports/cases/events, or a fraction, it is a finding and needs provenance.
+SMALL_INTS = frozenset(str(i) for i in range(11))
+_RC_BEFORE_CS = re.compile(r"(?:(?<![\w-])(?:a?HRs?|a?ORs?|a?RRs?|IRRs?|RORs?|PRRs?|AUCs?|CIs?|"
+                           r"CrI|IQR|SD|SE)(?![\w-])[^.;\n]{0,12}|\b[nN]\s*[=:]\s*|\d\s*/\s*)$")
+_RC_BEFORE_CI = re.compile(r"\b(?:hazard|odds|risk|rate)\s+ratios?\b[^.;\n]{0,12}$|"
+                           r"\b(?:mean|median|interquartile\s+range|range|interval|difference|"
+                           r"coefficient|estimate)s?\b[^.;\n]{0,12}$", re.I)
+_RC_AFTER = re.compile(r"^(?:\s?%(?!\s*(?:significance|level|alpha))|\s*/\s*\d|\s+of\s+\d|"
+                       r"\s+(?:patients?|reports?|cases?|events?|participants?|subjects?|deaths?|"
+                       r"individuals?|persons?|people|women|men|children|adults|infants|"
+                       r"admissions?|hospitali[sz]ations?|visits?|procedures?|deliveries)\b)",
+                       re.I)
+
+
+def result_context(line: str, start: int, end: int) -> bool:
+    before, after = line[max(0, start - 40):start], line[end:end + 30]
+    return bool(_RC_BEFORE_CS.search(before) or _RC_BEFORE_CI.search(before)
+                or _RC_AFTER.match(after))
+
+
+def _since_1160(ctx: Ctx) -> bool:
+    """Stricter 1.16.0 checks reach a paper pinned earlier only after `wf migrate --yes`."""
+    from ..state import version_tuple
+    try:
+        return version_tuple(ctx.state.engine_pin) >= (1, 16, 0)
+    except Exception:  # noqa: BLE001
+        return True
+
+
+def result_lines(text: str, rel: str) -> set[int]:
+    """1-based lines of Results/Abstract prose: the whole of results.md / abstract.md, the
+    Results and Abstract sections of a full manuscript; nothing in any other file."""
+    name = rel.replace("\\", "/").rsplit("/", 1)[-1]
+    lines = text.splitlines()
+    if name in ("results.md", "abstract.md"):
+        return set(range(1, len(lines) + 1))
+    if name != "full_manuscript.md":
+        return set()
+    from .. import clinical
+    out, inside = set(), False
+    for i, line in enumerate(lines, start=1):
+        m = re.match(r"^#{1,2}\s+(.+?)\s*$", line)
+        if m:
+            inside = clinical.role_of(m.group(1).strip().casefold()) in ("results", "abstract")
+            continue
+        if inside:
+            out.add(i)
+    return out
+
+
 def _offenders(text: str, floats, strings, allowed, stated=frozenset(),
-               explicit=frozenset(), strict_lines=frozenset()) -> list[tuple[int, str]]:
+               explicit=frozenset(), strict_lines=frozenset(),
+               result_ctx_lines=frozenset()) -> list[tuple[int, str]]:
     bad: list[tuple[int, str]] = []
     base_allowed, base_explicit = allowed, explicit
     for lineno, raw in enumerate(_scrub(text).splitlines(), start=1):
@@ -279,7 +332,11 @@ def _offenders(text: str, floats, strings, allowed, stated=frozenset(),
         for m in NUM_RE.finditer(raw):
             tok = m.group(1)
             if tok in allowed or _plain(tok) in allowed:
-                continue
+                strict_small = (lineno in result_ctx_lines and _plain(tok) in SMALL_INTS
+                                and tok not in explicit and _plain(tok) not in explicit
+                                and result_context(raw, m.start(1), m.end(1)))
+                if not strict_small:
+                    continue
             if _matches(tok, floats, strings):
                 continue
             bad.append((lineno, tok))
@@ -383,7 +440,9 @@ def numbers_have_provenance(ctx: Ctx) -> Result:
         locator = Locator(ctx.project)
         text = cite_external_numbers(text, disc, _verified_keys(ctx), locator, rel)
         locator.save(rel)
-    bad = _offenders(text, floats, strings, allowed, stated, explicit, disc)
+    strict = _since_1160(ctx)
+    rlines = result_lines(text, rel) if strict else set()
+    bad = _offenders(text, floats, strings, allowed, stated, explicit, disc, rlines)
     if bad:
         shown = "; ".join(f"line {ln}: {tok}" for ln, tok in bad[:10])
         return Result(
@@ -396,8 +455,30 @@ def numbers_have_provenance(ctx: Ctx) -> Result:
                 "Discussion: a prior study's number must sit in the same sentence as [@key] of that study (verified library) AND appear in that study's verified text (library abstract, 06_refs/deepread/<key>.md, or the identity-verified full text): quote the passage in the deep-read notes or remove the number.",
                 "A 'P<0.001' needs a reported P value below 0.001; a sign must match the result's sign.",
                 "Do not fix this by rounding differently. Re-run the analysis and dump the value.",
+                "1.16.0: in Results/Abstract a small integer next to n=, %, an effect measure, a "
+                "CI, a mean/median or a count of patients/events is a finding, not a convention.",
             ],
         )
+    if rlines:
+        # 1.16.0 (N1): the number is in the JSON - is it told in the context it was computed in?
+        from .. import resultcontext, reviewitems
+        fails, review = resultcontext.check_text(ctx.project, text, rlines)
+        reviewitems.note(ctx.project, f"result context: {rel}", review)
+        if fails:
+            return Result(
+                False, "numbers_have_provenance",
+                f"{rel}: {len(fails)} sentence(s) put a result into another context -> "
+                + " | ".join(fails[:4]),
+                ["The numbers exist in results JSON, but the sentence names a different "
+                 "measure (HR/OR/...), time window or display-dictionary label (population, "
+                 "exposure, comparator, outcome) than every result carrying those numbers.",
+                 "Write the sentence from the writer bundle line of that result (results_in_"
+                 "words.md); a sentence without context words is never failed.",
+                 "Sentences combining several results are listed for the reviewer "
+                 "(.wf/reviewer_items.json -> next review bundle), not failed."])
+        tail = f"; {len(review)} sentence(s) listed for the reviewer" if review else ""
+        return Result(True, "numbers_have_provenance",
+                      f"{rel}: every number traces to results JSON in its own context{tail}")
     return Result(True, "numbers_have_provenance", f"{rel}: every number traces to results JSON")
 
 

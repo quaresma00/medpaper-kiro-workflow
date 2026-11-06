@@ -120,6 +120,7 @@ if (!exists("save_medpaper", mode = "function")) source(file.path(dirname(.rc_se
   list(curve = pl, risk = .rc_risk_leaf(rt, times, lv, palette), levels = lv,
        pop = list(mode = "results", n_used = as.numeric(curve$n), analysis_n = as.numeric(curve$n),
                   n_dropped_na = curve$n_dropped_na %||% NULL,
+                  censored = if (length(cens) == nrow(df)) sum(cens, na.rm = TRUE) else NULL,
                   na_rule = curve$na_rule %||% "as exported by the analysis script"))
 }
 
@@ -143,7 +144,12 @@ recipe_km <- function(data = NULL, time = NULL, status = NULL, group = NULL, tim
   fml <- stats::as.formula(sprintf("survival::Surv(%s, %s) ~ %s", time, status, group))
   fit <- ggsurvfit::survfit2(fml, data = data)
   pal <- medpaper_palette(palette, length(lv))
-  curve <- ggsurvfit::ggsurvfit(fit) + ggsurvfit::add_censor_mark(size = 1.2) +
+  # 1.16.0 (N8): censoring marks only where censoring occurred.
+  n_cens <- sum(as.numeric(data[[status]]) == 0, na.rm = TRUE)
+  rf$pop$censored <- n_cens
+  curve <- ggsurvfit::ggsurvfit(fit)
+  if (n_cens > 0) curve <- curve + ggsurvfit::add_censor_mark(size = 1.2)
+  curve <- curve +
     scale_colour_manual(values = pal) +
     scale_x_continuous(breaks = times) + coord_cartesian(xlim = range(times), ylim = c(0, 1)) +
     labs(x = xlab, y = ylab, colour = NULL) + theme_medpaper() +
@@ -182,7 +188,10 @@ recipe_cif <- function(data = NULL, time = NULL, status = NULL, group = NULL, ti
   # which save_medpaper treats as an error (warn = 2). Dropping them here draws the same curve.
   if ("estimate" %in% names(curve$data))
     curve$data <- curve$data[!is.na(curve$data$estimate), , drop = FALSE]
-  curve <- curve + ggsurvfit::add_censor_mark(size = 1.2) +
+  n_cens <- sum(as.integer(data[[status]]) == 1L, na.rm = TRUE)  # first level = censoring
+  rf$pop$censored <- n_cens
+  if (n_cens > 0) curve <- curve + ggsurvfit::add_censor_mark(size = 1.2)
+  curve <- curve +
     scale_colour_manual(values = pal) +
     scale_x_continuous(breaks = times) + coord_cartesian(xlim = range(times)) +
     labs(x = xlab, y = ylab, colour = NULL) + theme_medpaper() +

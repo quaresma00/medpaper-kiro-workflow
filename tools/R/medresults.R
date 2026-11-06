@@ -117,6 +117,10 @@ baseline_counts <- function(data, vars, group = NULL) {
     x <- data[[v]]
     lv <- if (is.factor(x)) levels(x) else if (is.logical(x)) c("FALSE", "TRUE") else sort(unique(as.character(stats::na.omit(x))))
     xs <- as.character(x)
+    miss <- is.na(x) | is.na(xs)  # medpaper-compat 1.16.0 (N4): NA of Date/POSIXct/factor/NaN is missing
+    lv <- lv[!is.na(lv)]  # medpaper-compat 1.16.0 (N4)
+    if (all(miss)) lv <- character(0)  # medpaper-compat 1.16.0 (N4): an all-missing column has no levels
+    xs[miss] <- NA_character_  # medpaper-compat 1.16.0 (N4)
     out[[v]] <- lapply(groups, function(idx) {
       n <- sum(idx)
       cnt <- stats::setNames(lapply(lv, function(l) {

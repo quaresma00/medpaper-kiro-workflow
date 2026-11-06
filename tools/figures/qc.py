@@ -330,6 +330,14 @@ def qc_figure(entry: dict, tgt: dict, arch_reg: dict | None = None) -> dict:
                 add("r_render_provenance", False,
                     "legacy R sidecar has no provenance receipt; re-render with save_medpaper() "
                     "to bind the figure to its script and results", severity="warn")
+        elif any(k in art for k in PROVENANCE_KEYS):
+            # 1.16.0 (N5): figures.style.save() writes the same receipt for Python figures;
+            # blocking for papers pinned from 1.16.0 (advisory for older pins until migrate).
+            problems = _r_provenance_problems(art, entry, png_rel)
+            add("render_provenance", not problems,
+                "; ".join(problems[:6]) if problems
+                else "Python script, result inputs and rendered outputs match the render receipt",
+                severity="fail" if _pinned_from_1160() else "warn")
         policy = str(tgt.get("figure_engine", "R")).strip()
         if policy.casefold() not in ("r", "python"):
             add("figure_engine_valid", False,
@@ -374,6 +382,13 @@ def qc_figure(entry: dict, tgt: dict, arch_reg: dict | None = None) -> dict:
             else "no wasted space between panels")
 
         elements_found = art.get("elements", {})
+        pop = art.get("population") if isinstance(art.get("population"), dict) else {}
+        cm = elements_found.get("censoring_marks") if isinstance(elements_found, dict) else None
+        if pop.get("censored") == 0 and isinstance(cm, dict) and not cm.get("found"):
+            # 1.16.0 (N8): no censored observation -> no censoring marks to draw.
+            elements_found = {**elements_found, "censoring_marks": {
+                "found": True, "evidence": "no censored observations (recipe population "
+                                          "censored = 0): no marks drawn"}}
         base = elements_found.get("baseline_zero", {})
         if base:
             add("bar_baseline_zero", bool(base.get("found")), base.get("evidence", ""))
@@ -401,6 +416,16 @@ def qc_figure(entry: dict, tgt: dict, arch_reg: dict | None = None) -> dict:
         "ok": not blocking,
         "visual_reviewed": False,
     }
+
+
+def _pinned_from_1160() -> bool:
+    """Is the paper pinned to engine 1.16.0 or later (stricter figure checks apply)?"""
+    try:
+        st = json.loads((project_root() / ".wf/state.json").read_text(encoding="utf-8"))
+        pin = str(st.get("engine_pin") or st.get("pipeline_version") or "0")
+        return tuple(int(x) for x in pin.split(".")[:3]) >= (1, 16, 0)
+    except (OSError, ValueError):
+        return True
 
 
 def _r_provenance_problems(art: dict, entry: dict, png_rel: str) -> list[str]:
@@ -672,16 +697,34 @@ def contact_sheet(max_px: int = 1400, with_tables: bool = False) -> int:
 
     out = project_root() / (DISPLAYS_SHEET if with_tables else "05_figures/qc/contact_sheet.png")
     out.parent.mkdir(parents=True, exist_ok=True)
+    changed: set[str] = set()
+    if with_tables:
+        # 1.16.0 (N10b): the look is bound to the hashes of the displays on this sheet; displays
+        # that changed since the previous sheet are marked CHANGED.
+        from wfcore.checks.v1160 import display_hashes
+        manifest = project_root() / "05_figures/qc/displays_sheet.json"
+        try:
+            before = json.loads(manifest.read_text(encoding="utf-8")).get("displays") or {}
+        except (OSError, ValueError, AttributeError):
+            before = {}
+        now = display_hashes(project_root())
+        changed = {k for k in now if before and before.get(k) != now[k]}
+        manifest.write_text(json.dumps({"displays": now, "changed": sorted(changed),
+                                        "at": _now()}, indent=2) + "\n", encoding="utf-8")
     # Draw the id labels with matplotlib so the sheet is self-describing without a font blit.
     import matplotlib.pyplot as plt
     dpi = 100
     fig = plt.figure(figsize=(sheet.shape[1] / dpi, sheet.shape[0] / dpi), dpi=dpi)
     ax = fig.add_axes([0, 0, 1, 1]); ax.imshow(sheet); ax.axis("off")
     for fid, r, c in placed:
+        mark = fid in changed
         ax.text(pad + c * (cw + pad), pad + r * (ch + label_h + pad) + label_h - 10,
-                fid, fontsize=13, fontweight="bold", color="#000000", va="bottom")
+                fid + ("  CHANGED" if mark else ""), fontsize=13, fontweight="bold",
+                color="#C00000" if mark else "#000000", va="bottom")
     fig.savefig(str(out), dpi=dpi, facecolor="white")
     plt.close(fig)
+    if changed:
+        print(f"  CHANGED since the previous look: {', '.join(sorted(changed))}")
 
     rel = out.relative_to(project_root()).as_posix()
     _say(f"contact sheet: {len(tiles)} display item(s) in a {rows}x{cols} grid -> project/{rel}")

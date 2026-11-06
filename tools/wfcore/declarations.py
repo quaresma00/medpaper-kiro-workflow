@@ -201,6 +201,10 @@ def assess(idea: dict) -> dict:
                         "author on reasonable request with institutional approval.")
     if src.get("redistributable") == "unknown" or src.get("third_party") == "unknown":
         ask("redistribution", f"May the {name} data be shared by the authors (yes/no)?")
+    reg = registration(idea)
+    if reg.get("eligible"):
+        ask("prospero_registration", "PROSPERO registration ID (CRD42...), or 'not registered: "
+            "<reason>' (the author's fact; never an invented or back-dated ID)?")
     seen, unique = set(), []
     for q in questions:
         if q["id"] not in seen:
@@ -211,7 +215,47 @@ def assess(idea: dict) -> dict:
             "consent": {"conclusion": " ".join(dict.fromkeys(consent)) or "Not determinable.",
                         "basis": basis},
             "data_availability": {"text": availability, "basis": basis},
+            "registration": reg,
             "questions": unique}
+
+
+# 1.16.0 (N6): PROSPERO registers systematic reviews with a health-related outcome; it does not
+# accept scoping reviews, evidence/gap maps, guideline appraisals and similar, nor a review whose
+# data extraction has started (CRD guidance since October 2019).
+INELIGIBLE_REVIEWS = {
+    "scoping_review": "scoping reviews",
+    "evidence_map": "evidence maps",
+    "gap_map": "evidence and gap maps",
+    "guideline_appraisal": "appraisals of clinical guidelines",
+    "literature_review": "literature reviews without systematic methods",
+    "mapping_review": "mapping reviews",
+}
+PROSPERO_ID_RE = r"^CRD42\d{6,}$"
+
+
+def registration(idea: dict) -> dict:
+    """What the protocol and Methods say about registration, from the study basis."""
+    design = idea.get("study_design")
+    if design not in ("meta_analysis", "systematic_review"):
+        return {"applies": False, "eligible": False,
+                "conclusion": "No study registration is required for this design; none is "
+                              "written unless the journal requires one."}
+    rtype = str(idea.get("review_type") or "systematic_review").strip().casefold()
+    what = INELIGIBLE_REVIEWS.get(rtype)
+    if what is None and idea.get("health_outcome") is False:
+        what = "reviews without a health-related outcome"
+    if what:
+        return {"applies": True, "eligible": False, "review_type": rtype,
+                "conclusion": f"PROSPERO does not accept {what}: give no PROSPERO ID (never an "
+                              "invented or back-dated one) and record the reason in Methods.",
+                "statement": f"The review protocol was not registered in PROSPERO, which does "
+                             f"not accept {what}."}
+    return {"applies": True, "eligible": True, "review_type": rtype,
+            "conclusion": "Eligible for PROSPERO: register as early as possible and before data "
+                          "extraction starts (PROSPERO no longer accepts a review once extraction "
+                          "has begun). Record the CRD42 ID in the protocol (Ethics) and Methods, "
+                          "or state in Methods that the review was not registered and why. Never "
+                          "an invented or back-dated ID."}
 
 
 def idea_sha256(project: Path) -> str:
@@ -250,6 +294,13 @@ def answer(project: Path, qid: str, value: str) -> dict:
         raise ValueError(f"no open question {qid!r}; the workflow did not ask it")
     if len(value.strip()) < 2:
         raise ValueError("record the author's answer")
+    if qid == "prospero_registration":
+        import re
+        v = value.strip()
+        if not (re.match(PROSPERO_ID_RE, v) or (re.match(r"(?i)^(?:not registered|未注册)", v)
+                                                and len(v) >= 20)):
+            raise ValueError("answer with the PROSPERO ID as registered (CRD42 followed by its "
+                             "digits) or 'not registered: <reason>'")
     data.setdefault("answers", {})[qid] = {"value": value.strip(), "at": _now()}
     (Path(project) / REL).write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n",
                                      encoding="utf-8")

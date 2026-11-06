@@ -21,6 +21,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 VENV = ROOT / ".venv"
+# requirements.txt pins NumPy 2.5.2 and SciPy 1.18.1, both Requires-Python >= 3.12.
+SCIENCE_PYTHON = (3, 12)
 
 
 def venv_python() -> Path:
@@ -46,6 +48,13 @@ def create_venv(uv: str | None) -> bool:
         return True
     if uv:
         return run([uv, "venv", "--python", "3.13", str(VENV)], "create Python 3.13 environment")
+    if sys.version_info < SCIENCE_PYTHON:
+        # 1.16.0 (N10a): the pinned NumPy 2.5 / SciPy 1.18 declare Requires-Python >= 3.12; a
+        # 3.11 venv would fail halfway through the install.
+        print(f"\n!! the pinned science packages (NumPy, SciPy) need Python 3.12+; this "
+              f"interpreter is {sys.version.split()[0]}. Install uv (it fetches Python 3.13) or "
+              "run bootstrap.py with Python 3.12 or newer.")
+        return False
     return run([sys.executable, "-m", "venv", str(VENV)], "create virtual environment")
 
 
@@ -70,6 +79,9 @@ def main() -> int:
     if sys.version_info < (3, 11):
         print(f"Python 3.11+ required (tomllib); found {sys.version.split()[0]}")
         return 1
+    if args.skip_venv and sys.version_info < SCIENCE_PYTHON:
+        print(f"!! --skip-venv with Python {sys.version.split()[0]}: the workflow driver runs, but "
+              "the pinned NumPy/SciPy need Python 3.12+ (figures, tables, analysis).")
 
     uv = shutil.which("uv")
     print("=" * 72)

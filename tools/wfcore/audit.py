@@ -159,6 +159,10 @@ def start(project: Path, files: list[str]) -> tuple[Path, str]:
                 f"- {x}" for x in items) + "\n", encoding="utf-8")
         lines.append(f"- {out / 'previous_findings.md'} (check each: RESOLVED or OPEN)")
     lines += [f"- {project / rel}" for rel in files if (project / rel).is_file()]
+    from .reviewitems import write as _write_items  # 1.16.0: cases a gate could not decide
+    listed = _write_items(project, out)
+    if listed:
+        lines.append(f"- {listed} (cases the deterministic checks could not decide)")
     (out / "MANIFEST.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     reviewguard.take(project, aid)
     return out, mode

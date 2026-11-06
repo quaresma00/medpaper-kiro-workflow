@@ -296,6 +296,9 @@ def run_b(tmp: Path, record, section) -> None:
     # justification, one contact-sheet look before Results); the merged duplicates stay merged.
     new_1140 = sum(1 for v in names.values() for c in v if c in {
         "writer_results_mapped", "additional_analyses_justified", "displays_contact_sheet_seen"})
+    # 1.16.0 adds five gate lines for new checks (N3 twice, N5, N10b twice).
+    new_1140 += sum(1 for v in names.values() for c in v if c in {
+        "table_percent_denominators", "figure_statistics_bound", "displays_seen_current"})
     record("B4 duplicate gate lines merged (confirmation inside review_round_approved; SI clean "
            "inside docx_bundle_ready; limits/reference count as checklist rows); fewer gate "
            f"entries than 1.11.0 (287 -> {total - new_1140} + {new_1140} new in 1.14.0)",

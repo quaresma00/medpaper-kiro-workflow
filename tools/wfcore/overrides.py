@@ -81,6 +81,8 @@ PROTECTED_CHECKS = frozenset({
     "results_have_environment",
     "analysis_reproduces",
     "reporting_checklist_complete",
+    # 1.16.0 (N9): the verified author final copy is a final-package boundary.
+    "final_copy_verified",
 })
 
 # Skipping any of these is refused: they are where a human or an independent reader looks.

@@ -33,42 +33,158 @@ def _fmt_ci(est, lo, hi, dp=2) -> str:
     return f"{est:.{dp}f} ({lo:.{dp}f}\u2013{hi:.{dp}f})"
 
 
+def _paper_pin_before_1160() -> bool:
+    """True when the paper this figure belongs to is pinned to an engine before 1.16.0."""
+    import json
+    import os
+    from pathlib import Path
+    raw = os.environ.get("MEDPAPER_PROJECT")
+    if not raw:
+        return False
+    try:
+        st = json.loads((Path(raw) / ".wf/state.json").read_text(encoding="utf-8"))
+        pin = str(st.get("engine_pin") or st.get("pipeline_version") or "0")
+        return tuple(int(x) for x in pin.split(".")[:3] if x.isdigit()) < (1, 16, 0)
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def _curve_series(curve: dict) -> tuple[list[dict], int]:
+    """Series of an exported curve table (R curve_table_km() layout, or the same keys written
+    from Python): time, estimate, lower, upper, strata, censor, risk{time, strata, n_risk}, n."""
+    need = ("time", "estimate", "strata", "n", "risk")
+    if not isinstance(curve, dict) or any(k not in curve for k in need):
+        raise ValueError("km_survival: curve must carry time, estimate, strata, n and risk as "
+                         "exported by the analysis (curve_table_km in tools/R/medresults.R)")
+    t = np.asarray(curve["time"], float)
+    est = np.asarray(curve["estimate"], float)
+    st = [str(s) for s in curve["strata"]]
+    lo = curve.get("lower")
+    hi = curve.get("upper")
+    cens = curve.get("censor") or [False] * len(t)
+    risk = curve["risk"]
+    out = []
+    for name in dict.fromkeys(st):
+        idx = [i for i, s in enumerate(st) if s == name]
+        rec = {"name": name, "x": t[idx], "y": est[idx], "lo": None, "hi": None,
+               "cens_x": np.asarray([t[i] for i in idx if cens[i]], float),
+               "cens_y": np.asarray([est[i] for i in idx if cens[i]], float)}
+        if lo is not None and hi is not None:
+            lo_v = np.asarray([np.nan if lo[i] is None else lo[i] for i in idx], float)
+            hi_v = np.asarray([np.nan if hi[i] is None else hi[i] for i in idx], float)
+            if np.all(np.isfinite(lo_v)) and np.all(np.isfinite(hi_v)):
+                rec["lo"], rec["hi"] = lo_v, hi_v
+        rt = {float(x): int(n) for x, s, n in zip(risk["time"], risk["strata"], risk["n_risk"])
+              if str(s) == name}
+        rec["risk"] = (lambda x, _rt=rt: _rt.get(float(x)))
+        below = [x for x, y in zip(rec["x"], rec["y"]) if y <= 0.5]
+        rec["median"] = (float(below[0]), None, None) if below else None
+        out.append(rec)
+    return out, int(sum(1 for c in cens if c))
+
+
 # ---------------------------------------------------------------------------
-def km_survival(groups, time_points=None, width="single", height_mm=95.0,
+def km_survival(groups=None, time_points=None, width="single", height_mm=95.0,
                 risk_table_frac=None, ylabel="Overall survival", xlabel="Time (months)",
                 hr=None, hr_ci=None, logrank_p=None, show_ci=True, show_median=True,
-                colors=None, min_at_risk=10):
-    """Kaplan-Meier curves with a number-at-risk table, via lifelines.
+                colors=None, min_at_risk=None, curve=None, refit=False, analysis_n=None):
+    """Kaplan-Meier curves with a number-at-risk table.
 
-    groups: [{"name": str, "time": array, "event": array(0/1)}, ...]
-    hr, hr_ci, logrank_p: values from your results JSON. If logrank_p is omitted and
-        exactly two groups are given, it is computed here from the data.
-    min_at_risk: truncate the x axis once any group's risk set falls below this. Set to 0
-        to draw the full follow-up, but a curve past that point is not interpretable and
-        the tail will swing to 0 on a single event.
+    1.16.0 (N8), aligned with the R recipe_km: the default draws the curve table the analysis
+    exported (`curve=` - time, estimate, lower, upper, strata, censor, risk, n; R
+    curve_table_km() writes it), so the figure shows exactly the analysis population.
+    Refitting from `groups` ([{"name", "time", "event"}]) happens only with refit=True and
+    analysis_n = the N recorded in results JSON (the rows used must equal it). The log-rank P
+    is never computed here: pass logrank_p from the analysis results (required for >= 2
+    curves). Censoring marks are drawn only where censoring occurred. min_at_risk (default
+    off) optionally truncates the x axis once a risk set falls below it.
+    A paper pinned to an engine before 1.16.0 that calls km_survival(groups) keeps the old
+    behaviour (refit, log-rank computed, truncation at 10 at risk) with a warning.
 
-    Satisfies km_survival's mandatory elements: step curves, censoring marks, risk table,
-    legend and in-figure statistics. Also draws the CI band and reports median survival
-    with its CI, which the archetype lists as expected.
+    hr, hr_ci, logrank_p: values from your results JSON. Satisfies km_survival's mandatory
+    elements: step curves, censoring marks (when any), risk table, legend, in-figure statistics.
     """
-    try:
-        from lifelines import KaplanMeierFitter
-        from lifelines.statistics import logrank_test
-    except ImportError as exc:  # pragma: no cover
-        raise SystemExit(
-            "lifelines is required for the km_survival recipe.\n"
-            "  uv pip install --python .venv/Scripts/python.exe lifelines"
-        ) from exc
+    legacy = curve is None and not refit and groups is not None and _paper_pin_before_1160()
+    if legacy:
+        print("  ! km_survival: this paper is pinned before engine 1.16.0, so the old default "
+              "is kept (refit inside the figure, log-rank computed here, axis truncated at 10 "
+              "at risk). After `wf migrate --yes` pass curve= (exported by the analysis) or "
+              "refit=True with analysis_n, and logrank_p from the results.")
+        min_at_risk = 10 if min_at_risk is None else min_at_risk
+    elif curve is None and not refit:
+        raise ValueError("km_survival: refitting the curve inside the figure is off by default. "
+                         "Pass curve = the curve table the analysis exported into results JSON, "
+                         "or refit=True with analysis_n = the N recorded in results JSON")
 
-    if len(groups) < 1:
-        raise ValueError("km_survival needs at least one group")
+    if curve is not None:
+        series, n_censored = _curve_series(curve)
+        pop = {"mode": "results", "n_used": int(curve["n"]), "analysis_n": int(curve["n"]),
+               "censored": n_censored,
+               "na_rule": str(curve.get("na_rule") or "as exported by the analysis script")}
+    else:
+        try:
+            from lifelines import KaplanMeierFitter
+            from lifelines.statistics import logrank_test
+        except ImportError as exc:  # pragma: no cover
+            raise SystemExit(
+                "lifelines is required for the km_survival refit path.\n"
+                "  uv pip install --python .venv/Scripts/python.exe lifelines"
+            ) from exc
+        if not groups:
+            raise ValueError("km_survival needs at least one group")
+        clean = []
+        for grp in groups:
+            t = np.asarray(grp["time"], float)
+            e = np.asarray(grp["event"], float)
+            keep = np.isfinite(t) & np.isfinite(e)
+            clean.append((grp, t[keep], e[keep].astype(int), int((~keep).sum())))
+        n_used = sum(len(t) for _, t, _, _ in clean)
+        if not legacy:
+            if analysis_n is None or int(analysis_n) != n_used:
+                raise ValueError(f"km_survival: the refit would use N = {n_used} complete cases "
+                                 f"but analysis_n = {analysis_n}. Plot the population the "
+                                 "analysis used (pass analysis_n from results JSON).")
+        if logrank_p is None and len(groups) == 2 and legacy:
+            (_, ta, ea, _), (_, tb, eb, _) = clean
+            logrank_p = float(logrank_test(ta, tb, ea, eb).p_value)
+        series = []
+        for grp, t, e, _ in clean:
+            kmf = KaplanMeierFitter(label=grp["name"]).fit(t, e)
+            sf_vals = kmf.survival_function_
+            ci = kmf.confidence_interval_
+            cens_t = t[e == 0]
+            rec = {"name": grp["name"], "x": np.asarray(sf_vals.index, float),
+                   "y": np.asarray(sf_vals.iloc[:, 0], float),
+                   "lo": np.asarray(ci.iloc[:, 0], float), "hi": np.asarray(ci.iloc[:, 1], float),
+                   "ci_x": np.asarray(ci.index, float),
+                   "cens_x": cens_t,
+                   "cens_y": np.asarray([float(kmf.predict(x)) for x in cens_t], float),
+                   "risk": (lambda x, _t=t: int(np.sum(_t >= x)))}
+            med = kmf.median_survival_time_
+            rec["median"] = None
+            if np.isfinite(med):
+                try:
+                    from lifelines.utils import median_survival_times
+                    mci = median_survival_times(kmf.confidence_interval_)
+                    rec["median"] = (float(med), float(mci.iloc[0, 0]), float(mci.iloc[0, 1]))
+                except Exception:  # noqa: BLE001
+                    rec["median"] = (float(med), None, None)
+            series.append(rec)
+        pop = {"mode": "legacy_refit" if legacy else "refit", "n_used": n_used,
+               "analysis_n": int(analysis_n) if analysis_n is not None else n_used,
+               "n_dropped_na": sum(d for *_, d in clean),
+               "censored": int(sum(int((e == 0).sum()) for _, _, e, _ in clean))}
+    if logrank_p is None and len(series) >= 2:
+        raise ValueError("km_survival: logrank_p is missing. Export the log-rank P from the "
+                         "analysis into results JSON and pass it; the figure does not compute "
+                         "its own test.")
 
     if risk_table_frac is None:
         # Size the table panel to its contents rather than a fixed fraction. A panel
         # taller than its rows leaves dead space below the last row, which shows up as
         # an asymmetric bottom margin in QC.
         row_mm = 1.55 * matplotlib.rcParams["font.size"] / 72.0 * 25.4
-        needed_mm = 1.4 * row_mm + len(groups) * row_mm
+        needed_mm = 1.4 * row_mm + len(series) * row_mm
         risk_table_frac = min(0.45, max(0.10, needed_mm / height_mm))
 
     # One SubFigure holding two axes that SHARE the x axis. Two sibling SubFigures would
@@ -84,33 +200,16 @@ def km_survival(groups, time_points=None, width="single", height_mm=95.0,
         # nothing more; the layout engine floors the gap at roughly 0.03 anyway.
         gridspec_kw={"height_ratios": [1 - risk_table_frac, risk_table_frac], "hspace": 0.10},
     )
-    palette = colors or [f"C{i}" for i in range(len(groups))]
+    palette = colors or [f"C{i}" for i in range(len(series))]
 
-    fitted = []
-    for i, grp in enumerate(groups):
-        t = np.asarray(grp["time"], float)
-        e = np.asarray(grp["event"], int)
-        kmf = KaplanMeierFitter(label=grp["name"]).fit(t, e)
-        fitted.append((grp, kmf))
+    for i, rec in enumerate(series):
         c = palette[i % len(palette)]
-
-        sf_vals = kmf.survival_function_
-        xs = np.asarray(sf_vals.index, float)
-        ys = np.asarray(sf_vals.iloc[:, 0], float)
-        ax.step(xs, ys, where="post", color=c, lw=1.1, label=grp["name"])
-
-        if show_ci:
-            ci = kmf.confidence_interval_
-            ax.fill_between(np.asarray(ci.index, float),
-                            np.asarray(ci.iloc[:, 0], float),
-                            np.asarray(ci.iloc[:, 1], float),
+        ax.step(rec["x"], rec["y"], where="post", color=c, lw=1.1, label=rec["name"])
+        if show_ci and rec.get("lo") is not None:
+            ax.fill_between(rec.get("ci_x", rec["x"]), rec["lo"], rec["hi"],
                             step="post", color=c, alpha=0.13, lw=0)
-
-        # censoring ticks: mandatory for this archetype
-        cens_t = t[e == 0]
-        if len(cens_t):
-            cens_s = np.asarray([float(kmf.predict(x)) for x in cens_t], float)
-            ax.plot(cens_t, cens_s, linestyle="None", marker="|", markersize=3.2,
+        if len(rec["cens_x"]):  # censoring marks only where censoring occurred
+            ax.plot(rec["cens_x"], rec["cens_y"], linestyle="None", marker="|", markersize=3.2,
                     markeredgewidth=0.7, color=c)
 
     ax.set_ylabel(ylabel)
@@ -119,47 +218,43 @@ def km_survival(groups, time_points=None, width="single", height_mm=95.0,
     ax.set_xlim(left=0)
     ax.legend(loc="lower left")
 
-    if logrank_p is None and len(groups) == 2:
-        a, b = groups
-        logrank_p = float(logrank_test(np.asarray(a["time"], float), np.asarray(b["time"], float),
-                                       np.asarray(a["event"], int), np.asarray(b["event"], int)
-                                       ).p_value)
     lines = []
     if hr is not None and hr_ci is not None:
         lines.append(f"HR {_fmt_ci(hr, hr_ci[0], hr_ci[1])}")
     if logrank_p is not None:
         lines.append(f"{_fmt_p(logrank_p)}, log-rank")
     if show_median:
-        for grp, kmf in fitted:
-            med = kmf.median_survival_time_
-            if np.isfinite(med):
-                try:
-                    from lifelines.utils import median_survival_times
-                    ci = median_survival_times(kmf.confidence_interval_)
-                    lo, hi = float(ci.iloc[0, 0]), float(ci.iloc[0, 1])
-                    lines.append(f"{grp['name']}: median {med:.1f} ({lo:.1f}\u2013{hi:.1f})")
-                except Exception:  # noqa: BLE001
-                    lines.append(f"{grp['name']}: median {med:.1f}")
+        for rec in series:
+            med = rec.get("median")
+            if med is None:
+                lines.append(f"{rec['name']}: median not reached")
+            elif med[1] is not None and med[2] is not None:
+                lines.append(f"{rec['name']}: median {med[0]:.1f} ({med[1]:.1f}\u2013{med[2]:.1f})")
             else:
-                lines.append(f"{grp['name']}: median not reached")
+                lines.append(f"{rec['name']}: median {med[0]:.1f}")
     if lines:
         ax.text(0.97, 0.97, "\n".join(lines), transform=ax.transAxes,
                 ha="right", va="top", color="black", linespacing=1.45)
 
     # ---- number at risk ----
-    tp = list(time_points) if time_points is not None else list(ax.get_xticks())
+    if time_points is not None:
+        tp = list(time_points)
+    elif curve is not None:
+        tp = sorted({float(x) for x in curve["risk"]["time"]})
+    else:
+        tp = list(ax.get_xticks())
     tp = [x for x in tp if x >= 0]
 
-    # Truncate where the risk set is too small to interpret, which the archetype asks for.
+    # Optional truncation where the risk set is too small to interpret (default off).
     if min_at_risk:
-        all_t = np.concatenate([np.asarray(g["time"], float) for g in groups])
-        keep = [x for x in tp if min(int(np.sum(np.asarray(g["time"], float) >= x))
-                                    for g in groups) >= min_at_risk]
-        cutoff = max(keep) if keep else float(all_t.max())
+        keep = [x for x in tp if min((rec["risk"](x) or 0) for rec in series) >= min_at_risk]
+        cutoff = max(keep) if keep else max(float(np.max(rec["x"])) for rec in series)
         ax.set_xlim(0, cutoff)
         tp = [x for x in tp if x <= cutoff]
+    elif tp:
+        ax.set_xlim(0, max(tp))
 
-    ax_tab.set_ylim(len(groups) - 0.5, -0.5)
+    ax_tab.set_ylim(len(series) - 0.5, -0.5)
     for s in ax_tab.spines.values():
         s.set_visible(False)
     ax_tab.tick_params(axis="x", length=0)
@@ -172,24 +267,26 @@ def km_survival(groups, time_points=None, width="single", height_mm=95.0,
 
     # Group names as y tick labels, not hand-placed text. Constrained layout then reserves
     # room for them, so they cannot run into the count at t=0.
-    ax_tab.set_yticks(range(len(fitted)))
-    ax_tab.set_yticklabels([g["name"] for g, _ in fitted])
-    for lab, (_, _) in zip(ax_tab.get_yticklabels(), fitted):
-        lab.set_fontweight("bold")
+    ax_tab.set_yticks(range(len(series)))
+    ax_tab.set_yticklabels([rec["name"] for rec in series])
     for lab, c in zip(ax_tab.get_yticklabels(),
-                      [palette[i % len(palette)] for i in range(len(fitted))]):
+                      [palette[i % len(palette)] for i in range(len(series))]):
+        lab.set_fontweight("bold")
         lab.set_color(c)
 
     ax_tab.set_title("Number at risk", loc="left", fontweight="bold", color="black", pad=3)
     lo_x, hi_x = ax.get_xlim()
-    for i, (grp, _) in enumerate(fitted):
-        t = np.asarray(grp["time"], float)
+    for i, rec in enumerate(series):
         for x in tp:
+            n_at = rec["risk"](x)
+            if n_at is None:
+                continue
             # Centre-align except at the axis ends, where half the number would spill into
             # the row label on the left or past the frame on the right.
             ha = "left" if abs(x - lo_x) < 1e-9 else ("right" if abs(x - hi_x) < 1e-9 else "center")
-            ax_tab.text(x, i, str(int(np.sum(t >= x))), ha=ha, va="center", color="black")
+            ax_tab.text(x, i, str(int(n_at)), ha=ha, va="center", color="black")
     ax_tab.set_xticks(tp)
+    fig.medpaper_population = pop
     return fig, (ax, ax_tab)
 
 

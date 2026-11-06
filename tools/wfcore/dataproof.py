@@ -306,6 +306,76 @@ def _scan_caps(project: Path, files: list[dict], manifest: dict, state: object |
                 )
 
 
+JOIN_LOG_REL = "02_data/join_log.json"
+JOIN_KINDS = ("many_to_one", "repeated_visits", "many_to_many", "aggregation", "filter")
+
+
+def join_problems(project: Path, analysis: dict, n_rows: int | None,
+                  state: object | None = None) -> list[str]:
+    """1.16.0 (N7): a join declared complex carries a structured log per step (rows and unique
+    analysis units before/after with the key, the aggregation rule, unmatched/excluded units),
+    written by analysis.joinlog.JoinLog (Python) or join_log_step() (tools/R/medjoin.R), and
+    the counts must add up. Simple one-record-per-row acquisitions are never asked for it."""
+    if not isinstance(analysis, dict) or analysis.get("relationship") != "complex_join":
+        return []
+    from .state import version_tuple
+    pin = getattr(state, "engine_pin", None)
+    if pin is not None and version_tuple(str(pin)) < (1, 16, 0):
+        return []
+    try:
+        log = json.loads((Path(project) / JOIN_LOG_REL).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return [f"complex_join needs {JOIN_LOG_REL} (rows and analysis units per join step; "
+                "analysis.joinlog.JoinLog or join_log_step() in tools/R/medjoin.R)"]
+    except (OSError, ValueError) as exc:
+        return [f"{JOIN_LOG_REL} unreadable: {exc}"]
+    steps = log.get("steps") if isinstance(log, dict) else None
+    if not isinstance(steps, list) or not steps:
+        return [f"{JOIN_LOG_REL} has no steps"]
+    out, prev = [], None
+    fields = ("rows_before", "rows_after", "units_before", "units_after", "unmatched_units",
+              "excluded_units")
+    for i, s in enumerate(steps, 1):
+        tag = f"join step {i} ({s.get('name', '?') if isinstance(s, dict) else '?'})"
+        if not isinstance(s, dict):
+            out.append(f"{tag}: not an object")
+            continue
+        nums = {k: _integer(s.get(k)) for k in fields}
+        if any(v is None or v < 0 for v in nums.values()):
+            out.append(f"{tag}: {', '.join(fields)} must be integers >= 0")
+            continue
+        kind = s.get("kind")
+        if kind not in JOIN_KINDS:
+            out.append(f"{tag}: kind must be one of {', '.join(JOIN_KINDS)}")
+        if not str(s.get("key", "")).strip():
+            out.append(f"{tag}: the join key is not named")
+        lost = nums["units_before"] - nums["units_after"]
+        if lost < 0:
+            out.append(f"{tag}: analysis units grew {nums['units_before']} -> "
+                       f"{nums['units_after']} (a join cannot create patients)")
+        elif lost != nums["unmatched_units"] + nums["excluded_units"]:
+            out.append(f"{tag}: {lost} analysis unit(s) lost but unmatched + excluded = "
+                       f"{nums['unmatched_units'] + nums['excluded_units']}")
+        if kind == "many_to_one" and nums["rows_after"] > nums["rows_before"]:
+            out.append(f"{tag}: a many-to-one lookup grew the rows {nums['rows_before']} -> "
+                       f"{nums['rows_after']} (duplicate keys on the lookup side)")
+        if kind in ("aggregation", "many_to_many") and len(str(s.get("aggregation", "")).strip()) < 10:
+            out.append(f"{tag}: {kind} needs the aggregation/resolution rule in words")
+        if kind == "aggregation" and nums["rows_after"] != nums["units_after"]:
+            out.append(f"{tag}: after aggregation rows ({nums['rows_after']}) must equal "
+                       f"analysis units ({nums['units_after']})")
+        if prev is not None and (nums["rows_before"] != prev["rows_after"]
+                                 or nums["units_before"] != prev["units_after"]):
+            out.append(f"{tag}: starts from {nums['rows_before']} rows / {nums['units_before']} "
+                       f"units but the previous step ended with {prev['rows_after']} / "
+                       f"{prev['units_after']}")
+        prev = nums
+    if prev is not None and n_rows is not None and prev["rows_after"] != n_rows:
+        out.append(f"the last join step ends with {prev['rows_after']} rows but the analysis "
+                   f"dataset has n_rows = {n_rows}")
+    return out
+
+
 def validate(project: Path, state: object | None = None) -> Validation:
     problems: list[str] = []
     manifest_path = project / MANIFEST_REL
@@ -502,6 +572,7 @@ def validate(project: Path, state: object | None = None) -> Validation:
         elif relationship == "complex_join":
             if len(str(analysis.get("explanation", "")).strip()) < 40:
                 problems.append("complex_join requires a substantive count-reconciliation explanation")
+            problems += join_problems(project, analysis, n_rows, state)
         else:
             problems.append("analysis_dataset.relationship must be one_record_per_analysis_row or complex_join")
 

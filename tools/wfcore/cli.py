@@ -65,6 +65,31 @@ NON_OVERRIDABLE_GATES = {
     "analysis_reproduces",
     "reporting_checklist_complete",
 }
+# 1.16.0 (N9): the final-package boundaries cannot be forced either (papers pinned from 1.16.0):
+# the S24 freeze and the user's package confirmation, the S25 freeze/audit binding, the audit
+# decision PASS or PASS_AUTHOR_FINAL_COPY and the verified author final copy. The only author
+# route past REVISE is that final-copy channel. Generic checks such as decision_recorded are
+# non-overridable here only, not on every stage that uses them.
+FINAL_BOUNDARY_GATES = {
+    "S24_package_human_review": frozenset({
+        "bundle_matches_freeze", "package_content_matches_baseline", "review_round_approved",
+        "decision_recorded"}),
+    "S25_submission_audit": frozenset({
+        "bundle_matches_freeze", "submission_audit_matches_freeze",
+        "package_content_matches_baseline", "decision_recorded", "final_copy_verified"}),
+}
+
+
+def non_overridable(check: str, stage_id: str, state=None) -> bool:
+    if check in NON_OVERRIDABLE_GATES:
+        return True
+    if check in FINAL_BOUNDARY_GATES.get(stage_id, ()):
+        from .state import version_tuple
+        try:
+            return version_tuple(str(state.engine_pin)) >= (1, 16, 0)
+        except Exception:  # noqa: BLE001
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -951,7 +976,7 @@ def cmd_advance(args) -> int:
     results = gates.run_stage(pipe, st, proj, stage, reuse=True)
     ok, blocking, _ = gates.summarize(results)
     non_overridable_failures = [r for r in results if r.blocking and
-                                r.check in NON_OVERRIDABLE_GATES]
+                                non_overridable(r.check, stage.id, st)]
     if non_overridable_failures:
         print(f"refusing to advance: {len(non_overridable_failures)} non-overridable "
               f"gate(s) failed in {stage.id}")
@@ -995,6 +1020,11 @@ def cmd_advance(args) -> int:
         if "results_have_environment" in failed_names:
             print("--force cannot waive environment receipts. Write every results file with "
                   "write_results() from a top-level 03_analysis/code script via wf run-script.")
+        if failed_names & FINAL_BOUNDARY_GATES.get(stage.id, frozenset()):
+            print("--force cannot waive the final-package boundary: the frozen package, the "
+                  "user's confirmation ('我确认这一版'), the audit bound to the current freeze "
+                  "with PASS (or PASS_AUTHOR_FINAL_COPY plus the verified author final copy). "
+                  "After REVISE: fix and re-audit, or use the author final-copy channel.")
         if "reporting_checklist_complete" in failed_names:
             print("--force cannot waive a journal-required reporting checklist. Every item of "
                   "the required guideline needs a row whose location exists in the submitted "

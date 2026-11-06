@@ -172,6 +172,17 @@ def write_results(name: str, payload: dict, seed: int | None = None) -> Path:
     return out
 
 
+def _missing_value(v) -> bool:  # medpaper-compat 1.16.0 (N4): None/NaN/pd.NA/NaT are missing, never a level
+    if v is None or isinstance(v, (str, bytes, bool, int)):  # medpaper-compat 1.16.0 (N4)
+        return v is None  # medpaper-compat 1.16.0 (N4)
+    try:  # medpaper-compat 1.16.0 (N4)
+        import pandas as pd  # medpaper-compat 1.16.0 (N4)
+        res = pd.isna(v)  # medpaper-compat 1.16.0 (N4)
+        return bool(res) if getattr(res, "shape", ()) == () else False  # medpaper-compat 1.16.0 (N4)
+    except ImportError:  # medpaper-compat 1.16.0 (N4)
+        return isinstance(v, float) and v != v  # medpaper-compat 1.16.0 (N4)
+  # medpaper-compat 1.16.0 (N4)
+  # medpaper-compat 1.16.0 (N4)
 def baseline_counts(rows, variables: list[str], group: str | None = None) -> dict:
     """Counts for EVERY level of each categorical variable (1.9.0) - both categories of a
     binary one - overall and per group, missing counted separately. `rows` is a pandas
@@ -180,6 +191,8 @@ def baseline_counts(rows, variables: list[str], group: str | None = None) -> dic
     records = rows.to_dict("records") if hasattr(rows, "to_dict") else list(rows)
 
     def missing(v) -> bool:
+        if _missing_value(v):  # medpaper-compat 1.16.0 (N4)
+            return True  # medpaper-compat 1.16.0 (N4)
         return v is None or (isinstance(v, float) and v != v)
     groups = {"overall": records}
     if group:
@@ -193,6 +206,8 @@ def baseline_counts(rows, variables: list[str], group: str | None = None) -> dic
             levels = ["False", "True"]
         elif set(levels) <= {"0", "1"}:
             levels = ["0", "1"]
+        if not any(not missing(v) for v in values):  # medpaper-compat 1.16.0 (N4): an all-missing column
+            levels = []  # medpaper-compat 1.16.0 (N4)
         out[var] = {}
         for name, rs in groups.items():
             n = len(rs)

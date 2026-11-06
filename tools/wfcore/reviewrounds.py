@@ -294,6 +294,11 @@ def write_bundle(project: Path, rnd: dict) -> Path:
     if record:
         lines.append(f"- {record} (material scientific decisions: pre-specified vs decided "
                      "after the data were seen; reviewer only)")
+    from .reviewitems import write as _write_items  # 1.16.0: cases a gate could not decide
+    listed = _write_items(project, out)
+    if listed:
+        lines.append(f"- {listed} (cases the deterministic checks could not decide; judge "
+                     "each one in the report)")
     stage = str(rnd.get("stage", ""))
     docx += [p.relative_to(project).as_posix() for p in project.glob("08_submission/bundle/*.docx")
              if p.relative_to(project).as_posix() not in docx]

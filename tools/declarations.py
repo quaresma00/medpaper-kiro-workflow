@@ -63,6 +63,9 @@ def main() -> int:
         for key in ("ethics", "consent"):
             print(f"{key}: {data[key]['conclusion']}")
         print(f"data availability: {data['data_availability']['text']}")
+        reg = data.get("registration") or {}
+        if reg.get("applies"):  # 1.16.0 (N6): systematic reviews / meta-analyses only
+            print(f"registration: {reg.get('conclusion', '')}")
         print("basis: " + "; ".join(data["ethics"]["basis"]))
         fact = dc.ai_fact(project)
         if fact:

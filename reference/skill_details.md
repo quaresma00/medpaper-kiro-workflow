@@ -84,8 +84,10 @@ the background, read the log's last lines every 2-3 minutes (never short polling
 treat it as finished when `REPRODUCE DONE` appears; `analysis_reproduces` re-checks that proof at S17, S23 and S25. No study registration and no reporting
 checklist are prepared pre-emptively: a checklist is filled at S23 only when the chosen journal
 requires one (`journal_requires_checklist` in `target_journal.json`, set at S20), or PRISMA for
-a meta-analysis, which also registers on PROSPERO before screening. KM/CIF figures draw the curve table the analysis exported
-(`curve_table_km()`/`curve_table_cif()`), not a refit.
+a meta-analysis; an eligible systematic review registers on PROSPERO as early as possible and
+before data extraction (ineligible review types record the reason, never an invented ID). KM/CIF
+figures (R and Python) draw the curve table the analysis exported (`curve_table_km()`/
+`curve_table_cif()`), not a refit; the log-rank P comes from the analysis.
 
 ## Customise one paper without changing the engine
 

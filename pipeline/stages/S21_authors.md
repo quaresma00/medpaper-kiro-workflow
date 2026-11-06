@@ -15,7 +15,8 @@ open questions this prints:
 .\.venv\Scripts\python.exe tools/declarations.py assess
 ```
 Record answers with `tools/declarations.py answer <id> "<value>"`. No registration statement
-unless the journal requires one (a meta-analysis states its PROSPERO ID). Never infer a
+unless the journal requires one (an eligible review states its PROSPERO ID or 'not registered'
++ reason; an ineligible one only the reason). Never infer a
 missing item. AI/LLM use: show the user the journal's rule
 (`tools/declarations.py ai-rule`) in the same message and record the factual answer:
 `tools/declarations.py ai --used yes|no [--tool "<tool>" --purpose "<purpose>"] --words "<user's words>"`;

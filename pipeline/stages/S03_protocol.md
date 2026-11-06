@@ -6,8 +6,10 @@ Details (heading-by-heading content, sampling rule, pagination proof): `referenc
 ## Do
 1. No registration and no reporting checklist here: retrospective database, registry and
    own-centre studies need no registration; a checklist is written at S23 only if the
-   journal requires one. Systematic review / meta-analysis: register on PROSPERO before
-   screening (ID under `Ethics`).
+   journal requires one. Systematic review / meta-analysis eligible for PROSPERO: register as
+   early as possible, before data extraction (ID under `Ethics`, or 'not registered' + reason in
+   Methods); scoping reviews, evidence/gap maps, guideline appraisals: reason only, no ID;
+   never an invented or back-dated ID.
 2. Write `01_protocol/protocol_v1.md` with headings `Objective`, `Design`,
    `Population and eligibility`, `Variables`, `Statistical analysis plan`,
    `Sample size / power`, `Ethics`:

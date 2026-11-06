@@ -18,9 +18,18 @@ pre-specified rather than fitted to whatever happened to be significant.
 1. No study registration and no reporting checklist are chosen or filled here. Retrospective
    database / registry / own-centre retrospective studies need no registration; a checklist is
    written only at S23 if the chosen journal requires one. Exception - systematic review /
-   meta-analysis: register the protocol on PROSPERO before screening, record the registration
-   ID in `Ethics`; if not registered, say so in Methods. Its PRISMA flow diagram and checklist
-   are part of the normal flow.
+   meta-analysis (1.16.0, by PROSPERO eligibility; `idea.json` `review_type`, default
+   `systematic_review`, and `health_outcome`, default true):
+   - eligible (a systematic review with a health-related outcome): recommend registering on
+     PROSPERO as early as possible and before data extraction (PROSPERO does not accept a
+     review once extraction has started); record the CRD42 ID in `Ethics`, or state in Methods
+     that it was not registered and why;
+   - not eligible (`scoping_review`, `evidence_map`, `gap_map`, `guideline_appraisal`,
+     `mapping_review`, `literature_review`, or no health-related outcome): record the reason in
+     Methods, give no ID;
+   - never an invented or back-dated ID; the ID is the author's answer
+     (`declarations.py answer prospero_registration "CRD42..."` at S21).
+   Its PRISMA flow diagram and checklist are part of the normal flow.
 2. Write `project/01_protocol/protocol_v1.md` with exactly these headings:
    `Objective`, `Design`, `Population and eligibility`, `Variables`,
    `Statistical analysis plan`, `Sample size / power`, `Ethics`.

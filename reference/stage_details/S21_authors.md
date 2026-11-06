@@ -28,8 +28,11 @@ preprint and prior presentation. Never infer a missing item. Ethics, consent and
 availability are judged by the workflow (1.10.0): run `tools/declarations.py assess`, write
 its conclusions into statements.md, and add only its printed open questions to the same
 message (record answers with `tools/declarations.py answer <id> "<value>"`).
-Do not ask for or write a study-registration statement unless the journal requires one; a
-meta-analysis states its PROSPERO ID (or that it was not registered).
+Do not ask for or write a study-registration statement unless the journal requires one. 1.16.0:
+a systematic review / meta-analysis follows `declarations_assessment.json` `registration`:
+eligible for PROSPERO -> the CRD42 ID the author gives (`prospero_registration`), or 'not
+registered' with the reason; ineligible (scoping review, evidence/gap map, guideline appraisal)
+-> the printed reason, no ID. Never an invented or back-dated ID.
 Only if the study basis declares manual abstraction (`data_source.manual_abstraction` true)
 and `idea.json` lacks `human_coders`, ask in the same message for each coder's and
 adjudicator's specialty and years of experience; automated extraction never triggers it.

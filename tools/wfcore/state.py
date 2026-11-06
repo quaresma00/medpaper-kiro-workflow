@@ -158,8 +158,30 @@ class State:
             self._note_v1140(old_version, pipeline_version)
             self._note_v1141(old_version, pipeline_version)
             self._note_v1150(old_version, pipeline_version)
+            self._note_v1160(old_version, pipeline_version)
             self.save()
         return changed
+
+    def _note_v1160(self, old_version: str, new_version: str) -> None:
+        """1.16.0: one event; no file or stage is touched."""
+        if (version_tuple(old_version) >= (1, 16, 0) or version_tuple(new_version) < (1, 16, 0)
+                or self.data.get("v1160_migration_noted")):
+            return
+        self.data["v1160_migration_noted"] = True
+        self.event("requirements_changed",
+                   "1.16.0: fixes apply now (baseline_counts counts None/NaN/NA/NaT as missing; "
+                   "Python KM recipe draws the exported curve - papers pinned earlier keep the "
+                   "old default with a warning; no censoring marks without censoring; PROSPERO "
+                   "rule by eligibility, before data extraction, never an invented ID; Python "
+                   "3.12+ for the science packages). Stricter checks apply to this paper, "
+                   "including its current stage, only after `wf migrate --yes`: Results/Abstract "
+                   "numbers must keep the measure, time window and dictionary labels of the "
+                   "result they come from (ambiguous sentences go to the reviewer list); small "
+                   "integers in result context need provenance; table n (%) cells match their "
+                   "column denominator and population; figure statistics match the figure's own "
+                   "source_results with a fresh render receipt (R and Python); complex joins need "
+                   "02_data/join_log.json; S24/S25 final-package gates cannot be forced; the look "
+                   "before Results is bound to the display hashes. Paper files were not modified.")
 
     def _note_v1150(self, old_version: str, new_version: str) -> None:
         """1.15.0: one event; no file or stage is touched."""
@@ -478,6 +500,14 @@ class State:
             "at": _now(),
             "stage": self.current,
         }
+        if name == "displays_seen_before_results":
+            # 1.16.0 (N10b): bound to the display hashes the contact sheet showed.
+            try:
+                sheet = json.loads((self.project / "05_figures/qc/displays_sheet.json")
+                                   .read_text(encoding="utf-8"))
+                self.data["decisions"][name]["displays"] = dict(sheet.get("displays") or {})
+            except (OSError, ValueError, AttributeError, TypeError):
+                self.data["decisions"][name]["displays"] = {}
         if name in SCIENTIFIC_DECISIONS:
             # 1.14.0 (E): bound to the scientific inputs it judged; stale when they change.
             self.data["decisions"][name]["inputs_sha256"] = scientific_inputs_sha256(

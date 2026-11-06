@@ -292,14 +292,59 @@ def save(fig, stem: str | Path, width: str = "single", dpi: int = 600,
           + f"  {written['size_mm'][0]}x{written['size_mm'][1]} mm @ {dpi} dpi")
 
     if audit:
-        written["artist_audit"] = audit_figure(fig, stem, archetype=archetype)
+        written["artist_audit"] = audit_figure(fig, stem, archetype=archetype,
+                                               provenance=_provenance(stem, written))
     return written
+
+
+def _provenance(stem: Path, written: dict) -> dict:
+    """1.16.0 (N5): the same render receipt save_medpaper() writes for R figures - which
+    script drew the figure, from which source_results, into which bytes - so a changed script
+    or result makes the figure stale until it is re-rendered. {} outside a paper."""
+    import hashlib
+    import os
+
+    try:
+        paper = wfpaths.project_dir(check_engine=False).resolve()
+    except BaseException:  # noqa: BLE001 - outside a paper (engine selftest scratch figures)
+        return {}
+
+    def rel(p) -> str | None:
+        try:
+            return Path(p).resolve().relative_to(paper).as_posix()
+        except (ValueError, OSError):
+            return None
+
+    def sha(p: Path) -> str:
+        return hashlib.sha256(Path(p).read_bytes()).hexdigest().upper()
+    png_rel = rel(written["png"])
+    if png_rel is None:
+        return {}
+    script = os.environ.get("MEDPAPER_SCRIPT") or (sys.argv[0] if sys.argv and sys.argv[0] else "")
+    script_path = Path(script) if Path(script).is_absolute() else paper / script
+    script_rel = rel(script_path) if script and script_path.is_file() else None
+    sources: list[str] = []
+    try:
+        plan = json.loads((paper / "01_protocol/artifact_plan.json").read_text(encoding="utf-8"))
+        for g in ("main_figures", "supp_figures"):
+            for e in plan.get(g, []) or []:
+                if str(e.get("file", "")).replace("\\", "/") == png_rel:
+                    sources = [str(s) for s in e.get("source_results") or []
+                               if (paper / str(s)).is_file()]
+    except (OSError, ValueError, AttributeError):
+        pass
+    renders = {png_rel: sha(Path(written["png"]))}
+    if written.get("tiff") and rel(written["tiff"]):
+        renders[rel(written["tiff"])] = sha(Path(written["tiff"]))
+    return {"script": script_rel or "", "script_sha256": sha(script_path) if script_rel else "",
+            "source_hashes": {s: sha(paper / s) for s in sources}, "render_hashes": renders}
 
 
 # ---------------------------------------------------------------------------
 # artist-level audit: things only the live figure object knows
 # ---------------------------------------------------------------------------
-def audit_figure(fig, stem: str | Path, archetype: str | None = None) -> str:
+def audit_figure(fig, stem: str | Path, archetype: str | None = None,
+                 provenance: dict | None = None) -> str:
     """Everything only the live figure object knows; written to a sidecar JSON.
 
     Font sizes, line widths, panel overlap, clipping, missing glyphs, tick-label
@@ -376,6 +421,10 @@ def audit_figure(fig, stem: str | Path, archetype: str | None = None) -> str:
         "figure_text": sorted({(t.get_text() or "").strip() for t in real_texts()
                                if (t.get_text() or "").strip()}),
     }
+    report.update(provenance or {})
+    pop = getattr(fig, "medpaper_population", None)  # 1.16.0: recipes.km_survival
+    if isinstance(pop, dict) and pop:
+        report["population"] = pop
     out = stem.parent.parent / "qc" / f"{stem.name}.artist.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
