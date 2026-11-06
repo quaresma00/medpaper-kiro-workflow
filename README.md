@@ -2,7 +2,16 @@
 
 一套面向医学与临床研究的 Kiro 工作流。它把“研究想法”推进为经过数据、文献、统计结果、图表、人工复核和期刊规则共同校验的投稿包，而不是只让 AI 一次性写出一篇看似完整的论文。
 
-当前版本：`1.17.0`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE + R 4.3+
+当前版本：`1.18.0`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE + R 4.3+
+
+## 1.18.0 变化（投稿指南逐条要求清单、合规矩阵、缺失期刊字段接入、终审逐条对照原文、投稿前预检）
+
+- **要求清单（S20）**：根据带行号的 `guidelines_source.txt`，为所选文章类型写 `08_submission/guideline_requirements.json`：每条要求有原文引文、行号、类别（26 类固定）、规则（类型字段或检查名）和执行方式（auto/builder/manual/portal/n.a.）。新门禁 `guideline_requirements_mapped`：每个类别都有要求或“未提及”条目（列出搜索词）；引文须逐字出现在所引行；引文中的数字须等于 target_journal.json 的类型字段；原文中每个含 must/required/should/maximum/no more than 等义务词的句子都要被某条要求或 n.a. 范围覆盖，未覆盖的行号会列出。
+- **补齐期刊字段**：`abstract`（结构化小标题、分段/总字数）、`title_page`（要素、题名长度、短标题长度）、`running_title_position`（manuscript 时构建器把短标题放到正文首页）、`highlights`/`key_points`、`cover_letter.must_state`、`required_uploads`（与投稿包清单角色比对）、`figure`（格式、dpi、大小、色彩；可从 TIFF 母版转换为 PNG/PDF/EPS/JPEG）、`orcid_required`（校验位与题名页）。S23 新门禁 `journal_fields_met`。
+- **合规矩阵（S23）**：`wf rebuild` / `wf compliance write` 生成 `compliance_matrix.md/.json`，每条要求一行：auto 取测量值，builder 取构建回执，manual 须在 `compliance_evidence.json` 写明证据位置（S23 警告、S25 失败），portal 进门户待办，n.a. 写理由；状态 PASS/FAIL/WARN/CANNOT_ASSESS/N.A.。S24 审阅轮结束时打印中文合规摘要（`wf compliance summary`）。
+- **S25 逐条终审**：审计包含原文、要求清单和矩阵；审计员对每一行写 agree/disagree，并在原文中查找清单遗漏的义务句（`MISSING L00nn`，BLOCKING）；新门禁 `audit_rows_judged` 不允许在有异议或遗漏时记 PASS；复审只查未解决的行；无法评估/门户项交给用户，不单独导致 REVISE。
+- **投稿前预检**：`docx_bundle_ready` 发现修订痕迹、批注、占位符（XXX、TBD、TODO、[citation needed]、lorem ipsum、??）或高亮文字即失败。
+- **在途论文**：`wf compliance` 命令和审计包新增文件立即可用；新门禁（since 1.18.0）在 `wf migrate --yes` 后适用，`wf journal switch` 后 S20-S25 直接采用；换刊时要求清单与矩阵随旧刊归档，新刊必须按自己的指南重建；只记一条迁移事件，论文文件不改。
 
 ## 1.17.0 变化（换刊无残留、指南检索与导入、参考文献格式按 ISSN、按新刊参数重渲染）
 
