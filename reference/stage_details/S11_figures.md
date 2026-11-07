@@ -173,3 +173,21 @@ save(fig, PROJECT / "05_figures/out/Figure1", width="double", archetype="box_jit
 .\.venv\Scripts\python.exe tools/wf.py check
 .\.venv\Scripts\python.exe tools/wf.py advance --note "K figures rendered (R|python); QC clean; visual: <reviewed (rounds: ...) | DEFERRED to S23>; moved to legend: <n> items"
 ```
+
+## 1.20.0 - in-figure text for a clinical reader
+
+- save_medpaper() (R) and style.save() (Python) map axis/legend titles, discrete tick labels,
+  legend keys, facet strips and text labels through the display dictionary before rendering
+  (manual colour scales keyed by internal names are remapped too); a title or shown category
+  that stays code-like stops the render with the dictionary entry to add. The sidecar records
+  `text_roles` (each string with its role) and `axis_scales` (log axes), which `wf displays
+  text` judges: axis titles name the measure and CI ('Hazard ratio (95% CI)') and say 'log
+  scale' on a log axis; time axes name unit and origin; no value/variable/estimate titles, no
+  'grp: A' strips (use labeller = label_value), no code names or scientific notation.
+- Writer pass, once after S11 with the D2 look: the bundle `.wf/writer_bundle/displays/` holds
+  only flagged strings with their context (display, role, what it shows, labels in use); the
+  medpaper-clinical-writer answers in `.wf/writer/display_wording.md`; `wf displays apply`
+  puts labels/units/definitions into the dictionary and lists other wording for the scripts,
+  legends.md and table_captions.md. Incremental: only new or changed strings are re-sent.
+- After S19 the wording is presentation (labels only): a presentation round, `wf rebuild`
+  (re-renders displays whose relabel map changed), the user's new '我确认这一版'.

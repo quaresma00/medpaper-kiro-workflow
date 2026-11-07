@@ -485,7 +485,196 @@ scale_fill_medpaper <- function(name = "okabe_ito", ...) scale_fill_manual(value
        text_clipped_at_edge = clipped, axes_tightbbox_overlaps = overlaps,
        glyph_warnings = I(glyphs), tick_label_collisions = collisions, interior_voids = voids,
        elements = elements,
-       figure_text = I(sort(unique(trimws(vapply(labels, function(l) l$text, ""))))))
+       figure_text = I(sort(unique(trimws(vapply(labels, function(l) l$text, ""))))),
+       text_roles = .mf_text_roles(labels, legend))
+}
+
+# 1.20.0 (V2): every visible string with its role, read from the grob path of the drawn tree.
+.mf_text_role <- function(gparts, in_legend) {
+  g <- paste(gparts, collapse = "::")
+  if (in_legend || grepl("guide-box", g, fixed = TRUE))
+    return(if (grepl("guide.title", g, fixed = TRUE)) c("legend title", "") else c("legend key", ""))
+  if (grepl("(^|::)xlab-", g)) return(c("axis title", "x"))
+  if (grepl("(^|::)ylab-", g)) return(c("axis title", "y"))
+  if (grepl("(^|::)axis-[tb]", g)) return(c("tick label", "x"))
+  if (grepl("(^|::)axis-[lr]", g)) return(c("tick label", "y"))
+  if (grepl("(^|::)strip-", g)) return(c("strip", ""))
+  if (grepl("(^|::)(title|subtitle)[.-]", g)) return(c("title", ""))
+  if (grepl("(^|::)tag[.-]", g)) return(c("panel label", ""))
+  c("annotation", "")
+}
+.mf_text_roles <- function(labels, legend) {
+  out <- list(); seen <- character(0)
+  for (j in seq_along(labels)) {
+    txt <- trimws(labels[[j]]$text)
+    if (!nzchar(txt)) next
+    r <- .mf_text_role(labels[[j]]$gparts, isTRUE(legend[j]))
+    key <- paste(txt, r[1], r[2], sep = "\r")
+    if (key %in% seen) next
+    seen <- c(seen, key)
+    item <- list(text = txt, role = r[1])
+    if (nzchar(r[2])) item$axis <- r[2]
+    out[[length(out) + 1]] <- item
+  }
+  out
+}
+.mf_axis_scales <- function(leaves) {
+  out <- list()
+  for (lf in leaves) {
+    b <- tryCatch(suppressMessages(suppressWarnings(ggplot2::ggplot_build(lf))), error = function(e) NULL)
+    if (is.null(b)) next
+    for (ax in c("x", "y")) {
+      sc <- tryCatch(b$layout[[paste0("panel_scales_", ax)]][[1]], error = function(e) NULL)
+      nm <- tryCatch(sc$get_transformation()$name, error = function(e) tryCatch(sc$trans$name, error = function(e) NULL))
+      if (!is.null(nm) && (is.null(out[[ax]]) || grepl("log", nm))) out[[ax]] <- nm
+    }
+  }
+  if (!length(out)) structure(list(), names = character(0)) else out
+}
+
+# 1.20.0 (V4): internal names -> clinical labels from the display dictionary, before rendering.
+# `wf run-script` exports MEDPAPER_DISPLAY_LABELS ({"on", "hash", "titles", "values", "keep"});
+# on for papers pinned to 1.20.0+ (or display_relabel = true). Axis/legend titles take the
+# label with its unit; discrete values (ticks, legend keys, facet strips, text labels) the
+# label. Numbers are never touched; a title or shown category that stays code-like stops with
+# the dictionary entry to add.
+.mf_display_labels <- function() {
+  raw <- Sys.getenv("MEDPAPER_DISPLAY_LABELS", "")
+  if (!nzchar(raw)) return(NULL)
+  got <- tryCatch(jsonlite::fromJSON(raw, simplifyVector = FALSE), error = function(e) NULL)
+  if (is.null(got) || !isTRUE(got$on)) return(NULL)
+  got
+}
+.mf_labels_hash <- function() {
+  raw <- Sys.getenv("MEDPAPER_DISPLAY_LABELS", "")
+  h <- if (nzchar(raw)) tryCatch(jsonlite::fromJSON(raw, simplifyVector = FALSE)$hash, error = function(e) NULL) else NULL
+  if (is.null(h)) "off" else as.character(h)
+}
+.mf_code_like <- function(x, keep = character(0)) {
+  x <- as.character(x); x <- x[!is.na(x) & nzchar(trimws(x)) & !(x %in% keep)]
+  pats <- c("(?<![\\w./\\\\])[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]*[A-Za-z0-9](?!\\w)",
+            "(?<![\\w.])[a-z][a-z0-9]+\\.[a-z][a-z0-9]+",
+            "(?<![\\w.])(?:factor|as\\.[a-z]+|log|log2|log10|exp|sqrt)\\(",
+            "(?<![\\w:/])[A-Za-z][A-Za-z0-9_.]*:[A-Za-z]", "==|!=")
+  hit <- Reduce(`|`, lapply(pats, function(p) grepl(p, x, perl = TRUE)), rep(FALSE, length(x)))
+  dm <- regmatches(x, regexec("^([a-z]{2,})([A-Z][A-Za-z0-9]*|[IVX]{1,4}|[0-9]+)$", x, perl = TRUE))
+  dummy <- vapply(dm, function(m) length(m) == 3 && !(nchar(m[2]) <= 2 && grepl("^[A-Z]{2,}$", m[3])), logical(1))
+  unique(x[hit | dummy])
+}
+# Titles as the reader will see them, without building the plot (a build before relabelling
+# leaves layer caches that no longer match the relabelled data): the default label of each
+# mapped aesthetic is its expression, overridden by explicit labs().
+# A ggproto field as stored (not the method wrapper), looked up along the parent chain.
+.mf_raw_field <- function(obj, field) {
+  for (i in 1:20) {
+    if (!is.environment(obj)) return(NULL)
+    if (exists(field, envir = obj, inherits = FALSE)) return(get(field, envir = obj, inherits = FALSE))
+    sup <- if (exists("super", envir = obj, inherits = FALSE)) get("super", envir = obj, inherits = FALSE) else NULL
+    obj <- if (is.function(sup)) tryCatch(sup(), error = function(e) NULL) else NULL
+  }
+  NULL
+}
+.mf_current_labels <- function(p) {
+  out <- list()
+  quos <- c(lapply(p$layers, function(l) l$mapping), list(p$mapping))
+  for (m in quos) for (nm in names(m)) {
+    lab <- tryCatch(rlang::as_label(m[[nm]]), error = function(e) NULL)
+    if (!is.null(lab)) out[[nm]] <- lab
+  }
+  expl <- tryCatch(p$labels, error = function(e) list())
+  for (nm in names(expl)) out[[nm]] <- expl[[nm]]
+  out
+}
+.mf_relabel_leaf <- function(p, tmap, vmap, keep) {
+  labs_now <- .mf_current_labels(p)
+  new <- list()
+  for (nm in names(labs_now)) {
+    v <- labs_now[[nm]]
+    if (is.character(v) && length(v) == 1 && !is.na(v) && v %in% names(tmap)) new[[nm]] <- unname(tmap[[v]])
+  }
+  if (length(new)) p <- p + do.call(ggplot2::labs, new)
+  remap <- function(df) {
+    if (!is.data.frame(df) || !length(vmap)) return(df)
+    for (col in names(df)) {
+      x <- df[[col]]
+      lv <- if (is.factor(x)) levels(x) else if (is.character(x) && any(!is.na(x) & x %in% names(vmap))) sort(unique(x[!is.na(x)])) else NULL
+      if (is.null(lv) || !any(lv %in% names(vmap))) next
+      f <- if (is.factor(x)) x else factor(x, levels = lv)
+      nl <- lv; hit <- lv %in% names(vmap); nl[hit] <- unname(unlist(vmap[lv[hit]]))
+      if (anyDuplicated(nl)) stop("two categories of '", col, "' map to the same clinical label: ",
+                                  paste(lv[hit], collapse = ", "), call. = FALSE)
+      levels(f) <- nl
+      df[[col]] <- f
+    }
+    df
+  }
+  p$data <- remap(p$data)
+  for (i in seq_along(p$layers)) {
+    l <- p$layers[[i]]
+    if (is.data.frame(l$data)) {
+      nd <- remap(l$data)
+      if (!identical(nd, l$data)) l$data <- nd  # layer objects are environments: set in place
+    }
+  }
+  if (length(vmap)) {
+    sc <- tryCatch(p$scales$clone(), error = function(e) NULL)
+    changed <- FALSE
+    if (!is.null(sc)) for (k in seq_along(sc$scales)) {
+      s <- sc$scales[[k]]
+      # manual scales keep `values` in the closure of their raw palette/limits functions
+      rp <- .mf_raw_field(s, "palette")
+      rl <- .mf_raw_field(s, "limits")
+      env <- if (is.function(rp)) environment(rp) else NULL
+      vals <- if (is.environment(env) && exists("values", envir = env, inherits = FALSE)) get("values", envir = env) else NULL
+      if (!is.null(names(vals)) && any(names(vals) %in% names(vmap))) {
+        e2 <- list2env(as.list(env, all.names = TRUE), parent = parent.env(env))
+        nv <- vals; hit <- names(nv) %in% names(vmap); names(nv)[hit] <- unname(unlist(vmap[names(nv)[hit]]))
+        assign("values", nv, envir = e2)
+        environment(rp) <- e2
+        s <- s$clone()
+        assign("palette", rp, envir = s)
+        if (is.function(rl) && identical(environment(rl), env)) { environment(rl) <- e2; assign("limits", rl, envir = s) }
+        changed <- TRUE
+      }
+      for (field in c("breaks", "limits")) {
+        v <- .mf_raw_field(s, field)
+        if (is.character(v) && any(v %in% names(vmap))) {
+          hit <- v %in% names(vmap); v2 <- v; v2[hit] <- unname(unlist(vmap[v[hit]])); names(v2) <- names(v)
+          s <- s$clone(); assign(field, v2, envir = s); changed <- TRUE
+        }
+      }
+      sc$scales[[k]] <- s
+    }
+    if (changed) p$scales <- sc
+  }
+  # what is still shown in code form: titles and the categories of mapped/facet columns
+  shown <- .mf_current_labels(p)
+  titles <- unlist(Filter(function(v) is.character(v) && length(v) == 1, shown[intersect(names(shown),
+              c("x", "y", "colour", "fill", "shape", "linetype", "size", "alpha", "title", "subtitle"))]))
+  quos <- c(list(p$mapping), lapply(p$layers, function(l) l$mapping))
+  vars <- unique(unlist(lapply(quos, function(m) unlist(lapply(m, function(q) tryCatch(all.vars(rlang::quo_get_expr(q)), error = function(e) character(0))))), use.names = FALSE))
+  fp <- tryCatch(p$facet$params, error = function(e) list())
+  vars <- unique(c(vars, names(fp$facets), names(fp$rows), names(fp$cols)))
+  vals <- character(0)
+  for (df in c(list(p$data), lapply(p$layers, function(l) l$data))) if (is.data.frame(df))
+    for (v in intersect(vars, names(df))) if (is.factor(df[[v]]) || is.character(df[[v]])) vals <- c(vals, as.character(unique(df[[v]])))
+  bad <- .mf_code_like(c(titles, vals), keep)
+  if (length(bad)) stop("figure text without a clinical label: '", paste(head(bad, 4), collapse = "', '"),
+                        "' - add to 01_protocol/display_dictionary.json: {\"internal\": \"", bad[1],
+                        "\", \"label\": \"<clinical name>\", \"unit\": \"<if continuous>\", \"definition\": \"<one line>\"}",
+                        call. = FALSE)
+  p
+}
+mf_relabel <- function(plot, labels = .mf_display_labels()) {
+  if (is.null(labels)) return(plot)
+  tmap <- labels$titles %||% list(); vmap <- labels$values %||% list()
+  keep <- unlist(labels$keep %||% list())
+  if (inherits(plot, "patchwork")) {
+    plot <- tryCatch({ plot$patches$plots <- lapply(plot$patches$plots, mf_relabel, labels = labels); plot },
+                     error = function(e) { if (grepl("clinical label", conditionMessage(e))) stop(e); plot })
+  }
+  if (!inherits(plot, "ggplot")) return(plot)
+  .mf_relabel_leaf(plot, tmap, vmap, keep)
 }
 
 .mf_voids <- function(boxes, legend_boxes, W, H, max_frac = 0.10) {
@@ -843,6 +1032,7 @@ mf_label <- function(text, style = medpaper_numfmt()) {
 
 save_medpaper <- function(plot, stem, width = "single", height_mm = NULL, dpi = 600,
                           archetype = NULL, tiff = TRUE, pdf = TRUE) {
+  plot <- mf_relabel(plot)  # 1.20.0 (V4): clinical labels from the display dictionary
   # A ggplot warning while building the figure ("Removed 3 rows containing missing values")
   # means data were silently dropped from what the reader sees. Treat it as an error here,
   # where the figure is built and drawn; the previous render is kept (see staging below).
@@ -978,10 +1168,13 @@ save_medpaper <- function(plot, stem, width = "single", height_mm = NULL, dpi = 
   # them as MEDPAPER_PRESENTATION); a journal switch compares them with the new journal's.
   pres <- medpaper_presentation()
   pres_keys <- intersect(c("figure_width_mm", "line_art_dpi", "font_min_pt", "panel_label_case"), names(pres))
-  audit$presentation <- if (length(pres_keys)) pres[pres_keys] else structure(list(), names = character(0))
+  audit$presentation <- if (length(pres_keys)) pres[pres_keys] else list()
+  audit$presentation$display_labels <- .mf_labels_hash()  # 1.20.0: the relabel map in force
+  audit$axis_scales <- .mf_axis_scales(leaves)
   keys <- c("figure", "archetype", "engine", "n_axes", "min_font_pt", "max_font_pt", "min_line_pt",
             "text_clipped_at_edge", "axes_tightbbox_overlaps", "glyph_warnings",
-            "tick_label_collisions", "interior_voids", "elements", "figure_text",
+            "tick_label_collisions", "interior_voids", "elements", "figure_text", "text_roles",
+            "axis_scales",
             "script", "script_sha256", "source_hashes", "render_hashes", "population",
             "presentation")
   .mf_write_json(audit[keys], sidecar)

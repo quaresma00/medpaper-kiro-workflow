@@ -288,7 +288,18 @@ def defined_abbreviations(text: str) -> set[str]:
         out |= set(abbreviation_definitions(m.group(1)))
     out |= set(re.findall(r"\(\s*([A-Za-z][A-Za-z0-9-]{1,14})s?\s*\)", text))
     out |= set(re.findall(r"(?:^|[;:]\s*)([A-Z][A-Za-z0-9-]{1,14})\s*(?:,|=)\s+[a-z]", text, re.M))
+    out |= {d.split("-")[0] for d in out if re.fullmatch(r"[A-Z]{2,}-\d+", d)}  # ICD-10 -> ICD
     return out
+
+
+def undefined(used: set[str], notes: str, cells: list[str] | None = None) -> list[str]:
+    """1.20.0: used minus defined; a plural (ORs, CIs) of a defined abbreviation and a code
+    defined in parentheses inside a cell ('osimertinib (AZD9291)') count as defined."""
+    defined = defined_abbreviations(notes)
+    for c in cells or []:
+        defined |= set(re.findall(r"\(\s*([A-Z][A-Za-z0-9-]{1,14})\s*\)", str(c)))
+    return sorted(u for u in used - defined
+                  if not (u.endswith("s") and u[:-1] in defined))
 
 
 def central_list(text: str) -> set[str] | None:

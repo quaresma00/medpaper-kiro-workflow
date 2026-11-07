@@ -17,6 +17,12 @@ Details (R/Python templates, skill arbitration, QC list, manifest JSON): `refere
    minimum at print size; widths and panel-label case from the profile; no in-figure title
    when the journal puts titles in the legend. Flow diagrams: boxes, counts, arrows, every
    count names its analysis unit. The `medical-sci-figure-skill` may guide styling, never render.
+   1.20.0 - in-figure text for a clinician: axis/legend titles, ticks, legend keys and strips
+   come from the display dictionary (save_medpaper()/save() relabel internal names, titles
+   with units); axis titles state measure, unit and 'log scale' ('Hazard ratio (95% CI), log
+   scale', 'Time since diagnosis, months'); never value/variable/estimate/group as a title,
+   'grp: A' strips, code names or scientific notation; legends define abbreviations and
+   explain technical terms in plain words.
 ```
 .\.venv\Scripts\python.exe tools/wf.py run-script 05_figures/code/fig1_km.R
 .\.venv\Scripts\python.exe tools/figures/qc.py --all

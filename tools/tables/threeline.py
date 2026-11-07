@@ -119,8 +119,45 @@ def _styled(spec: dict) -> dict:
     return out
 
 
+def _relabelled(spec: dict) -> dict:
+    """1.20.0 (V4): headers, row labels and category levels through the display dictionary
+    (internal name -> clinical label; titles and row labels with the unit). Numbers are never
+    touched. On for papers pinned to 1.20.0+ (or display_relabel = true); a header or row label
+    that stays code-like fails with the dictionary entry to add."""
+    try:
+        from wfcore import displaytext
+        m = displaytext.active_map()
+    except Exception:  # noqa: BLE001 - outside a paper: no dictionary, no relabelling
+        return spec
+    if not m.get("on"):
+        return spec
+    titles, values = m.get("titles") or {}, m.get("values") or {}
+
+    def title(v):
+        return titles.get(v.strip(), v) if isinstance(v, str) else v
+
+    def value(v):
+        return values.get(v.strip(), v) if isinstance(v, str) else v
+    rows = []
+    for row in spec["rows"]:
+        first = row[0]
+        if isinstance(first, str) and re.match(r"^(\s{2,}|[\u2003\u2002\u00a0])", first):
+            lead = re.match(r"^\s*", first).group(0)
+            first = lead + value(first.strip())
+        else:
+            first = title(first)
+        rows.append([first] + [value(x) for x in row[1:]])
+    out = {**spec, "header": [title(h) for h in spec["header"]], "rows": rows}
+    bad = [x for x in [*out["header"], *(r[0] for r in rows)]
+           if isinstance(x, str) and displaytext.unmappable(x)]
+    if bad:
+        raise ValueError(f"'{spec['sheet']}': no clinical label for {bad[:4]} - "
+                         + displaytext.unmapped_message(bad[0]))
+    return out
+
+
 def _write_sheet(ws, spec: dict) -> None:
-    spec = _styled(spec)
+    spec = _styled(_relabelled(spec))
     header = spec["header"]
     rows = spec["rows"]
     footnotes = spec["footnotes"]

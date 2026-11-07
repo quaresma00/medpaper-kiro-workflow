@@ -16,6 +16,13 @@ and `reference/table-standards.md`.
    population/denominator in title or footnote; whole-sentence footnotes ending with a full
    stop; each footnote defines its abbreviations. Diagnostics and merge steps go to a
    supplementary table. Never print Undefined, Not fitted, NA, NaN or Inf.
+   1.20.0 - write every visible string for a clinician: headers, row labels and levels come
+   from the display dictionary (internal name -> label, `unit`; the builder relabels them);
+   standard formats `n (%)`, `median (IQR)`, `OR (95% CI)`/`HR (95% CI)`, `P value` in the
+   journal's format (<0.001); reference rows say `Reference`; no software-output columns
+   (estimate, Std. Error, z value, AIC) in main tables; no code names (sexM, p.value),
+   TRUE/FALSE or scientific notation; footnotes spell out abbreviations and explain technical
+   terms (IPTW, SMD) in plain words. `wf displays text` lists what still reads like a report.
 3. Write `04_tables/manifest.json`, then run and check:
 ```
 .\.venv\Scripts\python.exe tools/wf.py run-script 04_tables/code/build_tables.py

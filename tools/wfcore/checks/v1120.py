@@ -77,7 +77,7 @@ def first_reader_displays(ctx: Ctx) -> Result:
                                 "legend only")
         if "abbreviations" in include:
             used = clinical.used_abbreviations(visible)
-            missing = sorted(used - clinical.defined_abbreviations("\n".join([cap, *notes, *ftext])))
+            missing = clinical.undefined(used, "\n".join([cap, *notes, *ftext]), cells)
             if missing:
                 problems.append(f"{d['id']}: abbreviation(s) not defined locally: "
                                 + ", ".join(missing[:6]))
@@ -87,6 +87,16 @@ def first_reader_displays(ctx: Ctx) -> Result:
                 problems.append(f"{d['id']}: engineering term '{hits[0][1]}' -> {hits[0][2]}")
         if "flow_units" in include and d["kind"] == "figure" and d.get("archetype") == "flow_diagram":
             problems += [f"{d['id']}: {p}" for p in clinical.flow_unit_problems(ftext)][:2]
+    if "display_text" in include:  # 1.20.0 (V3): every visible string, clinical language
+        from .. import displaytext
+        if displaytext.since_1200(ctx):
+            inv = displaytext.inventory(ctx.project)
+            done = {p.split(":")[0] for p in problems if "unit not stated" in p}
+            for f in displaytext.findings(ctx.project, inv):
+                if f["kind"] not in kinds or (f["rule"] == "e" and f["role"] == "row label"
+                                              and f["display"] in done):
+                    continue
+                problems.append(displaytext.line(f))
     if "non_redundancy" in include:  # F2 re-checked whenever the plan changed, same line
         just = display_items_justified(ctx)
         if not just.ok:

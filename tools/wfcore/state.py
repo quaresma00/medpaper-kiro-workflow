@@ -171,6 +171,7 @@ class State:
             self._note_v1170(old_version, pipeline_version)
             self._note_v1180(old_version, pipeline_version)
             self._note_v1190(old_version, pipeline_version)
+            self._note_v1200(old_version, pipeline_version)
             self.save()
         return changed
 
@@ -236,6 +237,26 @@ class State:
                    "legends at the end, tables after the references, Supplemental_File_{n}_{Title} "
                    "names, layout_from_guideline at S23, discussion_outline_ready and the "
                    "Discussion checks at S16. Paper files were not modified.")
+
+    def _note_v1200(self, old_version: str, new_version: str) -> None:
+        """1.20.0: one event; no file or stage is touched."""
+        if (version_tuple(old_version) >= (1, 20, 0) or version_tuple(new_version) < (1, 20, 0)
+                or self.data.get("v1200_migration_noted")):
+            return
+        self.data["v1200_migration_noted"] = True
+        self.event("requirements_changed",
+                   "1.20.0: new commands work now - `wf displays text [--md]` (every visible "
+                   "string of every table and figure with its role, the clinical-readability "
+                   "findings and the writer bundle .wf/writer_bundle/displays/) and `wf displays "
+                   "apply` (the clinical writer's wording into the display dictionary); `wf "
+                   "rebuild` refreshes the inventory. Wording changes inside displays are "
+                   "presentation (labels only, numbers unchanged): after S19 through a "
+                   "presentation round, `wf rebuild` and the user's new '我确认这一版'. Applies "
+                   "only after `wf migrate --yes` (or for S20-S25 after `wf journal switch`): "
+                   "display_text_resolved at S09/S12/S23, the display-text findings in "
+                   "first_reader_displays at S10/S11, and build-time relabelling through the "
+                   "display dictionary (or earlier with `wf config set display_relabel true`). "
+                   "Paper files were not modified.")
 
     def _note_v1160(self, old_version: str, new_version: str) -> None:
         """1.16.0: one event; no file or stage is touched."""

@@ -55,7 +55,10 @@ Judge, from the first round on, as:
      abbreviations or terms you had to look up, can each table and figure be read on its own;
   2. an editor checking engineering language and self-contained displays: code names, letter
      codes, processing counts (lines/rows/files), data-handling jargon in the body, tables,
-     legends and in-figure text; every abbreviation defined in each footnote/legend;
+     legends and in-figure text; every abbreviation defined in each footnote/legend; each
+     table and figure understandable on its own by a clinician, with no analysis-report text
+     (programme names, software-output columns, scientific notation, placeholder axis titles;
+     display_text.md and the display sheet when listed);
   3. a methods and journal reviewer (publication readiness, numbers, claims). When
      decision_record.md is listed (what was pre-specified, what was decided after the data
      were seen), check that no post hoc analysis is presented as confirmatory.
@@ -294,6 +297,8 @@ def write_bundle(project: Path, rnd: dict) -> Path:
     if record:
         lines.append(f"- {record} (material scientific decisions: pre-specified vs decided "
                      "after the data were seen; reviewer only)")
+    if rnd.get("scope") == "manuscript":  # 1.20.0 (V6): every display as a clinician sees it
+        lines += _display_text_files(project, out)
     from .reviewitems import write as _write_items  # 1.16.0: cases a gate could not decide
     listed = _write_items(project, out)
     if listed:
@@ -342,6 +347,37 @@ def write_bundle(project: Path, rnd: dict) -> Path:
         lines += [f"- {p}" for p in pages]
     (out / "MANIFEST.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     return out
+
+
+def _display_text_files(project: Path, out: Path) -> list[str]:
+    """1.20.0 (V6): the contact sheet of all displays and the visible-text inventory (with the
+    strings the deterministic rules still flag) for the reviewer."""
+    import shutil
+    lines = []
+    for rel in ("05_figures/qc/displays_sheet.png", "05_figures/qc/contact_sheet.png"):
+        src = project / rel
+        if src.is_file():
+            dst = out / "files" / rel.replace("/", "__")
+            shutil.copyfile(src, dst)
+            lines.append(f"- {dst} (all displays in one image: can each be read on its own?)")
+            break
+    try:
+        from . import displaytext
+        inv = displaytext.inventory(project)
+        if not inv["displays"]:
+            return lines
+        review: list[str] = []
+        finds = displaytext.findings(project, inv, review)
+        text = [displaytext.markdown(inv), "", f"## Strings the checks still flag ({len(finds)})", ""]
+        text += [f"- {displaytext.line(f)}" for f in finds] or ["- none"]
+        if review:
+            text += ["", "## For your judgement", ""] + [f"- {r}" for r in review]
+        dst = out / "files" / "display_text.md"
+        dst.write_text("\n".join(text) + "\n", encoding="utf-8")
+        lines.append(f"- {dst} (every visible string of every table and figure, by role)")
+    except Exception as exc:  # noqa: BLE001 - the displays themselves remain in the bundle
+        lines.append(f"(display text inventory unavailable: {type(exc).__name__}: {exc})")
+    return lines
 
 
 def close(project: Path, scope: str, findings: dict[str, int], changes: list[dict],

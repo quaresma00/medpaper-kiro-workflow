@@ -128,3 +128,26 @@ write_table(
 ```
 .\.venv\Scripts\python.exe tools/wf.py advance --note "K main + M supp tables built; all values traced to results JSON"
 ```
+
+## 1.20.0 - visible table text for a clinical reader
+
+- `wf displays text [--md]` lists every visible string of every table and figure (title, column
+  header, row label, level, cell, footnote, caption; axis title, tick label, legend title/key,
+  strip, annotation, flow box, legend) in `.wf/display_text/inventory.json` and judges it
+  (`reference/display_text.toml`): a code-like names (snake_case, p.value, factor(...), sexM,
+  a:b, TRUE/FALSE, results-JSON keys, derived-data headers, dictionary internal names);
+  b placeholder titles/headers (value, variable, estimate, term, group, Freq); c software-output
+  columns in main tables (Estimate, Std. Error, z value, Pr(>|z|), AIC, df, statistic);
+  d scientific notation, more than 3 decimals, ratios/CI with the journal's
+  `number_format.ratio_decimals` (default 2), percentages with `percent_decimals` (default 1),
+  '1.00 (1.00-1.00)' instead of 'Reference'; e units on continuous rows (dictionary `unit`),
+  'n (%)' for count rows; f 'Model 2'/'Set A' defined in the same footnote; g technical terms
+  (IPTW, ROR, SMD, E-value ...) spelled out and explained (advisory); h > 8 data columns in a
+  main table (advisory).
+- Relabelling at build: `write_table()` maps headers, row labels and levels through the
+  dictionary (titles and row labels as 'Label, unit'); a header or row label that stays
+  code-like stops the build with the dictionary entry to add. On for papers pinned to 1.20.0+;
+  earlier pins after `wf migrate --yes` or `wf config set display_relabel true`.
+- Exceptions (a methods paper's model columns): `.wf/language_allowlist.json` with the exact
+  string and a reason. Severity: warning at S10/S11 (first_reader_displays), blocking at S09,
+  S12 and S23 (`display_text_resolved`).

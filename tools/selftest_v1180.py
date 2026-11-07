@@ -700,7 +700,7 @@ def run_release(tmp: Path, record, section) -> None:
     gates = {(s.id, g.get("check")): g.get("since") for s in pipe.stages for g in s.gate}
     record("R pipeline 1.18.0; a 1.17.0 paper gets exactly one 1.18.0 event, stays pinned, no paper "
            "file changes; cards <= limit",
-           pipe.meta.get("version") in ("1.18.0", "1.19.0") and len(notes) == 1 and st.engine_pin == "1.17.0"
+           pipe.meta.get("version") in ("1.18.0", "1.19.0", "1.20.0") and len(notes) == 1 and st.engine_pin == "1.17.0"
            and before == after and max(sizes.values()) <= registry.CARD_MAX_CHARS,
            f"{len(notes)} {max(sizes.values())}")
     record("R the new gates carry since = 1.18.0 at S20/S23/S25",

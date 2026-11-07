@@ -14,7 +14,7 @@
 
 [meta]
 name = "medpaper"
-version = "1.19.0"
+version = "1.20.0"
 schema = 1
 description = "Medical/clinical research pipeline: idea -> feasibility -> data -> analysis -> artifacts -> manuscript -> submission package."
 
@@ -156,6 +156,11 @@ discussion_result_sentences_max = 3
 discussion_restated_sentences_max = 2
 discussion_prior_studies_min = 5
 discussion_restate_jaccard = 0.6
+# 1.20.0 (V4): table builders and save_medpaper()/style.save() map internal names to the display
+# dictionary's clinical labels (with units) at build time. "" = on for papers pinned to 1.20.0+,
+# off for earlier pins (a rebuild never changes their displays unexpectedly); "true"/"false"
+# in the paper's .wf/config.toml decides explicitly (`wf config set display_relabel true`).
+display_relabel = ""
 
 # ==============================================================================
 # STAGES
@@ -505,6 +510,8 @@ artifact = "rendered tables"
 [[stage.gate]]
 check = "first_reader_displays"
 kinds = ["table"]
+# 1.20.0 (V3): + every visible string in clinical language (warning here).
+include = ["display_text"]
 severity = "warn"
 since = "1.12.0"
 [[stage]]
@@ -560,6 +567,7 @@ check = "temp_clean"
 [[stage.gate]]
 check = "first_reader_displays"
 kinds = ["figure"]
+include = ["display_text"]
 severity = "warn"
 since = "1.12.0"
 [[stage]]
@@ -584,6 +592,11 @@ since = "1.14.0"
 [[stage.gate]]
 check = "displays_seen_current"
 since = "1.16.0"
+# 1.20.0 (V3/V5): every visible string of the displays reads in clinical language before the
+# Results build on them (bound to the inventory hash; re-checked at S12 and S23).
+[[stage.gate]]
+check = "display_text_resolved"
+since = "1.20.0"
 # 1.14.0 (B): the writer gets every result - clinical label, comparison, measure, CI level.
 [[stage.gate]]
 check = "writer_results_mapped"
@@ -657,6 +670,9 @@ since = "1.16.0"
 check = "first_reader_displays"
 include = ["abbreviations", "engineering", "flow_units", "non_redundancy"]
 since = "1.12.0"
+[[stage.gate]]
+check = "display_text_resolved"
+since = "1.20.0"
 [[stage]]
 id = "S13_reflib"
 title = "Build verified reference library by argumentative role (abstracts mandatory)"
@@ -1147,6 +1163,10 @@ since = "1.18.0"
 [[stage.gate]]
 check = "layout_from_guideline"
 since = "1.19.0"
+# 1.20.0 (V3/V8): visible display text after the journal re-render (inventory recomputed).
+[[stage.gate]]
+check = "display_text_resolved"
+since = "1.20.0"
 [[stage.gate]]
 check = "reference_provenance"
 live = true

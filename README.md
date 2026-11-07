@@ -2,8 +2,15 @@
 
 一套面向医学与临床研究的 Kiro 工作流。它把“研究想法”推进为经过数据、文献、统计结果、图表、人工复核和期刊规则共同校验的投稿包，而不是只让 AI 一次性写出一篇看似完整的论文。
 
-当前版本：`1.19.0`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE + R 4.3+
+当前版本：`1.20.0`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE + R 4.3+
 
+## 1.20.0 变化（图表文字面向医学读者）
+- **可见文字清单**：`wf displays text [--md]` 按角色列出每个主表/补充表和图的全部可见文字（标题、列标题、行标签、分类水平、单元格文字、脚注、坐标轴标题、刻度标签、图例标题与条目、分面标签、注释、流程图方框、表题/图注），存于 `.wf/display_text/inventory.json`（按来源哈希增量更新）；`wf rebuild` 与 S09-S12/S23 检查自动运行。
+- **临床可读性检查**（`reference/display_text.toml`）：代码样名称（snake_case、p.value、factor()、sexM、a:b、TRUE/FALSE、结果 JSON 键名）、占位标题（value、variable、estimate、group）、主表中的软件输出列（Std. Error、z value、AIC）、科学计数法与过多小数、参考组写成 1.00 (1.00-1.00)、连续变量缺单位、计数行未注明 n (%)、对数轴/时间轴未说明、未定义的“Model 2”、未解释的专业术语（IPTW、ROR、E-value 等，提示）、主表超过 8 个数据列（提示）。S10/S11 警告，S09 写结果前、S12、S23 阻断（`display_text_resolved`，绑定清单哈希）；例外写入 `.wf/language_allowlist.json` 并给理由。
+- **按展示词典自动改标签**：表格构建器、R `save_medpaper()`、Python `style.save()` 在生成时把内部名称换成词典中的临床标签（标题与行标签带单位），数字不变；无法映射的代码样文字直接报出该字符串和应加的词典条目。
+- **临床写作代理改写图表文字**：`.wf/writer_bundle/displays/` 只含被标出的字符串及其上下文；写作代理把措辞写到 `.wf/writer/display_wording.md`，`wf displays apply` 写入词典，其余措辞列出供脚本、图注、表题修改；S11 之后与 D2 总览图一起做一次。
+- **审阅**：S18 审阅包附全部图表总览图和可见文字清单，审阅者逐项判断每个图表能否被临床读者单独看懂。
+- **在途论文**：`wf displays text`、写作包和 `wf displays apply` 立即可用；新门禁和自动改标签（since 1.20.0）在 `wf migrate --yes`、换刊后或 `wf config set display_relabel true` 后生效；S19 之后的措辞修改属于展示层（只改标签、不改数字），走展示修订轮 + `wf rebuild` + 用户重新回复“我确认这一版”；只记一条迁移事件，论文文件不改。
 ## 1.19.0 变化（题名页放入正文、图表位置按指南、讨论不复述结果并加深、补充文件按序号加类型命名）
 - **题名页放入正文**：`title_page.placement` = in_manuscript | separate | both。非盲审期刊默认 in_manuscript：正文首页就是 S21 题名页（题名、短标题、作者、单位、通讯作者地址/邮箱/电话、ORCID、期刊要求的计数），分页后接摘要；`required_uploads` 要求题名页时为 both（另交单独文件）；盲审期刊只用单独题名页、正文保持匿名。两处同一来源，参考文献计数、`journal_fields_met` 和盲审审计对两处都适用。
 - **图表位置由类型字段决定，不由代理判断**：`figures.placement` = separate_files（默认：正文不嵌图，图注在末尾另起一页，图片单独上传）| in_text | end_of_manuscript；`tables.placement` = end_of_manuscript（默认：参考文献后每表一页）| in_text。非默认值必须有指南要求（`guideline_requirements.json` 中 rule.field + 原文 + 行号），S23 新门禁 `layout_from_guideline` 检查；图片不会既嵌入又单独上传，除非指南要求。1.18 及以前“图放在正文末尾”来自 S20 写入的 `embed_figures: true`（构建器照做、未要求指南依据），现在被标出。

@@ -1,0 +1,111 @@
+# ==============================================================================
+# Display text for a clinical reader (1.20.0): what an analysis report puts into tables and
+# figures that a medical reader cannot follow.
+# ==============================================================================
+# Read by tools/wfcore/displaytext.py on the visible-text inventory of every table and figure
+# (`wf displays text`). Rule letters match the release notes:
+#   a code-like strings            b generic placeholder labels   c software-output columns
+#   d number display               e units and measures           f undefined letter-code labels
+#   g technical terms to explain   h too many columns in a main table
+# A paper that genuinely needs one of these strings adds it with a reason to
+# .wf/language_allowlist.json {"terms": [{"term": "<exact string>", "reason": ">= 15 chars",
+# "scope": "all"}]} - never by editing this file.
+# ==============================================================================
+
+[meta]
+version = "1.20.0"
+
+# Clinical tokens that look code-like to a pattern but are ordinary medical text.
+[clinical_tokens]
+exact = ["n (%)", "No. (%)", "n/N (%)", "Median (IQR)", "Mean (SD)", "P value", "P", "CI", "95% CI",
+         "HbA1c", "eGFR", "mmHg", "kPa", "mEq", "hsCRP", "hsTnT", "hsTnI", "ctDNA", "cfDNA", "dsDNA",
+         "scRNA", "mRNA", "miRNA", "lncRNA", "pH", "pCO2", "pO2", "SpO2", "FiO2", "kg/m2", "mg/dL",
+         "mL/min", "COVID-19", "SARS-CoV-2", "T2DM", "T1DM", "IgG", "IgM", "IgA", "IgE", "NT-proBNP",
+         "iPSC", "mL", "dL", "μL", "nM", "μM", "mM", "kDa"]
+
+# (b) generic labels that name the data structure, not the clinical content. Judged as the
+# whole string of an axis title, legend title, strip label or column header.
+[placeholders]
+words = ["value", "values", "variable", "variables", "var", "name", "count", "counts", "group",
+         "groups", "x", "y", "estimate", "est", "term", "terms", "level", "levels", "label", "type",
+         "category", "freq", "frequency", "key", "factor", "index", "series", "item", "class",
+         "colour", "color", "fill", "size", "shape", "id", "stat", "statistic"]
+suggest = "name the clinical content and its unit ('Number of patients', 'Hazard ratio (95% CI), log scale', 'Time since diagnosis, months')"
+
+# (c) software-output columns that belong in a supplementary table (or nowhere) - main tables only.
+[software_columns]
+pattern = '^(?:estimate|Estimate|coef|Coef\.?|coefficient|Std\.?\s?Error|std\.error|SE|s\.e\.|se|z\s?value|t\s?value|z|t|Pr\(>\|[zt]\|\)|exp\(coef\)|se\(coef\)|robust\s?se|lower\s?\.95|upper\s?\.95|conf\.low|conf\.high|p\.value|df|d\.f\.|AIC|BIC|logLik|log-likelihood|deviance|Deviance|Resid\.?\s?Dev|statistic|Wald|Chisq|Chi-?sq|convergence|converged|iterations?|n\.iter|null\.deviance)$'
+suggest = "report the clinical layout ('OR (95% CI)', 'HR (95% CI)', 'P value'); model diagnostics go to a supplementary table"
+
+# (g) technical statistical terms a clinician may not know: spelled out AND explained in plain
+# words in the same display's footnote or legend. `expand` must appear there.
+[[technical]]
+term = "ROR"
+pattern = '\bRORs?\b|\breporting odds ratios?\b'
+expand = 'reporting odds ratio'
+plain = "how much more often the event is reported with this drug than with all other drugs"
+[[technical]]
+term = "PRR"
+pattern = '\bPRRs?\b|\bproportional reporting ratios?\b'
+expand = 'proportional reporting ratio'
+plain = "the share of reports with the event for this drug divided by that share for all other drugs"
+[[technical]]
+term = "IC025"
+pattern = '\bIC0?25\b|\binformation component\b'
+expand = 'information component'
+plain = "a disproportionality measure; a lower 95% limit above 0 means more reports than expected"
+[[technical]]
+term = "EBGM"
+pattern = '\bEBGM\b|\bEB05\b|\bempirical Bayes(?:ian)? geometric mean\b'
+expand = 'empirical Bayes(?:ian)? geometric mean'
+plain = "a shrunken observed-to-expected reporting ratio"
+[[technical]]
+term = "E-value"
+pattern = '\bE-values?\b'
+expand = 'E-value'
+plain = "how strong an unmeasured confounder would have to be to explain the association away"
+[[technical]]
+term = "SMD"
+pattern = '\bSMDs?\b|\bstandardi[sz]ed mean differences?\b'
+expand = 'standardi[sz]ed mean difference'
+plain = "the difference between groups in standard-deviation units; below 0.1 is usually read as balanced"
+[[technical]]
+term = "IPTW"
+pattern = '\bIPTW\b|\binverse probability (?:of treatment )?weight\w*'
+expand = 'inverse probability (?:of treatment )?weight'
+plain = "each patient is weighted so that the compared groups are similar in measured characteristics"
+[[technical]]
+term = "propensity score"
+pattern = '\bpropensity scores?\b|\bPS-?matched\b'
+expand = 'propensity score'
+plain = "each patient's estimated probability of receiving the treatment given measured characteristics"
+[[technical]]
+term = "C statistic"
+pattern = '\bC[- ]statistics?\b|\bC[- ]index\b|\bconcordance (?:statistic|index)\b'
+expand = 'C[- ](?:statistic|index)|concordance'
+plain = "how well the model ranks patients by risk (0.5 = chance, 1 = perfect)"
+[[technical]]
+term = "NRI"
+pattern = '\bNRI\b|\bnet reclassification\b'
+expand = 'net reclassification'
+plain = "the net share of patients moved to a more correct risk category"
+[[technical]]
+term = "Brier score"
+pattern = '\bBrier scores?\b'
+expand = 'Brier score'
+plain = "the mean squared difference between predicted risk and outcome (lower is better)"
+[[technical]]
+term = "subdistribution HR"
+pattern = '\bsub-?distribution(?:al)? hazard|\bsHR\b|\bFine[- ]Gray\b'
+expand = 'sub-?distribution(?:al)? hazard'
+plain = "the hazard ratio for the event when death or other events can prevent it"
+[[technical]]
+term = "cumulative incidence"
+pattern = '\bcumulative incidence(?: function)?\b|\bCIF\b'
+expand = 'cumulative incidence'
+plain = "the proportion of patients who had the event by each time point, accounting for competing events"
+[[technical]]
+term = "restricted cubic spline"
+pattern = '\brestricted cubic splines?\b|\bRCS\b'
+expand = 'restricted cubic spline'
+plain = "a smooth curve that lets the association change shape across values"

@@ -48,6 +48,11 @@ def snapshot(keys, project: Path | None = None) -> dict:
                     out["spelling"] = st["spelling"]
         except Exception:  # noqa: BLE001 - presentparams alone stands
             pass
+    try:  # 1.20.0 (V4/V8): the display-dictionary relabel map in force ('off' or its hash)
+        from . import displaytext
+        out["display_labels"] = displaytext.labels_state(project)
+    except Exception:  # noqa: BLE001
+        pass
     return _canon(out)
 
 

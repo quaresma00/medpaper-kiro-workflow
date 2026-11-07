@@ -17,6 +17,10 @@ Write the Results from the final tables and figures (1.10.0: S09 runs after S10/
 .\.venv\Scripts\python.exe tools/figures/qc.py --contact-sheet --with-tables
 .\.venv\Scripts\python.exe tools/wf.py decide displays_seen_before_results YES --why "<what you saw; what you fixed>"
 ```
+   1.20.0, in the same pass: `wf displays text` lists table/figure strings that read like an
+   analysis report; delegate `.wf/writer_bundle/displays/MANIFEST.md` to the
+   `medpaper-clinical-writer` (answer in `.wf/writer/display_wording.md`), `wf displays apply`,
+   apply the listed wording, re-render, repeat until clean (`display_text_resolved`).
 1. Order the Results the way the artifact plan is ordered: cohort/flow, baseline
    characteristics, primary analysis, secondary analyses, sensitivity analyses.
    1.12.0: build the writer bundle (results rendered as sentences with clinical labels, table
@@ -26,20 +30,15 @@ Write the Results from the final tables and figures (1.10.0: S09 runs after S10/
 ```
 .\.venv\Scripts\python.exe tools/manuscript/writer_bundle.py build --stage S09_results
 ```
-   1.14.0: build exits 2 while a result lacks a clinical label or its CI level
-   (`.wf/writer_bundle/S09_results_GAPS.md`, gate `writer_results_mapped`); fix the display
-   dictionary or the results first, never let the writer guess.
+   Build exits 2 while a result lacks a clinical label or CI level (`S09_results_GAPS.md`);
+   fix the dictionary or results first, never let the writer guess.
 2. Write `project/07_manuscript/results.md`. Every display item in the plan must be cited
    at least once, in order, as `(Figure 1)`, `(Table 2)`, `(Figure S1)`, `(Table S1)`.
    The gate rejects citations to items not in the plan, and items never cited.
-3. Report effects the way the design demands: point estimate, CI (at its recorded level), then the p-value -
-   never a bare p. Copy the values from the result JSONs; do not re-round to look tidier
-   than the analysis was.
-4. Do not interpret. No "importantly", no "consistent with prior work", no mechanism.
-   Those belong in the Discussion.
-5. Do not restate a table row by row. The prose carries the findings the reader must not
-   miss; the table carries the rest.
-6. Polish this section before advancing (medical register, de-AI, de-engineering, no
+3. Effects: estimate, CI (recorded level), then P - never a bare P; values exactly as in the
+   result JSONs.
+4. Do not interpret (no "importantly", no mechanism) and do not restate tables row by row.
+5. Polish this section before advancing (medical register, de-AI, de-engineering, no
    processing log, prose not lists); fix every blocking item (`section_language_clean`):
 ```
 .\.venv\Scripts\python.exe tools/text/polish.py lint --file 07_manuscript/results.md

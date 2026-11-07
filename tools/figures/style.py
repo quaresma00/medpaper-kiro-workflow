@@ -267,6 +267,7 @@ def save(fig, stem: str | Path, width: str = "single", dpi: int = 600,
     stem = wfpaths.paper_output_path(stem)
     stem.parent.mkdir(parents=True, exist_ok=True)
     written = {}
+    relabel(fig)  # 1.20.0 (V4): clinical labels from the display dictionary
 
     png = stem.with_suffix(".png")
     fig.savefig(png, dpi=dpi, format="png")
@@ -295,6 +296,103 @@ def save(fig, stem: str | Path, width: str = "single", dpi: int = 600,
         written["artist_audit"] = audit_figure(fig, stem, archetype=archetype,
                                                provenance=_provenance(stem, written))
     return written
+
+
+def relabel(fig) -> None:
+    """1.20.0 (V4): axis and legend titles, categorical tick labels, legend keys and text
+    annotations through the display dictionary (internal name -> clinical label; titles with
+    the unit). Numbers are untouched. On for papers pinned to 1.20.0+ (or display_relabel =
+    true); a title or category that stays code-like raises with the dictionary entry to add."""
+    try:
+        from wfcore import displaytext
+        m = displaytext.active_map()
+    except Exception:  # noqa: BLE001 - outside a paper
+        return
+    if not m.get("on"):
+        return
+    from matplotlib.ticker import FuncFormatter
+    titles, values = m.get("titles") or {}, m.get("values") or {}
+
+    def tmap(s):
+        return titles.get(s.strip(), s) if s else s
+
+    def vmap(s):
+        return values.get(s.strip(), s) if s else s
+    texts = list(fig.texts)
+    for ax in fig.get_axes():
+        ax.set_xlabel(tmap(ax.get_xlabel()))
+        ax.set_ylabel(tmap(ax.get_ylabel()))
+        ax.set_title(tmap(ax.get_title()))
+        for axis in (ax.xaxis, ax.yaxis):
+            orig = axis.get_major_formatter()
+            if not getattr(orig, "_medpaper_relabel", False):
+                ff = FuncFormatter(lambda x, pos=None, _o=orig: vmap(_o(x, pos)))
+                ff._medpaper_relabel = True
+                axis.set_major_formatter(ff)
+        texts += list(ax.texts)
+        leg = ax.get_legend()
+        if leg is not None:
+            leg.get_title().set_text(tmap(leg.get_title().get_text()))
+            texts += list(leg.get_texts())
+    for leg in getattr(fig, "legends", []):
+        leg.get_title().set_text(tmap(leg.get_title().get_text()))
+        texts += list(leg.get_texts())
+    for t in texts:
+        t.set_text(vmap(t.get_text()))
+    fig.canvas.draw()
+    bad = []
+    for ax in fig.get_axes():
+        cands = [ax.get_xlabel(), ax.get_ylabel()]
+        cands += [t.get_text() for t in ax.get_xticklabels() + ax.get_yticklabels()]
+        leg = ax.get_legend()
+        if leg is not None:
+            cands += [leg.get_title().get_text()] + [t.get_text() for t in leg.get_texts()]
+        bad += [c for c in cands if c and displaytext.unmappable(c)]
+    if bad:
+        raise ValueError(f"figure text without a clinical label: {sorted(set(bad))[:4]} - "
+                         + displaytext.unmapped_message(bad[0]))
+
+
+def _text_roles(fig, phantom: set[int]) -> tuple[list[dict], dict]:
+    """1.20.0 (V2): every visible string with its role, and the axis scales."""
+    out, seen = [], set()
+
+    def add(t, role, axis=None):
+        if t is None or id(t) in seen or id(t) in phantom or not t.get_visible():
+            return
+        seen.add(id(t))
+        s = (t.get_text() or "").strip()
+        if s:
+            out.append({"text": s, "role": role, **({"axis": axis} if axis else {})})
+    if getattr(fig, "_suptitle", None) is not None:
+        add(fig._suptitle, "title")
+    scales = {}
+    for ax in fig.get_axes():
+        add(ax.xaxis.label, "axis title", "x")
+        add(ax.yaxis.label, "axis title", "y")
+        for t in (ax.title, getattr(ax, "_left_title", None), getattr(ax, "_right_title", None)):
+            add(t, "title")
+        for t in ax.get_xticklabels():
+            add(t, "tick label", "x")
+        for t in ax.get_yticklabels():
+            add(t, "tick label", "y")
+        leg = ax.get_legend()
+        if leg is not None:
+            add(leg.get_title(), "legend title")
+            for t in leg.get_texts():
+                add(t, "legend key")
+        for t in ax.texts:
+            add(t, "annotation")
+        for k, v in (("x", ax.get_xscale()), ("y", ax.get_yscale())):
+            if k not in scales or "log" in v:
+                scales[k] = v
+    for leg in getattr(fig, "legends", []):
+        add(leg.get_title(), "legend title")
+        for t in leg.get_texts():
+            add(t, "legend key")
+    for t in fig.texts:
+        add(t, "annotation")
+    return out, scales
 
 
 def _provenance(stem: Path, written: dict) -> dict:
@@ -421,6 +519,7 @@ def audit_figure(fig, stem: str | Path, archetype: str | None = None,
         "figure_text": sorted({(t.get_text() or "").strip() for t in real_texts()
                                if (t.get_text() or "").strip()}),
     }
+    report["text_roles"], report["axis_scales"] = _text_roles(fig, phantom)
     report.update(provenance or {})
     try:  # 1.17.0 (J7): the presentation parameters this render used (journal switch check)
         from wfcore import renderparams

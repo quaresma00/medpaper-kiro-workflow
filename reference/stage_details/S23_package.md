@@ -258,3 +258,5 @@ project/08_submission/manuscript/highlights.md --output project/08_submission/bu
 --style-config project/08_submission/docx_style.json`, manifest role `highlights`.
 DOCX preflight (docx_bundle_ready, 1.18.0): no tracked changes, comments, placeholders (XXX,
 TBD, TODO, [citation needed], lorem ipsum, ??) or highlighted text in any upload.
+
+- 1.20.0 (V8): after a journal re-render (`wf rebuild`) or `wf journal switch` the visible-text inventory is recomputed; `display_text_resolved` blocks until every table/figure string reads in clinical language.

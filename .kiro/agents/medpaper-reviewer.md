@@ -94,6 +94,15 @@ explained (design, population, definitions, follow-up); mechanisms/plausibility 
 implications are missing; limitations are generic (no likely direction or size of bias). The
 caller must close each such finding as changed or kept with a reason, like every finding.
 
+1.20.0 - display check: each table and figure must be understandable on its own by a
+clinician, with no analysis-report text. Use the display sheet (all displays in one image) and
+`display_text.md` (every visible string by role) when listed: programme names (sexM,
+exposure_strict, p.value), software-output columns in main tables (Std. Error, z value, AIC),
+scientific notation, '1.00 (1.00-1.00)' instead of 'Reference', placeholder titles (value,
+variable, estimate), axes without measure/unit/log scale, undefined 'Model 2', technical terms
+(IPTW, ROR, E-value) not explained in the footnote/legend. One numbered finding per display
+(category `other`, presentation); the caller closes each as changed or kept with a reason.
+
 1.14.0: when the bundle lists `decision_record.md` (a factual record of what was pre-specified
 and what was decided after the data were seen), check that every post hoc analysis is labelled
 exploratory and is not presented as confirmatory in the abstract, Results or conclusions. The

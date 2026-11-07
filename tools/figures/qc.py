@@ -61,7 +61,9 @@ SIDECAR_KEYS = ("figure", "archetype", "n_axes", "min_font_pt", "max_font_pt", "
 PROVENANCE_KEYS = ("script", "script_sha256", "source_hashes", "render_hashes")
 # "population" (1.7.1): N and NA handling of a curve drawn by recipe_km/recipe_cif.
 # "presentation" (1.17.0): the journal presentation parameters the render used.
-SIDECAR_OPTIONAL_KEYS = ("engine", *PROVENANCE_KEYS, "population", "presentation")
+# "text_roles" / "axis_scales" (1.20.0): every visible string with its role, and log axes.
+SIDECAR_OPTIONAL_KEYS = ("engine", *PROVENANCE_KEYS, "population", "presentation", "text_roles",
+                         "axis_scales")
 
 
 RENDER_STALE_SECONDS = 1800

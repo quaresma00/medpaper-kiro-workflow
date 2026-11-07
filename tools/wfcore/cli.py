@@ -1350,6 +1350,45 @@ def cmd_compliance(args) -> int:
     return 2 if counts["FAIL"] else 0
 
 
+def cmd_displays(args) -> int:
+    """1.20.0 (V2/V5): visible text of every table and figure for a clinical reader."""
+    _pipe, st, proj = _load()
+    from . import displaytext
+    if args.action == "apply":
+        try:
+            lines = displaytext.apply_reply(proj)
+        except ValueError as exc:
+            print(f"displays apply refused: {exc}")
+            return 2
+        st.event("display_wording_applied", "; ".join(lines)[:300])
+        st.save()
+        print("\n".join(lines))
+        print("next: apply the listed wording in the scripts/legends, then `wf rebuild --wait` "
+              "(or re-run the table/figure scripts) and `wf displays text` again")
+        return 0
+    inv, finds, bundle, review = displaytext.run(proj, md=args.md)
+    n = sum(len(d["strings"]) for d in inv["displays"].values())
+    block = [f for f in finds if f["severity"] == "fail"]
+    print(f"display text: {len(inv['displays'])} display(s), {n} visible string(s), inventory "
+          f"{inv['hash'][:12]} -> {displaytext.INV_REL}")
+    for f in finds[:40]:
+        print(f"  [{f['rule']}{'' if f['severity'] == 'fail' else ' warn'}] {displaytext.line(f)}")
+    if len(finds) > 40:
+        print(f"  ... {len(finds) - 40} more in {displaytext.BUNDLE_REL}/MANIFEST.md")
+    for r in review[:8]:
+        print(f"  REVIEW {r}")
+    if args.md:
+        print(f"markdown inventory: {displaytext.INV_MD}")
+    if finds:
+        print(f"{len(block)} string(s) to resolve, {len(finds) - len(block)} advisory. Writer "
+              f"bundle: {displaytext.BUNDLE_REL}/MANIFEST.md - delegate it to "
+              f"medpaper-clinical-writer (reply in {displaytext.REPLY_REL}), then `wf displays "
+              "apply`; a string that is right as it is: .wf/language_allowlist.json with a reason.")
+    else:
+        print("every table and figure reads in clinical language (no flagged strings)")
+    return 2 if block else 0
+
+
 def cmd_archetype(args) -> int:
     """Print one archetype instead of making the agent read the whole registry.
 
@@ -1865,6 +1904,9 @@ def cmd_run_script(args) -> int:
     # panel label case, line-art dpi) reach the builders from the first render.
     from . import presentparams
     os.environ["MEDPAPER_PRESENTATION"] = presentparams.env_json(proj)
+    # 1.20.0 (V4): the display-dictionary relabel map reaches R and Python builders.
+    from . import displaytext
+    os.environ["MEDPAPER_DISPLAY_LABELS"] = displaytext.relabel_env(proj)
     watch = ("04_tables", "05_figures/out")
 
     def _derived() -> dict[Path, int]:
@@ -2348,6 +2390,14 @@ def build_parser() -> argparse.ArgumentParser:
                                           "supplementary names and their basis, 1.19.0)")
     p.add_argument("action", choices=("write", "summary", "layout"))
     p.set_defaults(fn=cmd_compliance)
+
+    p = sub.add_parser("displays", help="visible text of tables and figures (1.20.0): text "
+                                        "[--md] (inventory, clinical-readability findings, "
+                                        "writer bundle) | apply (writer's wording -> display "
+                                        "dictionary)")
+    p.add_argument("action", choices=("text", "apply"))
+    p.add_argument("--md", action="store_true", help="text: also write the inventory as Markdown")
+    p.set_defaults(fn=cmd_displays)
 
     p = sub.add_parser("doctor", help="environment and wiring check")
     p.set_defaults(fn=cmd_doctor)

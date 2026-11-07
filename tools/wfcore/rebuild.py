@@ -235,6 +235,18 @@ def run(project: Path, everything: bool = False, dry: bool = False) -> int:
             log.run("polish diff", [py, str(tools / "text/polish.py"), "diff"], project)
         for rec in todo:
             log.run(f"build {rec['output']}", build_command(project, rec), project)
+        # 1.20.0 (V8): the visible-text inventory follows every re-render (S23 gate reads it).
+        try:
+            from . import displaytext
+            inv, finds, _b, _r = displaytext.run(project)
+            log.note(f"display text: inventory {inv['hash'][:12]}, {len(finds)} flagged string(s)")
+            blocking = [f for f in finds if f["severity"] == "fail"]
+            if blocking:
+                print(f"display text: {len(blocking)} string(s) not yet in clinical language, e.g. "
+                      f"{displaytext.line(blocking[0])[:200]} (`wf displays text`; the S23 gate "
+                      "display_text_resolved checks it)")
+        except Exception as exc:  # noqa: BLE001 - reported, the package rebuild continues
+            log.note(f"display text inventory failed: {type(exc).__name__}: {exc}")
         from . import displayfiles
         try:
             made = displayfiles.sync(project)

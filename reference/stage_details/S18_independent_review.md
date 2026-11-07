@@ -86,3 +86,5 @@ edits them. This is an independent scientific/editorial audit, not another writi
 .\.venv\Scripts\python.exe tools/wf.py check
 .\.venv\Scripts\python.exe tools/wf.py advance --note "independent verdict=<READY|REVISE|NOT_READY>; critical barriers: <none or list>; frozen files unchanged"
 ```
+
+- 1.20.0: the manuscript review bundle carries the display sheet (all displays in one image) and `display_text.md` (every visible string by role, the strings still flagged); the reviewer judges whether each table and figure is understandable on its own by a clinician, and each such finding is closed as changed or kept with a reason.

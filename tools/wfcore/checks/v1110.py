@@ -179,7 +179,7 @@ def display_abbreviations_defined(ctx: Ctx) -> Result:
                 problems.append(f"{d['id']}: the journal requires one central list; remove the "
                                 "local Abbreviations block")
             continue
-        missing = sorted(used - clinical.defined_abbreviations(notes))
+        missing = clinical.undefined(used, notes, d["cells"])
         if missing:
             problems.append(f"{d['id']}: defines not " + ", ".join(missing[:8]))
     full_rel = ctx.src("07_manuscript/full_manuscript.md")

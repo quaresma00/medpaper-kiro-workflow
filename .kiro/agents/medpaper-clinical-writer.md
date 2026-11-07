@@ -72,6 +72,14 @@ their names are the programmer's vocabulary, not the reader's.
   implications proportionate to the evidence; strengths and limitations with the likely
   direction and size of each bias; no new results, no overclaiming; never cite supplementary
   items (Table S2, Online Resource 1); continuous prose without subheadings.
+- Display wording (1.20.0; bundle `.wf/writer_bundle/displays/MANIFEST.md`): you own the words
+  inside tables and figures. For each item give the clinical wording a medical reader
+  understands without the text ('Male sex', 'Age, years', 'Hazard ratio (95% CI), log scale',
+  'Number of patients', 'Reference'), the unit for a continuous measure, a one-line definition,
+  and - where needed - one plain footnote/legend sentence (abbreviation spelled out, a technical
+  term such as IPTW or ROR explained, what 'Model 2' adjusts for). Use the clinical labels
+  already listed; standard formats n (%), median (IQR), OR/HR (95% CI), P value. Never change
+  a number. Write only the table the manifest names to `.wf/writer/display_wording.md`.
 - Continuous paragraphs, no bullet lists, no review/round/re-run history in the text.
 - An analysis the material calls post hoc or additional is written as exploratory ("In an
   exploratory analysis, ..."), never as confirmatory; do not narrate plan changes.

@@ -60,6 +60,7 @@ manuscript instead of the subagent. If context runs out, say so.
 | Stage | Agent | Notes |
 |---|---|---|
 | S08, S09, S14, S16, S19 rewrites | `medpaper-clinical-writer` | Pass the MANIFEST of `tools/manuscript/writer_bundle.py build --stage <S>`; it sees clinical labels, results in words, tables, legends, notes - never code, JSON keys or logs. Run `wf check` (engineering-language lint) afterwards. |
+| after S11 (with the D2 look) | `medpaper-clinical-writer` | 1.20.0: table/figure wording - `wf displays text` writes `.wf/writer_bundle/displays/MANIFEST.md` (only strings that read like an analysis report); then `wf displays apply` and re-render. |
 | S15 | `medpaper-deepreader` | One invocation per full text; save its notes yourself. |
 | S18, S19/S24 rounds, S25 | `medpaper-reviewer` | Give it only the bundle path `review_round.py start` prints and the neutral brief. It writes only `.wf/review_bundle/<round>/report.md`; `close` reads that file - never paraphrase findings. Confirmation is the exact sentence `我确认这一版`. |
 
