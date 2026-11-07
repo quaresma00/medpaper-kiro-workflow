@@ -2,19 +2,20 @@
 
 Goal: pick a legitimate current SCIE venue with realistic acceptance odds, freeze its
 author instructions as typed fields, and open the journal variant.
-Details (typed-field JSON, docx_style.json template, evidence rules, switching journals):
+Details (typed fields, docx style, evidence, browser, switching):
 `reference/stage_details/S20_journal.md`.
 
 ## Do
-1. Screen candidates that recently published the same design/topic: currently SCIE, current
-   JCR Q1-Q4, no integrity warning; evidence <= 90 days old (official source first).
+1. Screen journals that recently published the same design/topic: current SCIE, JCR Q1-Q4,
+   no integrity warning; evidence <= 90 days old (official source first).
 2. `08_submission/journal_shortlist.md` (`Eligibility screen`, `Ranking basis`, `Shortlist`,
    `Reject-fallback cascade`): 5-8 candidates ranked by acceptance probability and fit.
 3. Ask the user to choose (never default to the highest impact factor).
-4. Official guide: `wf journal lookup --issn <ISSN>` (DOAJ/OpenAlex/NLM + publisher URL table,
-   one polite GET). Blocked (403/captcha)? It prints the URL: the user saves the page in the
-   browser (HTML only, or PDF), then `wf guidelines ingest --from <file> --url <URL>`. Never
-   log in, bypass bot checks or use reader proxies. MJL page as PDF: `--kind indexing`.
+4. Official guide: `wf journal lookup --issn <ISSN>`. Blocked/JS page: its BROWSER steps
+   (`playwright` tool: capture to `.playwright-mcp/`, `wf guidelines ingest --from <capture>
+   --url <final URL>`, sub-pages `--append`; the user does verification/login in the browser
+   window) or the manual save path. MJL/JCR: `--kind indexing --screenshot <png>`. Never
+   solve checks or type credentials.
 5. `08_submission/target_journal.json` typed fields: `limits` (+ `source`; only an explicit
    numeric rule is a cap - never derive word caps from a page count; an estimate goes in
    `limits.estimated`), `separate_display_files`, `supplementary_label`, `abbreviation_list`,
@@ -39,14 +40,14 @@ Details (typed-field JSON, docx_style.json template, evidence rules, switching j
 .\.venv\Scripts\python.exe tools/manuscript/scientific_freeze.py open-variant --journal "<chosen journal>"
 ```
    Rejected later? `wf journal switch --to "<new>" --confirm-old "<old>" --why "..."` (one
-   command; then the user opens a new chat). Never edit S20 files in place for a new journal.
+   command; then a new chat). Never edit S20 files in place for a new journal.
 
 ## Outputs
 - `08_submission/journal_shortlist.md`, `target_journal.json`, `guidelines_extract.md`,
   `docx_style.json`, `guideline_requirements.json`, `manuscript/` (journal variant)
 
 ## Gate
-guidelines sourced (cited lines), requirement list mapped (every obligation line covered,
+guidelines sourced (cited lines), indexing evidence, requirement list mapped (every obligation line covered,
 quotes verbatim, numbers = typed fields), journal layer clean, docx style, display plan fits,
 presentation params confirmed, freeze intact and variant ready (non-overridable). Never state
 indexing, fees or rules from memory.

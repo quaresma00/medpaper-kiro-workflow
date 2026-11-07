@@ -143,3 +143,24 @@ write_results("dataset_summary", {
 .\.venv\Scripts\python.exe tools/wf.py check
 .\.venv\Scripts\python.exe tools/wf.py advance --note "n=<rows>x<cols>; source=<x>; blockers=<missingness/dictionary gaps>"
 ```
+
+## Web pages as data (1.21.0)
+
+Public pharmacovigilance dashboards (VigiAccess, the FAERS public dashboard), drug labels on
+regulator sites and registry pages enter the paper as facts only through
+`wf data capture --from <capture> --url <URL> --query "<exact query and filters>" --name <n>
+[--screenshot <png>] [--values-csv <csv>]`: a dated raw source under `02_data/raw/web/<n>/v001/`
+(original capture, clean text, screenshot, `capture.json` with URL, query, time, method and the
+sha256 of every file). A repeated capture of the same query is `v002`, never an overwrite. The
+files are part of the raw inventory (`tools/data_manifest.py sync`; cite the URL, query and
+date in the acquisition manifest), so analysis numbers trace to them; scripts read
+`source_path('web:<n>')` (R `medpaper_source_path('web:<n>')`, latest version). When the page
+text is obfuscated (VigiAccess inserts invisible characters), take a screenshot and read the
+numbers from the image into a small CSV next to it (`--values-csv`, marked 'read from
+screenshot'); never decode the obfuscation. The values are listed once for the user or
+reviewer to verify: `wf data confirm-capture <n> --note "<words>"` (stored in
+`.wf/web_captures.json`, the raw files never change). `web_captures_traced` (S04, since
+1.21.0) fails when a capture changed after capture and warns while screenshot readings are
+unverified. Where the browser tool is unavailable, use the local scripts the user's own rules
+name (if they exist); literature search and full texts stay on PubMed/E-utilities and the
+open-access APIs.

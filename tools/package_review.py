@@ -49,6 +49,9 @@ def main() -> int:
                      "08_submission/guideline_requirements.json",
                      "08_submission/compliance_matrix.md", "08_submission/compliance_matrix.json",
                      "08_submission/compliance_evidence.json",
+                     # 1.21.0 (B8): the evidence index (capture method, URL, date, sha256),
+                     # indexing captures/screenshots and the submission-system record.
+                     *audit.evidence_files(project),
                      "08_submission/bundle/manifest.json", "08_submission/bundle/SUBMISSION_CHECKLIST.md",
                      "08_submission/submission_qc.md", *copies]
             out, mode = audit.start(project, list(dict.fromkeys(files)))

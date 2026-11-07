@@ -332,6 +332,8 @@ def decisions(project: Path) -> list[dict]:
     project = Path(project)
     target = _target(project)
     rows = []
+    from . import portal  # 1.21.0 (B5): the submission system's own upload slots
+    portal_rec = portal.current(project)
     vals = {"title_page": title_page_placement(target, project),
             "figures": figure_placement(target, project),
             "tables": table_placement(target, project),
@@ -349,6 +351,9 @@ def decisions(project: Path) -> list[dict]:
             why = "盲审期刊（blinded_main_manuscript），正文保持匿名"
         elif b:
             why = f"投稿指南 {b['lines']} “{b['quote'][:80]}”"
+        elif item == "title_page" and portal_rec.get("title_page_slot") is not None:
+            why = ("投稿系统" + ("有" if portal_rec["title_page_slot"] else "没有") + "题名页上传项（"
+                   f"portal_requirements.json，{portal_rec.get('read_at')}）")
         elif item == "title_page" and value == "both" and explicit(target, item) is None:
             why = "期刊 required_uploads 要求单独题名页（引擎默认规则）"
         elif explicit(target, item) is not None or (item == "figures" and legacy_embed(target)) \

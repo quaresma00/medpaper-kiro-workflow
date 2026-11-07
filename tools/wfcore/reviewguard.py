@@ -20,7 +20,8 @@ import time
 from pathlib import Path
 
 DIR = ".wf/review_guard"
-SKIP_TOP = {".wf", "temp", ".kiro", ".git", ".venv", "__pycache__", ".wf_archive"}
+SKIP_TOP = {".wf", "temp", ".kiro", ".git", ".venv", "__pycache__", ".wf_archive",
+            ".playwright-mcp"}  # 1.21.0 (B1): browser scratch
 START, END = "<<<REPORT>>>", "<<<END>>>"
 
 

@@ -14,6 +14,12 @@ Details (pilot/sampling markers, manifest fields, source-limited path): `referen
    (`reference/language_policy.toml`); resolve the paper root with
    `wfcore.paths.project_dir()`; run via `tools/wf.py run-script 02_data/acquisition/<s>.py`.
    Request the source total first, exhaust every page/cursor, no convenience cap.
+   Web pages that become data (VigiAccess/FAERS public dashboards, regulator labels, registry
+   pages; the `playwright` browser tool if it is in your list): `wf data capture --from
+   <capture> --url <URL> --query "<exact query + filters>" --name <n> [--screenshot <png>]` ->
+   dated, versioned `02_data/raw/web/<n>/v001/`; scripts read `source_path('web:<n>')`.
+   Obfuscated page text: never decode it; read the numbers off the screenshot into a CSV
+   (`--values-csv`), verified once by the user (`wf data confirm-capture <n> --note ...`).
 2. Cleaning, recoding, exclusions and merges: scripts in `03_analysis/code/` writing
    `02_data/derived/`; no manual spreadsheet edits.
 3. `02_data/provenance.md` (source, query, timestamp, release, hash, licence, who may see it)

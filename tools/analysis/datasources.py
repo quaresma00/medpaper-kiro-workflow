@@ -32,7 +32,17 @@ def _paper() -> Path:
 
 
 def source_path(name: str, *parts: str) -> Path:
-    """Absolute path of a declared data source (optionally a file inside it)."""
+    """Absolute path of a declared data source (optionally a file inside it).
+    1.21.0: 'web:<name>' is the latest version folder of a `wf data capture` (02_data/raw/web/)."""
+    if name.startswith("web:"):
+        from wfcore import webdata
+        base = webdata.latest(_paper(), name[4:])
+        if base is None:
+            raise KeyError(f"no web capture {name[4:]!r}; run: wf data capture ... --name {name[4:]}")
+        p = base.joinpath(*parts) if parts else base
+        if parts and not str(p.resolve()).startswith(str(base.resolve())):
+            raise ValueError(f"{'/'.join(parts)} escapes the web capture {name}")
+        return p
     for s in _ds.load(_paper()):
         if s["name"] == name:
             base = Path(s["path"])

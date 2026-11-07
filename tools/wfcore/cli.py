@@ -346,7 +346,7 @@ def _record_user_files(pipe, proj: Path) -> None:
     info) are the user's, never orphans; they are listed once in .wf/user_files.json."""
     state_dir = proj / pipe.layout.get("state_dir", ".wf")
     skip = {pipe.layout.get("state_dir", ".wf"), ".kiro", ".git"}
-    foreign = paths.foreign_prefixes(proj)  # 1.14.1: older paper attempts stay theirs
+    foreign = paths.skipped_prefixes(proj)  # 1.14.1: older paper attempts stay theirs
     found = sorted(p.relative_to(proj).as_posix() for p in proj.rglob("*")
                    if p.is_file() and not set(p.relative_to(proj).parts[:1]) & skip
                    and p.name != ".gitkeep"
@@ -1179,6 +1179,9 @@ def cmd_clean(args) -> int:
         if not p.is_file():
             continue
         rel = p.relative_to(proj).as_posix()
+        if rel.startswith(paths.SCRATCH_PREFIXES):
+            scratch.append(rel)  # 1.21.0 (B1): browser page dumps and captures (already ingested)
+            continue
         if rel.startswith(foreign):
             continue
         if rel.startswith(f"{tmp}/"):
@@ -1190,7 +1193,7 @@ def cmd_clean(args) -> int:
             continue
         orphans.append(rel)
 
-    print(f"scratch files in project/{tmp}/: {len(scratch)}")
+    print(f"scratch files in project/{tmp}/ and {paths.BROWSER_SCRATCH}/: {len(scratch)}")
     for r in scratch[:40]:
         print(f"  del  {r}")
     print(f"\nundeclared files elsewhere: {len(orphans)}")
@@ -1206,6 +1209,10 @@ def cmd_clean(args) -> int:
         return 0
     for r in scratch:
         (proj / r).unlink(missing_ok=True)
+    browser = proj / paths.BROWSER_SCRATCH
+    if browser.is_dir():
+        import shutil
+        shutil.rmtree(browser, ignore_errors=True)
     st.event("clean", f"deleted {len(scratch)} scratch file(s)")
     st.save()
     print(f"\ndeleted {len(scratch)} scratch file(s)")
@@ -1227,18 +1234,41 @@ def cmd_rebuild(args) -> int:
 def _ingest(st, proj: Path, args) -> int:
     """1.17.0 (J4): a guide the user saved (HTML/PDF/DOCX/TXT) becomes the guideline source."""
     from . import guideingest
+    values = {}
+    for item in getattr(args, "read_from_image", None) or []:
+        k, sep, v = str(item).partition("=")
+        if not sep or not k.strip() or not v.strip():
+            print(f"导入被拒绝：--read-from-image 写成 键=值（例如 jcr_quartile=Q2），收到 {item!r}")
+            return 2
+        values[k.strip()] = v.strip()
+    shot = getattr(args, "screenshot", None)
     try:
         entry = guideingest.ingest(proj, paths.resolve_paper_path(args.from_file), args.url or "",
-                                   args.title or "", args.kind)
+                                   args.title or "", args.kind, append=bool(getattr(args, "append", False)),
+                                   screenshot=paths.resolve_paper_path(shot) if shot else None,
+                                   read_from_image=values or None)
     except (OSError, ValueError) as exc:
         print(f"导入被拒绝：{exc}")
         return 2
     st.event("guidelines_ingested", f"{entry['kind']} {entry['file']} ({entry['format']}, "
-                                    f"{entry['lines']} lines) from {entry['url']}")
+                                    f"{entry['lines']} lines, {entry.get('method', 'file')}) "
+                                    f"from {entry['url']}")
     st.save()
     day = entry["ingested_at"][:10]
     print(f"已保存原文：08_submission/cache/{entry['file']}（{entry['format']}，sha256 "
-          f"{entry['sha256'][:12]}，{day}，journal epoch {entry['epoch']}）")
+          f"{entry['sha256'][:12]}，{day}，journal epoch {entry['epoch']}"
+          + ("，浏览器抓取" if entry.get("method") == "browser" else "") + "）")
+    if entry["kind"] == "lead":
+        print(f"注意：{guideingest.reg_domain(entry.get('final_url') or entry['url'])} 不是该期刊或出版商的"
+              "官方域名，已存为线索（lead），不作为来源、不并入指南。请找到出版商官网上的同一页面再抓取；"
+              "小出版商先运行 wf journal lookup --issn <ISSN>，让期刊主页域名进入记录。")
+        return 0
+    if entry.get("screenshot"):
+        print(f"截图已与证据一起保存：08_submission/cache/{entry['screenshot']}")
+    if entry.get("read_from_image"):
+        print("以下数值只从截图读出（标记 read from image），请用户核对一次："
+              + "；".join(f"{k} = {v}" for k, v in entry["read_from_image"].items())
+              + "。用户确认后运行：wf guidelines confirm-image --why \"<用户原话>\"")
     if entry["kind"] == "indexing":
         print(f"收录证据已保存（不并入投稿指南）。target_journal.json：scie_source_url = "
               f"{entry['url']}，scie_verified_at = {day}；JCR 分区同样写明来源与日期。")
@@ -1260,6 +1290,17 @@ def cmd_guidelines(args) -> int:
     from . import guidelines
     if args.action == "status":
         print(guidelines.status(proj))
+        return 0
+    if args.action == "confirm-image":  # 1.21.0 (B4): the user checked values read from a screenshot
+        from . import guideingest
+        words = (args.why or "").strip()
+        if len(words) < 2:
+            print("confirm-image 需要 --why \"<用户核对截图数值后的原话>\"")
+            return 2
+        done = guideingest.confirm_image_values(proj, words)
+        st.event("image_values_confirmed", f"{len(done)} evidence entr(y/ies): {words[:200]}")
+        st.save()
+        print(f"已记录用户核对：{len(done)} 条截图读数" if done else "没有待核对的截图读数")
         return 0
     if args.from_file is None:
         print("guidelines ingest/refresh needs --from <file>")
@@ -1315,6 +1356,40 @@ def cmd_journal(args) -> int:
         print(f"{'换刊' if args.action == 'switch' else args.action} 被拒绝：{exc}")
         return 2
     print("\n".join(lines))
+    return 0
+
+
+def cmd_portal(args) -> int:
+    """1.21.0 (B5): the submission system's own requirements, read (never changed) by the agent
+    in the browser after the user logged in."""
+    _pipe, st, proj = _load()
+    from . import guideingest, portal
+    if args.action == "status":
+        lines = portal.summary_zh(portal.current(proj))
+        print("\n".join(lines) if lines else "还没有读取投稿系统要求（只在用户要求时：wf portal ingest "
+              "--from <capture> --url <URL>）")
+        for p in portal.problems(proj):
+            print(f"  !! {p}")
+        return 0
+    if args.from_file is None:
+        print("wf portal ingest --from <capture> --url <URL> [--append]")
+        return 2
+    try:
+        rec = portal.ingest(proj, paths.resolve_paper_path(args.from_file), args.url or "",
+                            append=args.append)
+    except (OSError, ValueError, guideingest.IngestError) as exc:
+        print(f"导入被拒绝：{exc}")
+        return 2
+    st.event("portal_ingested", f"{len(rec['captures'])} page(s), {len(rec['upload_items'])} "
+                                f"upload item(s), title_page_slot={rec['title_page_slot']}")
+    st.save()
+    print(f"已保存：{portal.REL}（source=portal，{rec['read_at']}，P0001-P{len(rec['lines']):04d}）")
+    print("\n".join(portal.summary_zh(rec)))
+    print("下一步：逐项核对上面的 P 行号；把需要上传的项目写入 target_journal.json required_uploads，"
+          "题名页位置按上传项决定（没有题名页上传项 -> title_page.placement in_manuscript）；然后 "
+          "wf compliance write（或 wf rebuild）。不提交、不批准、不生成 PDF——这些步骤留给用户。")
+    for p in portal.problems(proj):
+        print(f"  !! {p}")
     return 0
 
 
@@ -2015,6 +2090,47 @@ def cmd_data(args) -> int:
         print("analysis code: from analysis.datasources import source_path; "
               f"source_path('{rec['name']}')")
         return 0
+    if action in ("capture", "confirm-capture"):  # 1.21.0 (B6): web pages that become data
+        from . import webdata
+        st = State(proj, pipe.layout.get("state_dir", ".wf")).load()
+        if action == "confirm-capture":
+            name = args.name or args.path or ""
+            words = (args.note or "").strip()
+            if not name or len(words) < 2:
+                print("wf data confirm-capture <name> --note \"<用户或审阅者核对截图数值后的原话>\"")
+                return 2
+            done = webdata.confirm(proj, name, words)
+            st.event("web_capture_confirmed", f"{name}: {len(done)} version(s): {words[:200]}")
+            st.save()
+            print(f"已记录核对：{', '.join(done)}" if done else "没有待核对的截图读数")
+            return 0
+        if not (args.from_file and args.url and args.query and args.name):
+            print("wf data capture --from <capture> --url <URL> --query \"<exact query and "
+                  "filters>\" --name <short> [--screenshot <png>] [--values-csv <csv>]")
+            return 1
+        res = paths.resolve_paper_path
+        try:
+            rec = webdata.capture(proj, res(args.from_file), args.url, args.query, args.name,
+                                  res(args.screenshot) if args.screenshot else None,
+                                  res(args.values_csv) if args.values_csv else None)
+        except (OSError, ValueError) as exc:
+            print(f"refused: {exc}")
+            return 2
+        st.event("web_capture", f"{rec['name']} v{rec['version']:03d}: {rec['final_url']} "
+                                f"query={rec['query'][:120]}")
+        st.save()
+        print(f"已保存网页数据：{rec['dir']}/（{len(rec['files'])} 个文件，sha256 已记录，"
+              f"{rec['captured_at'][:10]}，第 {rec['version']} 版；同一检索再次抓取会成为新版本）")
+        print(f"分析代码读取：source_path('web:{rec['name']}')；运行 tools/data_manifest.py sync，"
+              "在 acquisition_manifest.json 的 sources 中写明网址、检索式和日期。")
+        if rec["obfuscated_text"] and not rec["read_from_screenshot"]:
+            print("页面文字被混淆（含不可见字符）：不要解码；看截图，把数字写成小 CSV，"
+                  "用 --values-csv 重新保存（新版本）。")
+        if rec["read_from_screenshot"]:
+            print("以下数据从截图读出（read from screenshot），请用户或审阅者核对一次："
+                  f"{rec['dir']}/read_from_screenshot.csv；核对后运行 wf data confirm-capture "
+                  f"{rec['name']} --note \"<原话>\"")
+        return 0
     if action == "remove":
         ok = datasources.remove(proj, args.path or args.name or "")
         print("removed" if ok else "no such data source")
@@ -2035,6 +2151,8 @@ def cmd_data(args) -> int:
                   f"{size / 1e6:,.1f} MB" + (f"; {n} file hash(es) cached" if n else ""))
         return 0 if bad == 0 else 2
     lines = datasources.describe(proj)
+    from . import webdata
+    lines += webdata.describe(proj)
     print("\n".join(lines) if lines else "no data sources declared (wf data add <path>)")
     return 0
 
@@ -2355,10 +2473,20 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("guidelines", help="journal guideline snapshot: status | ingest --from "
                                           "FILE --url URL [--title T] [--kind indexing] (1.17.0) "
                                           "| refresh --from EXTRACT.md [--source URL]")
-    p.add_argument("action", choices=("status", "ingest", "refresh"))
+    p.add_argument("action", choices=("status", "ingest", "refresh", "confirm-image"))
     p.add_argument("--from", dest="from_file", type=Path, default=None,
-                   help="ingest: the guide saved in the browser (HTML/PDF/DOCX/TXT); refresh: a "
-                        "newly written extract (.md)")
+                   help="ingest: the guide saved in the browser (HTML/PDF/DOCX/TXT) or a browser "
+                        "MCP capture (.playwright-mcp/*.yml snapshot, browser_evaluate JSON/text, "
+                        "1.21.0); refresh: a newly written extract (.md)")
+    p.add_argument("--append", action="store_true",
+                   help="ingest (1.21.0): a further page of the same guide (article type, "
+                        "editorial policy, artwork); lines continue")
+    p.add_argument("--screenshot", type=Path, default=None,
+                   help="ingest (1.21.0): a screenshot kept with the evidence (indexing pages)")
+    p.add_argument("--read-from-image", dest="read_from_image", action="append", default=[],
+                   help="ingest (1.21.0): KEY=VALUE read only from the screenshot (the user "
+                        "confirms it once: confirm-image)")
+    p.add_argument("--why", default="", help="confirm-image: the user's words")
     p.add_argument("--url", default="", help="ingest: the official page URL the file came from")
     p.add_argument("--title", default="", help="ingest: page title (optional)")
     p.add_argument("--kind", choices=("guidelines", "indexing"), default="guidelines",
@@ -2382,6 +2510,15 @@ def build_parser() -> argparse.ArgumentParser:
                    help="lookup: metadata only, no GET of the guide page")
     p.add_argument("--answer", choices=("restore", "keep"), default=None)
     p.set_defaults(fn=cmd_journal)
+
+    p = sub.add_parser("portal", help="submission-system requirements (1.21.0, only when the user "
+                                      "asks): ingest --from CAPTURE --url URL [--append] | status")
+    p.add_argument("action", choices=("ingest", "status"))
+    p.add_argument("--from", dest="from_file", type=Path, default=None)
+    p.add_argument("--url", default="")
+    p.add_argument("--append", action="store_true",
+                   help="a further step page of the same submission system")
+    p.set_defaults(fn=cmd_portal)
 
     p = sub.add_parser("compliance", help="compliance matrix (1.18.0): write (regenerate "
                                           "08_submission/compliance_matrix.md/.json from the "
@@ -2414,12 +2551,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(fn=cmd_engine_fork)
 
     p = sub.add_parser("data", help="declare datasets in place, read-only, never copied "
-                                    "(add PATH | list | verify | remove NAME)")
-    p.add_argument("action", nargs="?", default="list", choices=("add", "list", "verify", "remove"))
+                                    "(add PATH | list | verify | remove NAME); 1.21.0: capture "
+                                    "--from F --url U --query Q --name N [--screenshot PNG] "
+                                    "[--values-csv CSV] | confirm-capture NAME --note W")
+    p.add_argument("action", nargs="?", default="list",
+                   choices=("add", "list", "verify", "remove", "capture", "confirm-capture"))
     p.add_argument("path", nargs="?")
     p.add_argument("--name")
     p.add_argument("--note")
     p.add_argument("--hash", action="store_true", help="verify: also (re)hash changed files")
+    p.add_argument("--from", dest="from_file", type=Path, default=None,
+                   help="capture: the saved browser capture (.playwright-mcp/...)")
+    p.add_argument("--url", default="", help="capture: the page URL")
+    p.add_argument("--query", default="", help="capture: the exact query and filters")
+    p.add_argument("--screenshot", type=Path, default=None, help="capture: screenshot (PNG)")
+    p.add_argument("--values-csv", dest="values_csv", type=Path, default=None,
+                   help="capture: numbers read from the screenshot (obfuscated page text)")
     p.set_defaults(fn=cmd_data)
 
     p = sub.add_parser("override", help="paper-local workflow shape; never edits the master")

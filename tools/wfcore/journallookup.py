@@ -13,7 +13,9 @@ Cascade (each network answer is cached with its date in 08_submission/cache/look
   L3 ONE polite GET of the best candidate (clear User-Agent, timeout, no retry, no proxy); a
      real guide page is stored and ingested (guidelines_source.txt);
   L4 403 / captcha / empty page / offline: STOP and print the exact URL with instructions to save
-     the page in the browser and run `wf guidelines ingest --from <file> --url <URL>`.
+     the page in the browser and run `wf guidelines ingest --from <file> --url <URL>`; since
+     1.21.0 first the agent-side browser steps (playwright MCP: capture to .playwright-mcp/,
+     ingest; a verification or login is completed by the user in the browser window).
 Third-party summaries (LetPub and similar) are leads only, never a source. SCIE/JCR: the user
 exports the Master Journal List page as PDF and ingests it with --kind indexing.
 
@@ -311,9 +313,41 @@ def lookup(project: Path, root: Path, issn: str, title: str = "", refresh: bool 
     return rec, lines
 
 
+def _slug(text: str) -> str:
+    s = re.sub(r"[^a-z0-9]+", "-", str(text or "").casefold()).strip("-")
+    return s[:40] or "journal"
+
+
+def browser_steps(url: str, slug: str) -> list[str]:
+    """1.21.0 (B3): the agent-side browser path (playwright MCP), printed when the GET failed,
+    was blocked or the page needs JavaScript. The engine itself never drives a browser."""
+    cap = f".playwright-mcp/guidelines_{slug}.txt"
+    return [
+        "BROWSER (agent; only if a browser tool `playwright` is in your tool list - otherwise "
+        "use the manual path below):",
+        f"  1. browser_navigate {url}  (its page-*.yml/console-*.log land in .playwright-mcp/: "
+        "scratch, never read them into the chat)",
+        "  2. JS check ('Client Challenge', 'Just a moment', '请稍候'): browser_wait_for textGone "
+        "<that text>, at most ~20 s. A cookie banner: click 'necessary only' only if it hides "
+        "the content.",
+        "  3. browser_evaluate function `() => (document.querySelector('main')||document.body)"
+        f".innerText` with filename `{cap}` (never return page text into the chat; no "
+        "browser_snapshot without filename)",
+        f"  4. wf guidelines ingest --from {cap} --url <final URL>; a sub-page the guide refers "
+        "to for required rules (article type, artwork, editorial/AI policy): capture it the same "
+        "way and add --append",
+        "  5. Human verification, captcha or login: STOP, ask the user (Chinese) to complete it in "
+        "the browser window, continue after the reply; never solve it or type credentials. "
+        "No browser window / no tool: manual path below. Done: browser_close.",
+        "给用户：如果浏览器窗口出现安全验证或登录页面，请您在该窗口中完成，完成后回复我即可继续。",
+    ]
+
+
 def _manual(url: str | None, rec: dict) -> list[str]:
     target = url or rec.get("homepage") or "（出版商官网上该期刊的 Instructions for Authors 页面）"
-    return [
+    lead = browser_steps(url or rec.get("homepage") or "<official guide URL>",
+                         _slug(rec.get("title") or rec.get("issn") or ""))
+    return lead + [
         "L4 请用户在自己的浏览器里取得官方投稿指南（合法方式，不用登录绕过、不用第三方代理）：",
         f"  1. 打开：{target}",
         "  2. 页面完整显示后，任选其一：Ctrl+S 另存为“网页，仅 HTML”；或 Ctrl+P 打印为 PDF；"
@@ -321,4 +355,6 @@ def _manual(url: str | None, rec: dict) -> list[str]:
         f"  3. 运行：wf guidelines ingest --from <保存的文件> --url {target if url else '<官方网址>'}",
         "  LetPub 等第三方摘要只能作线索，不能作为来源。",
         "  SCIE/JCR 证据：在 Master Journal List 打开该刊页面，打印为 PDF，运行 wf guidelines "
-        "ingest --from <PDF> --url <MJL 页面网址> --kind indexing；NLM 的 MEDLINE 状态只作补充。"]
+        "ingest --from <PDF> --url <MJL 页面网址> --kind indexing；NLM 的 MEDLINE 状态只作补充。"
+        "（浏览器：用户在窗口中登录 MJL/JCR 后，文字抓取 + browser_take_screenshot 存到 "
+        ".playwright-mcp/，再 --kind indexing --screenshot <png>）"]

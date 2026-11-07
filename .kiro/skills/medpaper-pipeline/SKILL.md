@@ -49,6 +49,15 @@ Reports the user wants outside the paper: `wf config --user report_dirs add <dir
   `wf archetype <name>` prints one figure archetype.
 - Prefer a cheaper model for mechanical steps (building tables/figures, checks, DOCX builds)
   when the host lets you choose.
+- Browser (1.21.0; only if a browser tool `playwright` is in your tool list): APIs first
+  (PubMed/E-utilities and open-access APIs for literature and full text - a paywalled full
+  text: ask the user for the PDF; DOAJ/OpenAlex/NLM via `wf journal lookup`). Never
+  `browser_snapshot` without `filename` on long pages; prefer `browser_evaluate` on `main`;
+  never read capture files into the chat - ingest them (`wf guidelines ingest`, `wf portal
+  ingest`, `wf data capture`), then read only the needed line ranges of
+  `guidelines_source.txt`. One browser session per task, then `browser_close`. Browsing is
+  the paper's main agent's job (subagents get the ingested files); a verification page or
+  login is completed by the user in the browser window.
 - One look at the end: in `deferred` mode no PNG is loaded at S10/S11 and no decision is
   recorded; S23 discharges every look on one contact sheet (`qc.py --contact-sheet`).
 

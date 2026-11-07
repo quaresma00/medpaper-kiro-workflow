@@ -148,7 +148,7 @@ def snapshot(project: Path) -> dict[str, str]:
     """
     from . import paths as _paths
     out: dict[str, str] = {}
-    skip = SNAPSHOT_SKIP + _paths.foreign_prefixes(project)  # 1.14.1: older attempts, archive
+    skip = SNAPSHOT_SKIP + _paths.skipped_prefixes(project)  # 1.14.1 archive; 1.21.0 browser
     for path in sorted(project.rglob("*")):
         if not path.is_file() or "__pycache__" in path.parts or path.name == ".gitkeep":
             continue
@@ -179,7 +179,7 @@ def permits(project: Path, stage: str) -> bool:
                 and stage in revision.get("validation_stages", []))
 
 
-SCOPE_EXEMPT = ("temp/", ".wf/", ".kiro/", "08_submission/notes/")
+SCOPE_EXEMPT = ("temp/", ".wf/", ".kiro/", "08_submission/notes/", ".playwright-mcp/")
 
 
 def out_of_scope(revision: dict | None, rels: list[str]) -> list[str]:

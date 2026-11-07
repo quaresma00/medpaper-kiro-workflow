@@ -10,6 +10,16 @@
 medpaper_source_path <- function(name, ...) {
   project <- Sys.getenv("MEDPAPER_PROJECT")
   if (!nzchar(project)) stop("MEDPAPER_PROJECT is not set: run the script with `wf run-script`")
+  if (startsWith(name, "web:")) {  # 1.21.0: latest version of a `wf data capture`
+    base <- file.path(project, "02_data", "raw", "web", substring(name, 5))
+    v <- sort(list.files(base, pattern = "^v[0-9]{3}$"))
+    if (!length(v)) stop(sprintf("no web capture '%s': wf data capture ... --name %s",
+                                 substring(name, 5), substring(name, 5)))
+    parts <- c(...)
+    root <- file.path(base, v[length(v)])
+    if (length(parts)) return(do.call(file.path, c(list(root), as.list(parts))))
+    return(root)
+  }
   f <- file.path(project, ".wf", "data_sources.json")
   if (!file.exists(f)) stop("no data sources declared: wf data add <path> --name <name>")
   sources <- jsonlite::fromJSON(f, simplifyVector = FALSE)$sources

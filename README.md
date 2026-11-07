@@ -2,8 +2,16 @@
 
 一套面向医学与临床研究的 Kiro 工作流。它把“研究想法”推进为经过数据、文献、统计结果、图表、人工复核和期刊规则共同校验的投稿包，而不是只让 AI 一次性写出一篇看似完整的论文。
 
-当前版本：`1.20.0`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE + R 4.3+
+当前版本：`1.21.0`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE + R 4.3+
 
+## 1.21.0 变化（浏览器联网）
+- **浏览器临时文件不干扰门禁**：浏览器 MCP（playwright）写入论文目录的 `.playwright-mcp/`（页面快照、控制台日志、抓取文件）被 no_orphans、修订漂移、审阅守卫和复现快照忽略，从不上传；`wf clean --apply` 删除它。
+- **浏览器读取投稿指南**：`wf journal lookup` 仍先用 API 和一次礼貌请求；被拦截或需要 JavaScript 时打印给代理的浏览器步骤（打开、等待自动检查、把 `main` 文字存到 `.playwright-mcp/`、导入、子页面 `--append`、用完 `browser_close`）和一句给用户的中文提示。`wf guidelines ingest` 接受快照 YAML、browser_evaluate 的 JSON 字符串和文本，去掉 Cookie 横幅/“Back to top”/页脚，记录抓取方式、最终网址、标题、时间和 sha256；验证页/拦截页被拒绝并提示等待或请用户在浏览器窗口中完成；非官方域名只存为线索。
+- **收录与政策证据**：用户在浏览器窗口登录 MJL/JCR 后，文字抓取 + 截图用 `--kind indexing --screenshot` 保存；只从截图读出的数值标记 read from image，用户核对一次（`wf guidelines confirm-image`）。
+- **投稿系统要求**（仅在用户要求时）：用户登录后只读不改，`wf portal ingest` 生成 `08_submission/portal_requirements.json`（上传项、有无题名页上传项、文件限制、声明问题），用于 required_uploads、题名页位置、合规矩阵和投稿系统待办；最终提交/批准/生成 PDF 永远由用户完成。
+- **网页数据留痕**：VigiAccess、FAERS 公开仪表盘、药品说明书、注册库页面用 `wf data capture` 存为带日期、可追溯、按版本保存的原始数据（`02_data/raw/web/`）；文字被混淆时从截图读数写成 CSV，核对一次。
+- **省额度规则**：API 优先；长页面不用不带 filename 的快照；抓取文件不读进对话，导入后只读需要的行；一次任务一个浏览器会话；浏览由论文主代理完成。
+- **在途论文**：临时文件忽略立即生效，新命令立即可用；新门禁（web_captures_traced S04、indexing_evidence_cited S20、portal_requirements_applied S23，since 1.21.0）在 `wf migrate --yes` 或换刊后生效；只记一条迁移事件，论文文件不改。
 ## 1.20.0 变化（图表文字面向医学读者）
 - **可见文字清单**：`wf displays text [--md]` 按角色列出每个主表/补充表和图的全部可见文字（标题、列标题、行标签、分类水平、单元格文字、脚注、坐标轴标题、刻度标签、图例标题与条目、分面标签、注释、流程图方框、表题/图注），存于 `.wf/display_text/inventory.json`（按来源哈希增量更新）；`wf rebuild` 与 S09-S12/S23 检查自动运行。
 - **临床可读性检查**（`reference/display_text.toml`）：代码样名称（snake_case、p.value、factor()、sexM、a:b、TRUE/FALSE、结果 JSON 键名）、占位标题（value、variable、estimate、group）、主表中的软件输出列（Std. Error、z value、AIC）、科学计数法与过多小数、参考组写成 1.00 (1.00-1.00)、连续变量缺单位、计数行未注明 n (%)、对数轴/时间轴未说明、未定义的“Model 2”、未解释的专业术语（IPTW、ROR、E-value 等，提示）、主表超过 8 个数据列（提示）。S10/S11 警告，S09 写结果前、S12、S23 阻断（`display_text_resolved`，绑定清单哈希）；例外写入 `.wf/language_allowlist.json` 并给理由。

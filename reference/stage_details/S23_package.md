@@ -260,3 +260,22 @@ DOCX preflight (docx_bundle_ready, 1.18.0): no tracked changes, comments, placeh
 TBD, TODO, [citation needed], lorem ipsum, ??) or highlighted text in any upload.
 
 - 1.20.0 (V8): after a journal re-render (`wf rebuild`) or `wf journal switch` the visible-text inventory is recomputed; `display_text_resolved` blocks until every table/figure string reads in clinical language.
+
+## Submission system requirements (1.21.0, only when the user asks; S23/S24)
+
+After the user has logged into the submission system in the browser window, the agent reads
+the submission steps WITHOUT changing anything: article types, upload item types and whether a
+title-page slot exists, required fields, declaration questions, file size and format limits.
+Each step page: `browser_evaluate` (main text, `filename` under `.playwright-mcp/`), then
+`wf portal ingest --from <capture> --url <URL>` (first page) / `--append` (later steps) ->
+`08_submission/portal_requirements.json` (source=portal, dated, P-numbered lines, a draft
+extraction of upload items, title-page slot, limits, declarations). Check the draft against
+its P-lines, then write `target_journal.json` `required_uploads` (portal-only items
+`{"item": ..., "portal": true}`) and `title_page.placement` (no title-page slot ->
+`in_manuscript`); `wf compliance write` adds the portal rows (category required_uploads /
+declarations, enforcement portal) to the matrix and the portal to-do list;
+`portal_requirements_applied` (S23, since 1.21.0) checks the fields against the record;
+`wf portal status` prints the Chinese summary. Fill fields or upload files only after an
+explicit instruction from the user in that chat; always stop before the final
+submit/approve/build-PDF step for the user; never store credentials. The portal record is
+journal layer: `wf journal switch` archives it.

@@ -107,6 +107,13 @@ Hard rules, several mechanically enforced by the gates:
   R-strong statistics: `${engine}/reference/language_policy.toml`.
 - Draft scientific sections only at their active stages; S17 assembles the canonical full text.
 - Only create the outputs the stage declares; scratch lives in `temp/`.
+- Browser (1.21.0; only if a browser tool `playwright` is in your tool list): APIs first. Its
+  files land in `.playwright-mcp/` (scratch: ignored by the gates, never uploaded, deleted by
+  `${wf} clean --apply`). Never read page text into the chat: save captures with `filename`,
+  then `${wf} guidelines ingest`, `${wf} portal ingest` or `${wf} data capture`. A verification
+  page or login: ask the user to complete it in the browser window; never solve it, never type
+  credentials. One browser session per task, then `browser_close`. Browsing is yours, not a
+  subagent's.
 - Figures: R `save_medpaper()` (`${tool}figures/R/medfig.R`) by default, or
   `${tool}figures/style.py` when `figure_engine = python`; then
   `python "${tool}figures/qc.py" --all` every round. `DEFER` means "not looked at yet" and must

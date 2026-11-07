@@ -261,6 +261,18 @@ def build_rows(ctx, qc_rows=None) -> list[dict]:
                      "lines": rq._ranges(rq.line_numbers(r.get("lines"))), "enforcement": enf,
                      "status": status, "evidence": str(ev).replace("\n", " ")[:400],
                      "quote": _short(r.get("quote", "")), "portal": enf == "portal"})
+    # 1.21.0 (B5): what the submission system itself asks for (wf portal ingest) - user items.
+    from . import portal
+    rec = portal.current(project)
+    for kind, key, cat in (("U", "upload_items", "required_uploads"),
+                           ("D", "declarations", "declarations")):
+        for i, it in enumerate(rec.get(key) or [], 1):
+            label = it.get("item") or it.get("text") or ""
+            need = {True: "required", False: "optional", None: "listed"}.get(it.get("required"), "listed")
+            rows.append({"id": f"PORTAL-{kind}{i}", "category": cat, "lines": str(it.get("line", "")),
+                         "enforcement": "portal", "status": CANNOT,
+                         "evidence": f"portal ({portal.REL}, read {rec.get('read_at')}): {need}",
+                         "quote": _short(str(label)), "portal": True})
     for e in data.get("not_mentioned") or []:
         if isinstance(e, dict):
             rows.append({"id": f"NM-{e.get('category')}", "category": str(e.get("category")),

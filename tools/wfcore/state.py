@@ -172,6 +172,7 @@ class State:
             self._note_v1180(old_version, pipeline_version)
             self._note_v1190(old_version, pipeline_version)
             self._note_v1200(old_version, pipeline_version)
+            self._note_v1210(old_version, pipeline_version)
             self.save()
         return changed
 
@@ -257,6 +258,25 @@ class State:
                    "first_reader_displays at S10/S11, and build-time relabelling through the "
                    "display dictionary (or earlier with `wf config set display_relabel true`). "
                    "Paper files were not modified.")
+
+    def _note_v1210(self, old_version: str, new_version: str) -> None:
+        """1.21.0: one event; no file or stage is touched."""
+        if (version_tuple(old_version) >= (1, 21, 0) or version_tuple(new_version) < (1, 21, 0)
+                or self.data.get("v1210_migration_noted")):
+            return
+        self.data["v1210_migration_noted"] = True
+        self.event("requirements_changed",
+                   "1.21.0: the browser scratch folder .playwright-mcp/ is ignored now by "
+                   "no_orphans, revision drift, review guards and reproduction snapshots, and "
+                   "`wf clean --apply` deletes it. New commands work now - `wf guidelines ingest` "
+                   "accepts browser captures (snapshot YAML, browser_evaluate JSON/text; challenge "
+                   "pages refused, non-official domains kept as leads; --append, --screenshot, "
+                   "--read-from-image, confirm-image), `wf portal ingest|status` (submission-system "
+                   "requirements, on the user's request) and `wf data capture|confirm-capture` "
+                   "(web pages as dated, versioned raw data under 02_data/raw/web/). Stricter checks "
+                   "apply only after `wf migrate --yes` (or for S20-S25 after `wf journal switch`): "
+                   "web_captures_traced at S04, indexing_evidence_cited at S20, "
+                   "portal_requirements_applied at S23. Paper files were not modified.")
 
     def _note_v1160(self, old_version: str, new_version: str) -> None:
         """1.16.0: one event; no file or stage is touched."""

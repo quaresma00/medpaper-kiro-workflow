@@ -261,6 +261,12 @@ def check_not_nested(target: Path) -> None:
 
 
 ARCHIVE_DIR = ".wf_archive"
+# 1.21.0 (B1): the browser MCP (playwright) writes page-*.yml / console-*.log and the agent's
+# captures into <workspace>/.playwright-mcp/. It is scratch: never a paper file, never an
+# orphan, never revision drift, never uploaded; `wf clean --apply` deletes it. Captures enter
+# the paper only through `wf guidelines ingest`, `wf portal ingest` or `wf data capture`.
+BROWSER_SCRATCH = ".playwright-mcp"
+SCRATCH_PREFIXES = (BROWSER_SCRATCH + "/",)
 
 
 def nested_papers(target: Path | str) -> list[Path]:
@@ -274,7 +280,7 @@ def nested_papers(target: Path | str) -> list[Path]:
         for pattern in ("*/.wf/state.json", "*/*/.wf/state.json"):
             for p in target.glob(pattern):
                 top = p.relative_to(target).parts[0]
-                if top in (".wf", ARCHIVE_DIR, ".kiro", ".git"):
+                if top in (".wf", ARCHIVE_DIR, ".kiro", ".git", BROWSER_SCRATCH):
                     continue
                 found.append(p.parents[1])
     except OSError:
@@ -293,6 +299,11 @@ def foreign_prefixes(project: Path | str) -> tuple[str, ...]:
         except ValueError:
             continue
     return tuple(out)
+
+
+def skipped_prefixes(project: Path | str) -> tuple[str, ...]:
+    """Prefixes every whole-paper scan skips: foreign_prefixes plus the browser scratch."""
+    return foreign_prefixes(project) + SCRATCH_PREFIXES
 
 
 ASK_ONCE = ("The paper is the folder the user opened as the Kiro workspace: run `wf init` there, "

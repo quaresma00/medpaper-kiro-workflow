@@ -205,6 +205,23 @@ def guideline_files(project: Path) -> list[str]:
     return ["08_submission/guidelines_source.txt", *originals]
 
 
+def evidence_files(project: Path) -> list[str]:
+    """1.21.0 (B8): cache/index.json (shows each source's capture method), this epoch's indexing
+    captures and screenshots, and portal_requirements.json when the portal was read."""
+    from . import guideingest, journalepoch
+    project = Path(project)
+    out = []
+    if (project / guideingest.INDEX).is_file():
+        out.append(guideingest.INDEX)
+    for e in guideingest.entries(project, "indexing", journalepoch.number(project)):
+        out.append(f"{guideingest.CACHE}/{e['file']}")
+        if e.get("screenshot"):
+            out.append(f"{guideingest.CACHE}/{e['screenshot']}")
+    if (project / "08_submission/portal_requirements.json").is_file():
+        out.append("08_submission/portal_requirements.json")
+    return [r for r in out if (project / r).is_file()]
+
+
 def open_items(text: str) -> list[str]:
     """BLOCKING and MINOR finding lines (what the author would still fix)."""
     return [x for x in findings(text) if re.search(r"(?i)\b(BLOCKING|MINOR)\b", x)

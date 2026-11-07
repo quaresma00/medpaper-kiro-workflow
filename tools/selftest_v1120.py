@@ -312,6 +312,10 @@ def run_b(tmp: Path, record, section) -> None:
     new_1140 += sum(1 for v in names.values() for c in v if c in {
         "guideline_requirements_mapped", "journal_fields_met", "compliance_matrix_complete",
         "audit_rows_judged"})
+    # 1.21.0 adds three gate lines for new checks (S04 web captures, S20 indexing
+    # evidence, S23 portal requirements).
+    new_1140 += sum(1 for v in names.values() for c in v if c in {
+        "web_captures_traced", "indexing_evidence_cited", "portal_requirements_applied"})
     record("B4 duplicate gate lines merged (confirmation inside review_round_approved; SI clean "
            "inside docx_bundle_ready; limits/reference count as checklist rows); fewer gate "
            f"entries than 1.11.0 (287 -> {total - new_1140} + {new_1140} new in 1.14.0)",

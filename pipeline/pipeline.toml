@@ -14,7 +14,7 @@
 
 [meta]
 name = "medpaper"
-version = "1.20.0"
+version = "1.21.0"
 schema = 1
 description = "Medical/clinical research pipeline: idea -> feasibility -> data -> analysis -> artifacts -> manuscript -> submission package."
 
@@ -72,6 +72,8 @@ always_allowed = [
   "temp/**",
   ".wf/**",
   ".kiro/**",
+  # 1.21.0 (B1): browser MCP scratch (page dumps, captures); `wf clean --apply` deletes it.
+  ".playwright-mcp/**",
   # 1.14.0 (E): internal diagnostic plots (never submission figures) and retired results.
   "03_analysis/diagnostics/**",
   "03_analysis/retired/**",
@@ -255,6 +257,11 @@ check = "data_acquisition_complete"
 [[stage.gate]]
 check = "data_not_copied"
 since = "1.13.0"
+# 1.21.0 (B6): web pages captured as data (wf data capture) unchanged, URL + query,
+# screenshot readings verified once (a warning until then).
+[[stage.gate]]
+check = "web_captures_traced"
+since = "1.21.0"
 # 1.10.0: full extraction guards quantity; the crosswalk guards definitions.
 [[stage.gate]]
 check = "variable_crosswalk_confirmed"
@@ -984,6 +991,11 @@ check = "decision_recorded"
 name = "journal_chosen"
 [[stage.gate]]
 check = "guidelines_sourced"
+# 1.21.0 (B4): an official MJL/JCR source URL is backed by a captured indexing page of this
+# journal epoch; values read only from a screenshot were confirmed by the user once.
+[[stage.gate]]
+check = "indexing_evidence_cited"
+since = "1.21.0"
 # 1.17.0 (J2): a later journal epoch starts from a clean submission layer and fresh evidence.
 [[stage.gate]]
 check = "journal_layer_clean"
@@ -1163,6 +1175,11 @@ since = "1.18.0"
 [[stage.gate]]
 check = "layout_from_guideline"
 since = "1.19.0"
+# 1.21.0 (B5): when the submission system was read (wf portal ingest, on request), the
+# journal fields agree with its upload slots.
+[[stage.gate]]
+check = "portal_requirements_applied"
+since = "1.21.0"
 # 1.20.0 (V3/V8): visible display text after the journal re-render (inventory recomputed).
 [[stage.gate]]
 check = "display_text_resolved"
@@ -1382,5 +1399,7 @@ globs = [
   "08_submission/compliance_matrix.json",
   "08_submission/compliance_matrix.md",
   "08_submission/compliance_evidence.json",
+  # 1.21.0 (B5): what the submission system asks for (wf portal ingest, on request).
+  "08_submission/portal_requirements.json",
 ]
 

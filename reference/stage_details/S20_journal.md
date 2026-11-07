@@ -263,3 +263,54 @@ true}` for portal-only), `figure {formats[], min_dpi, max_mb, colour}` (separate
 files are converted from the TIFF masters to the first format the engine can write: TIFF,
 PNG, PDF, EPS, JPEG; CMYK/greyscale on request), `orcid_required` (true | "corresponding" |
 "portal").
+
+## Browser retrieval (1.21.0) - guides, indexing and policy evidence
+
+The engine's Python never drives a browser; the agent does, and only when a browser tool
+(`playwright`) is in its tool list. Subagents and workflow steps may not have it: they get the
+ingested files. The cascade stays API-first: `wf journal lookup` (dated caches, DOAJ, OpenAlex,
+NLM Catalog, publisher URL templates, ONE polite GET). When the GET fails, is blocked or the page
+needs JavaScript, the lookup prints a BROWSER block (for the agent) and one Chinese line for the
+user, then the manual fallback.
+
+1. `browser_navigate <URL>`. Every navigation writes `.playwright-mcp/page-*.yml` and
+   `console-*.log` (scratch: ignored by no_orphans, revision drift, review guards and
+   reproduction; never uploaded; `wf clean --apply` deletes the folder). Never read them into
+   the chat.
+2. Automatic JS checks ('Client Challenge', 'Just a moment', '请稍候'): `browser_wait_for`
+   with `textGone` = that text, at most ~20 s. A cookie banner only if it hides the content
+   (prefer 'necessary only').
+3. Capture the main content to a file, never into the chat: `browser_evaluate` with
+   `() => (document.querySelector('main')||document.body).innerText` and `filename`
+   `.playwright-mcp/guidelines_<slug>.txt` (saved as a JSON-encoded string; an object
+   `{text, url: location.href, title: document.title}` also works and records the final URL
+   and title). `browser_snapshot` only with `filename` (the YAML accessibility tree is
+   accepted too); prefer evaluate on `main` over full snapshots.
+4. `wf guidelines ingest --from .playwright-mcp/guidelines_<slug>.txt --url <final URL>`.
+   The ingest decodes JSON strings, converts snapshot YAML (headings, paragraphs, list items,
+   table rows, link text; drops [ref]/[cursor]/[box] and /url lines), strips cookie banners,
+   'Back to top' and short footers, records method 'browser', final URL, title, capture time
+   and sha256 in `cache/index.json`, and refuses verification pages ('Just a moment',
+   '请稍候', 'security verification', '正在进行安全验证', 'Client Challenge', captcha,
+   'verify you are human', 403 text or too little text) with a Chinese message. A page whose
+   domain is neither in the publisher URL table nor the journal homepage/candidate domains of
+   the lookup is stored as a lead (kind `lead`), never as a source.
+5. Sub-pages the guide refers to for required rules (article-type page, editorial policies,
+   AI-use policy, artwork guidelines): capture each the same way and ingest with `--append`;
+   each block keeps its own URL in `guidelines_source.txt` and line numbers continue
+   (requirement quotes may cite any block).
+6. Human verification, captcha or login: stop and ask the user (Chinese) to complete it in the
+   browser window; continue after the reply. Never solve it, never type passwords or other
+   credentials, no stealth settings, no bulk crawling, never around a paywall or institutional
+   access rule. No browser window or no browser tool: the 1.17 path (the user saves the page or
+   prints it to PDF; you ingest the file). Finally `browser_close`.
+
+Indexing and policy evidence (B4): MJL/JCR need a login - the user logs in in the browser
+window; the agent opens the journal's MJL/JCR page, saves a text capture (evaluate with
+`filename`) and `browser_take_screenshot` with `filename` under `.playwright-mcp/`, then
+`wf guidelines ingest --kind indexing --from <capture> --screenshot <png> --url <URL>`. The
+screenshot is kept with the evidence (`cache/index.json`); `scie_source_url`/`jcr_source` cite
+that URL (`indexing_evidence_cited`, since 1.21.0). A value read only from the screenshot is
+recorded with `--read-from-image jcr_quartile=Q2` (marked 'read from image'), listed once for
+the user, and confirmed with `wf guidelines confirm-image --why "<用户原话>"`. APC pages use
+the same indexing path; editorial and AI-use policy pages that carry rules use `--append`.

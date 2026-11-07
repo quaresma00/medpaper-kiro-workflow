@@ -150,7 +150,8 @@ def no_orphans(ctx: Ctx) -> Result:
     always = ctx.pipeline.policy.get("always_allowed", [])
     from .. import paths as _paths
     users = _paths.user_files(ctx.project)  # 1.13.0: the user's own files from before `wf init`
-    foreign = _paths.foreign_prefixes(ctx.project)  # 1.14.1: older attempts, restart archive
+    # 1.14.1: older attempts, restart archive; 1.21.0 (B1): the browser scratch .playwright-mcp/
+    foreign = _paths.skipped_prefixes(ctx.project)
     orphans = []
     for p in ctx.project.rglob("*"):
         if not p.is_file():

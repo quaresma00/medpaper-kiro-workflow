@@ -34,7 +34,7 @@ RERUN_DIR = ".wf/repro/rerun"
 # marker whose process is gone (cleanup_stale).
 SANDBOX_DIR = ".wf/repro/sandboxes"
 LOCK_REL = ".wf/repro/run.lock"
-SNAPSHOT_EXCLUDE = (".wf", "temp", ".kiro", REPORT_REL)
+SNAPSHOT_EXCLUDE = (".wf", "temp", ".kiro", ".playwright-mcp", REPORT_REL)
 # 1.13.0: documentation, acquisition code (never re-run), the extraction cache and the S04
 # receipts are not analysis inputs; editing them never invalidates the proof.
 INPUT_EXCLUDE_DIRS = ("02_data/derived", "02_data/acquisition", "02_data/cache")
