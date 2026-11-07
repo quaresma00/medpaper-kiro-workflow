@@ -18,7 +18,7 @@ Details (builder, manifest roles, checklist format, portal to-do): `reference/st
    `--kind supplementary --esm-number <n> --pdf --output project/08_submission/bundle/`,
    `tools/supplementary.py figures|xlsx --number <n> [--input ...] --output
    project/08_submission/bundle/` (Supplemental_File_n_Title, header "Online Resource n:
-   Title"). No keep markers. Helper scripts in `.wf/scripts/`, never `temp/`.
+   Title"). No keep markers. Helpers in `.wf/scripts/`, never `temp/`.
 3. Write `08_submission/bundle/manifest.json` (every upload, role, rule). Main figure TIFFs
    and table workbooks are added automatically when the journal wants separate files.
    From now on ONE command rebuilds what an edit affects and re-measures (audit,
@@ -52,8 +52,8 @@ Details (builder, manifest roles, checklist format, portal to-do): `reference/st
 - `08_submission/submission_qc.md`
 
 ## Gate
-bundle complete, DOCX ready (no tracked changes/comments/placeholders), measured checklist,
-journal fields met, compliance matrix (no FAIL), layout from guideline, package baseline, visual debts, reporting
+bundle complete, DOCX ready (no tracked changes, comments, placeholders), measured checklist,
+journal fields met, compliance matrix (no FAIL), layout from guideline, display text, package baseline, visual debts, reporting
 checklist, reproduces, no orphans, journal CSL. Never recapture the baseline for a Word edit.
 
 ## Close

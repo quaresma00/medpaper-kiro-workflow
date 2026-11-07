@@ -14,6 +14,8 @@ differently from how it was built.
      every planned item is cited, nothing cited that was not planned.
    - `numbers_cross_match`: every number in a sentence that cites `Table N` actually
      appears in that table.
+   - `display_text_resolved` (1.20.0): every visible table/figure string reads in clinical
+     language (`wf displays text` lists the rest; wording only, numbers unchanged).
 2. Do the part code cannot. For each display item, open it and compare against what the
    prose and the legend claim:
    - Tables: read the xlsx values against the sentences that cite them.
