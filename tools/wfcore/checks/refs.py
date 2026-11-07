@@ -136,8 +136,12 @@ def title_page_reference_count(ctx: Ctx) -> Result:
         except (json.JSONDecodeError, OSError) as exc:
             problems.append(f"08_submission/bundle/manifest.json cannot be read: {exc}")
             manifest = {}
+        from .. import journalspec, layout
+        # 1.19.0 (M1): the manuscript's first page carries the title page (in_manuscript|both)
+        tp_roles = {"title_page"} | ({"manuscript"} if layout.title_page_in_manuscript(
+            journalspec.load(ctx.project), ctx.project) else set())
         for item in manifest.get("items", []):
-            if str(item.get("role", "")).casefold() != "title_page":
+            if str(item.get("role", "")).casefold() not in tp_roles:
                 continue
             rel = str(item.get("file", "")).strip()
             path = ctx.p(rel) if rel else None

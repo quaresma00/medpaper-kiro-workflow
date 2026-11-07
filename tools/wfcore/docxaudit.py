@@ -212,12 +212,16 @@ def plan_counts(project: Path) -> dict:
 
 
 def audit_spec(project: Path) -> dict:
+    from . import layout
     target = journalspec.load(project)
     counts = plan_counts(project)
     return {"legend_style": journalspec.legend_style(target),
             "reference_separator": journalspec.reference_separator(target),
-            "embed_figures": target.get("embed_figures") is True,
-            "word_tables": target.get("word_tables") is True,
+            # 1.19.0 (M2): figures.placement / tables.placement (legacy embed_figures /
+            # word_tables when the typed placement is absent)
+            "embed_figures": layout.figures_embedded(target, project),
+            "word_tables": layout.tables_in_manuscript(target, project),
+            "figure_placement": layout.figure_placement(target, project),
             "main_figures": counts["main_figures"], "supp_figures": counts["supp_figures"],
             "main_tables": counts["main_tables"],
             "line_numbers": journalspec.line_numbers(target),
@@ -276,17 +280,19 @@ def line_number_problems(root, mode: str) -> list[str]:
 
 
 def legend_problems(root, expected: list[str], cap: int, label: str = "",
-                    supplementary: list[str] | None = None) -> list[str]:
+                    supplementary: list[str] | None = None, in_text: bool = False) -> list[str]:
     paras = [(t, s) for t, s, _ in paragraphs(root) if t]
     try:
         start = next(i for i, (value, _) in enumerate(paras)
                      if value.casefold() == "figure legends") + 1
     except StopIteration:
-        return ["Figure legends heading is missing"]
+        if not in_text:
+            return ["Figure legends heading is missing"]
+        start = 0  # 1.19.0 (M2): figures.placement in_text - each legend sits with its figure
     heads: list[tuple[int, str, str]] = []
     for i in range(start, len(paras)):
         value, sid = paras[i]
-        if sid == "SectionHeading" and value.casefold() in ("tables", "supplementary figure legends"):
+        if sid == "SectionHeading" and value.casefold() in LEGEND_SECTION_END:
             break
         m = LEGEND_HEAD_RE.match(value)
         if m and sid == "SectionHeading":
@@ -326,6 +332,11 @@ def legend_problems(root, expected: list[str], cap: int, label: str = "",
     return problems
 
 
+# 1.19.0 (M2): "Figures" holds the images after the legend list (figures.placement
+# end_of_manuscript); their captions repeat the legends and are not legend headings.
+LEGEND_SECTION_END = ("tables", "supplementary figure legends", "figures")
+
+
 def legend_style_problems(root, style: dict) -> list[str]:
     """Prefix, bold label, panel-label case and end punctuation, as configured at S20."""
     problems: list[str] = []
@@ -339,7 +350,7 @@ def legend_style_problems(root, style: dict) -> list[str]:
             continue
         if not in_legends:
             continue
-        if sid == "SectionHeading" and text.casefold() in ("tables", "supplementary figure legends"):
+        if sid == "SectionHeading" and text.casefold() in LEGEND_SECTION_END:
             break
         m = LEGEND_HEAD_RE.match(text)
         if m and sid == "SectionHeading":

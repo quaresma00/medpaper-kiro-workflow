@@ -1,5 +1,22 @@
 # S20 - Select the most realistic current SCIE journal - details
 
+> 1.19.0 layout fields (`tools/wfcore/layout.py`), absent = engine default, never set by
+> judgment. `title_page.placement` in_manuscript (default when not blinded: the title page
+> is the manuscript's first page, then a page break, then the abstract) | separate (blinded
+> journals always) | both (default when `required_uploads` lists a title page).
+> `figures.placement` separate_files (default: no images in the manuscript, legends on their
+> own page at the end, figure files uploaded) | in_text | end_of_manuscript (each image on
+> its own page after the legend list); `figures.also_separate: true` only when the guide
+> asks for embedded AND separate figures. `tables.placement` end_of_manuscript (default:
+> each table on its own page after the references) | in_text. `supplementary_file_pattern`
+> (default `Supplemental_File_{n}_{Title}`) only for a mandated naming rule (must/required +
+> fixed pattern); an example after 'e.g.' (Springer's 'ESM_3.mpg') is not a mandate and
+> 'name the files consecutively' is met by the default. A non-default value needs a
+> requirement in `guideline_requirements.json` with `rule.field` = that field (category
+> title_page / figures / tables / supplementary, enforcement builder) and its quote + lines;
+> `layout_from_guideline` (S23) checks it. `embed_figures`/`word_tables`/`figures_at_end`
+> are the pre-1.19 fields (kept for pinned papers); do not write them for a new journal.
+
 > 1.15.0 supersedes older wording below where they differ: only an explicit numeric rule of
 > the guide is a hard cap. Never derive a word cap from a page count; an estimate goes in
 > `limits.estimated` (or a source saying 'estimated from N pages') and is a soft hint that
@@ -84,7 +101,6 @@ then freeze its actual author instructions and Word-format rules.
                        "Consent for publication", "Data availability", "Code availability",
                        "Author contributions", "Acknowledgements"],
 "discussion_subheadings": false,
-"embed_figures": false, "word_tables": false,
 "legend_style": {"prefix": "Figure", "bold": true, "panel_label_case": "any", "end_punctuation": "any"},
 "supplementary_aliases": {"Online Resource 1": ["Supplementary Methods", "Table S1"]},
 "reference_separator": "space",

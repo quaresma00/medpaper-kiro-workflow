@@ -86,6 +86,14 @@ unnumbered remark is a remark nobody acts on. From the first round, read also as
 When given a bundle path (`.../MANIFEST.md`), read the manifest and every file it lists,
 including rendered Word pages when present - judge the paper as the reader will see it.
 
+1.19.0 - Discussion check (one numbered finding each, category `other` unless a claim is
+stronger than the evidence, then `conclusion_strength`): the Discussion restates the Results
+(repeats numbers or sentences, cites tables/figures repeatedly, cites supplementary items
+such as "Table S2"); a comparison with previous studies is missing, or differences are not
+explained (design, population, definitions, follow-up); mechanisms/plausibility or clinical
+implications are missing; limitations are generic (no likely direction or size of bias). The
+caller must close each such finding as changed or kept with a reason, like every finding.
+
 1.14.0: when the bundle lists `decision_record.md` (a factual record of what was pre-specified
 and what was decided after the data were seen), check that every post hoc analysis is labelled
 exploratory and is not presented as confirmatory in the abstract, Results or conclusions. The

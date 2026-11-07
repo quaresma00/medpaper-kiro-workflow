@@ -95,6 +95,10 @@ def _write_build_receipt(args, project: Path) -> Path:
     extra = [journalspec.TARGET, "06_refs/ref_overrides.json"]
     if args.kind == "supplementary":
         extra.append("05_figures/legends.md")
+    from wfcore import layout
+    if args.kind == "manuscript" and layout.title_page_in_manuscript(journalspec.load(project), project):
+        # 1.19.0 (M1): the first page is the S21 title page - one source for both places.
+        extra += [scifreeze.resolve(project, "07_manuscript/title_page.md"), "00_input/author_info.json"]
     for rel in extra:
         if (project / rel).is_file():
             auxiliaries.append(_receipt_file_record(project / rel, project))
@@ -120,7 +124,9 @@ def _write_build_receipt(args, project: Path) -> Path:
                               ("csl", getattr(args, "csl", None)),
                               ("style_config", getattr(args, "style_config", None)),
                               ("pdf", bool(getattr(args, "pdf", False))),
-                              ("esm_number", getattr(args, "esm_number", None)))
+                              ("esm_number", getattr(args, "esm_number", None)),
+                              ("title", getattr(args, "title", None)
+                               if getattr(args, "esm_number", None) else None))
                  if v not in (None, False) and not (isinstance(v, Path) and not v.is_file())},
     }
     receipt.parent.mkdir(parents=True, exist_ok=True)
@@ -818,8 +824,10 @@ def audit_docx(path: Path, style: dict, kind: str = "",
         problems.append(f"{path.name}: forbidden down-arrow character remains")
     if kind == "manuscript":
         lines = [line.strip() for line in text.splitlines() if line.strip()]
+        # 1.19.0 (M2): figures.placement in_text keeps each legend with its figure in the text.
+        in_text = (spec or {}).get("figure_placement") == "in_text"
         exact = {name: [i for i, line in enumerate(lines) if line.casefold() == name]
-                 for name in ("abstract", "references", "figure legends")}
+                 for name in ("abstract", "references") + (() if in_text else ("figure legends",))}
         keywords = [i for i, line in enumerate(lines) if line.casefold().startswith("keywords:")]
         for name, indices in exact.items():
             if len(indices) != 1:
@@ -829,15 +837,16 @@ def audit_docx(path: Path, style: dict, kind: str = "",
         order = [exact[name][0] if len(exact[name]) == 1 else -1
                  for name in ("abstract",)] + [keywords[0] if len(keywords) == 1 else -1] + [
                  exact[name][0] if len(exact[name]) == 1 else -1
-                 for name in ("references", "figure legends")]
+                 for name in ("references", "figure legends") if name in exact]
         if all(x >= 0 for x in order) and order != sorted(order):
             problems.append(f"{path.name}: Abstract/Keywords/References/Figure legends order is wrong")
         if planned_figures is None:
             problems.append(f"{path.name}: artifact_plan.json is missing or invalid")
         else:
             problems.extend(f"{path.name}: {problem}" for problem in
-                            _legend_problems(root, planned_figures, legend_cap,
-                                             (spec or {}).get("supp_figures")))
+                            docxaudit.legend_problems(root, planned_figures, legend_cap,
+                                                      supplementary=(spec or {}).get("supp_figures"),
+                                                      in_text=in_text))
     elif kind == "figure_legends":
         count = sum(1 for line in docx_text(path).splitlines()
                     if line.strip().casefold() == "figure legends")
@@ -1179,14 +1188,16 @@ def _clean_pipeline_code(text: str) -> str:
                   r"(?:[^\s'\"`)]*[\\/])?([^\s'\"`)\\/]+)", r"\1", text)
 
 
-def _info_page(project: Path, number: int | None = None) -> str:
+def _info_page(project: Path, number: int | None = None, esm_title: str | None = None) -> str:
+    from wfcore import layout
     target = journalspec.load(project)
     title_path = project / "07_manuscript/title.md"
     title = re.sub(r"^#\s+", "", title_path.read_text(encoding="utf-8").strip()) \
         if title_path.is_file() else ""
     # 1.15.0 (E5): one header for every supplementary file - "Online Resource n" (the
-    # journal's supplementary_label) when the file's number is given.
-    head = f"{journalspec.esm_label(target)} {number}" if number else "Supplementary information"
+    # journal's supplementary_label) when the file's number is given; 1.19.0 (M4) adds the
+    # file's descriptive title: "Online Resource 1: Supplementary Methods".
+    head = layout.header(target, number, esm_title, project)
     lines = [f"# {head}", ""]
     if title:
         lines += [f"Article title: {title}", ""]
@@ -1278,16 +1289,71 @@ def _running_title(text: str, target: dict, project: Path) -> str:
     return f"{head}\n\nRunning title: {value}{sep or chr(10) * 2}{rest}"
 
 
+def _title_page_front(text: str, target: dict, project: Path) -> str:
+    """1.19.0 (M1): title_page.placement in_manuscript|both - the S21 title page (the same file
+    the separate title page is built from) is the manuscript's first page, then a page break,
+    then the abstract. A blinded journal never gets it (layout.title_page_placement)."""
+    from wfcore import layout
+    if not layout.title_page_in_manuscript(target, project):
+        return text
+    tp_path = project / scifreeze.resolve(project, "07_manuscript/title_page.md")
+    m = re.search(r"(?mi)^#\s+(?:abstract|summary|structured abstract)\s*$", text)
+    if not tp_path.is_file() or not m:
+        return text
+    tp = tp_path.read_text(encoding="utf-8", errors="replace").strip()
+    # The abstract's Keywords line stays the only one in the manuscript.
+    tp = re.sub(r"(?mi)^[\W_]*keywords?\s*[:\uff1a].*$\n?", "", tp).strip()
+    head, rest = text[:m.start()], text[m.start():]
+    title = re.search(r"(?m)^#\s+.+$", head)
+    first = re.search(r"(?m)^#\s+(.+?)\s*$", tp)
+    if first and first.group(1).strip().casefold() in ("title page", "title"):
+        tp = (tp[:first.start()] + tp[first.end():]).strip()
+        first = None
+    if not first and title:
+        tp = title.group(0) + "\n\n" + tp
+    remainder = (head[:title.start()] + head[title.end():]).strip() if title else head.strip()
+    front = tp + ("\n\n" + remainder if remainder else "")
+    return front.rstrip() + "\n\n" + PAGE_BREAK_MD + "\n\n" + rest
+
+
+_BODY_END_RE = re.compile(r"(?mi)^#\s+(?:references|reference list|bibliography)\s*$")
+
+
+def _insert_at_citation(head: str, label_re: str, block: str) -> str:
+    """1.19.0 (M2 in_text): `block` after the first body paragraph citing the display
+    (before References); without a citation it goes just before References."""
+    end = _BODY_END_RE.search(head)
+    limit = end.start() if end else len(head)
+    pat = re.compile(label_re)
+    pos = 0
+    for para in re.finditer(r"(?s)(?:^|\n\n)(.+?)(?=\n\n|\Z)", head[:limit]):
+        body = para.group(1)
+        if not body.lstrip().startswith(("#", "```")) and pat.search(body):
+            pos = para.end()
+            break
+    else:
+        pos = limit
+    return head[:pos].rstrip() + "\n\n" + block.strip() + "\n\n" + head[pos:].lstrip()
+
+
+def _display_re(word: str, num: str) -> str:
+    words = r"(?:Figures?|Figs?\.?)" if word == "figure" else r"Tables?"
+    return rf"\b{words}\s+(?:\d+\s*(?:,|and|&|-|\u2013)\s*)*{re.escape(num)}(?!\d)(?!\.\d)"
+
+
 def prepare_source(kind: str, inputs: list[Path], project: Path, workdir: Path,
-                   style: dict | None = None, esm_number: int | None = None) -> list[Path]:
+                   style: dict | None = None, esm_number: int | None = None,
+                   esm_title: str | None = None) -> list[Path]:
     """Apply the journal's presentation rules to a temporary copy handed to Pandoc."""
     if kind not in ("manuscript", "supplementary"):
         return inputs
+    from wfcore import layout
     text = "\n\n".join(p.read_text(encoding="utf-8", errors="replace") for p in inputs)
     target = journalspec.load(project)
     if kind == "manuscript":
         text = place_abbreviations(text, journalspec.abbreviation_list(target, project))
         text = journal_structure(text, target)
+        text = _title_page_front(text, target, project)
         text = _running_title(text, target, project)
         m = re.search(r"(?mi)^#\s+Figure legends\s*$", text)
         if m:
@@ -1295,7 +1361,40 @@ def prepare_source(kind: str, inputs: list[Path], project: Path, workdir: Path,
             legends = _style_legends(legends, journalspec.legend_style(target))
             counts = docxaudit.plan_counts(project)
             plan = counts["plan"]
-            if target.get("embed_figures") is True and not target.get("figures_at_end"):
+            fig_place = layout.figure_placement(target, project)
+            tab_place = layout.table_placement(target, project)
+            if not layout.legacy_embed(target) and fig_place in ("in_text", "end_of_manuscript"):
+                # 1.19.0 (M2): typed figures.placement (from a guideline requirement).
+                from wfcore import presentparams
+                pres = presentparams.params(project)
+                entries = {docxaudit.canon_figure_id(str(e.get("id", ""))): e
+                           for e in plan.get("main_figures", [])}
+                blocks = list(_LEGEND_H_RE.finditer(legends))
+                pages = []
+                for i, b in enumerate(blocks):
+                    end = blocks[i + 1].start() if i + 1 < len(blocks) else len(legends)
+                    block = legends[b.start():end].rstrip()
+                    img = _figure_image(project, entries.get(f"figure {b.group(2).lower()}", {}))
+                    pic = ""
+                    if img is not None:
+                        w, h = figure_size(img, block, style, pres)
+                        pic = f"![]({img.as_posix()}){{width={w}in height={h}in}}"
+                    if fig_place == "in_text":
+                        head = _insert_at_citation(head, _display_re("figure", b.group(2)), "\n\n".join(
+                            x for x in (PAGE_BREAK_MD if pic else "", pic, block) if x))
+                    else:
+                        caption = re.sub(r"^#{2,6}\s+", "", block.split("\n", 1)[0]).strip()
+                        rest = block.split("\n", 1)[1].strip() if "\n" in block else ""
+                        pages += ([PAGE_BREAK_MD] if pages else []) + [
+                            pic, f"**{caption}**" + (f" {rest}" if rest else "")]
+                if fig_place == "in_text":
+                    legends = legends[:blocks[0].start()] if blocks else legends
+                    if not re.sub(r"(?mi)^#\s+Figure legends\s*$", "", legends).strip():
+                        legends = ""
+                else:
+                    legends = legends.rstrip() + f"\n\n{PAGE_BREAK_MD}\n\n# Figures\n\n" + \
+                        "\n\n".join(x for x in pages if x) + "\n"
+            elif layout.legacy_embed(target):
                 # 1.13.0 (#10): each figure starts after an explicit page-break run (never the
                 # pageBreakBefore property), then the image, then its legend; the image is
                 # sized so image + estimated legend fit the usable page height.
@@ -1307,7 +1406,7 @@ def prepare_source(kind: str, inputs: list[Path], project: Path, workdir: Path,
                 head_text = legends[:blocks[0].start()].strip() if blocks else ""
                 # Word tables end with a next-page section break; a page break right after it
                 # would leave a blank page before the first figure.
-                tables_before = target.get("word_tables") is True and bool(plan.get("main_tables"))
+                tables_before = tab_place == "end_of_manuscript" and bool(plan.get("main_tables"))
                 out = []
                 for i, b in enumerate(blocks):
                     end = blocks[i + 1].start() if i + 1 < len(blocks) else len(legends)
@@ -1331,22 +1430,30 @@ def prepare_source(kind: str, inputs: list[Path], project: Path, workdir: Path,
                 if not blocks:
                     out.append(legends.rstrip())
                 legends = "\n\n".join(x for x in out if x) + "\n"
-            if target.get("word_tables") is True and plan.get("main_tables"):
+            if tab_place != "none" and plan.get("main_tables"):
                 # Each table on a new page, in its own portrait/landscape section; the section
                 # after the last table returns to the portrait main text (Figure legends).
+                # 1.19.0 (M2): tables.placement in_text puts each section after the first
+                # paragraph that cites the table.
                 caps = _table_captions(project)
                 overrides = docxaudit.table_overrides(project, plan)
                 parts = [_sect_break("portrait", style), "# Tables"]
                 for e in plan.get("main_tables", []):
                     md, orientation = _table_block(project, e, caps.get(
                         docxaudit.canon_figure_id(str(e.get("id", ""))), ""), style, overrides)
-                    parts += [md, _sect_break(orientation, style)]
-                head = head.rstrip() + "\n\n" + "\n\n".join(parts) + "\n\n"
+                    if tab_place == "in_text":
+                        num = re.sub(r"(?i)^\s*table\s*", "", str(e.get("id", ""))).strip()
+                        head = _insert_at_citation(head, _display_re("table", num), "\n\n".join(
+                            [_sect_break("portrait", style), md, _sect_break(orientation, style)]))
+                    else:
+                        parts += [md, _sect_break(orientation, style)]
+                if tab_place != "in_text":
+                    head = head.rstrip() + "\n\n" + "\n\n".join(parts) + "\n\n"
             text = head + legends
     else:
         text = _clean_pipeline_code(text)
         if target:
-            text = _info_page(project, esm_number) + "\n" + text
+            text = _info_page(project, esm_number, esm_title) + "\n" + text
         legends = supplementary_legends(project)
         if legends:
             text = text.rstrip() + "\n\n" + legends
@@ -1488,6 +1595,15 @@ def run_pandoc(inputs: list[Path], output: Path, bibliography: Path | None,
 
 def build(args) -> int:
     project = project_root()
+    if args.kind in ("supplementary", "checklist_form") and getattr(args, "esm_number", None):
+        # 1.19.0 (M4): number + descriptive title; a bundle directory as --output gets the
+        # journal's (or the default Supplemental_File_{n}_{Title}) name.
+        from wfcore import layout
+        args.title = getattr(args, "title", None) or layout.default_title(
+            args.kind, args.input[0] if args.input else None)
+        if args.output.is_dir() or not args.output.suffix:
+            args.output = layout.named_output(project, args.output, args.esm_number, args.title,
+                                              ".docx")
     if scifreeze.is_frozen(project) and args.kind in {
             "manuscript", "title_page", "supplementary", "statements"}:
         frozen = []
@@ -1530,7 +1646,8 @@ def build(args) -> int:
         with tempfile.TemporaryDirectory(prefix="medpaper_render_") as work:
             workdir = Path(work)
             rendered = prepare_source(args.kind, args.input, project, workdir, style,
-                                      esm_number=getattr(args, "esm_number", None))
+                                      esm_number=getattr(args, "esm_number", None),
+                                      esm_title=getattr(args, "title", None))
             from wfcore import refoverrides  # 1.15.0 (E12): never edits refs.bib
             bib = refoverrides.render_copy(
                 project, args.bibliography, workdir,
@@ -1601,7 +1718,11 @@ def audit_manifest(args) -> int:
             problems.append(f"{role}: narrative upload must be DOCX, got {path.name}")
         if path.suffix.lower() == ".docx":
             problems += audit_docx(path, style, role, planned, legend_cap, spec)
-    for role in ("manuscript", "title_page", "cover_letter"):
+    from wfcore import layout
+    needed = ["manuscript", "title_page", "cover_letter"]
+    if layout.title_page_placement(journalspec.load(project_root()), project_root()) == "in_manuscript":
+        needed.remove("title_page")  # 1.19.0 (M1): the title page is the manuscript's first page
+    for role in needed:
         if not any(p.suffix.lower() == ".docx" for p in roles.get(role, [])):
             problems.append(f"manifest lacks a DOCX item for role '{role}'")
     if (project_root() / "07_manuscript/supplementary_methods.md").exists():
@@ -1638,6 +1759,10 @@ def main() -> int:
     p.add_argument("--esm-number", type=int, default=None,
                    help="supplementary: header 'Online Resource <n>' (label from "
                         "target_journal.json supplementary_label) on the information page")
+    p.add_argument("--title", default=None,
+                   help="supplementary: descriptive title (default: the source's first heading); "
+                        "with --output <bundle dir> the file is named "
+                        "Supplemental_File_<n>_<Title>.docx (1.19.0)")
     p.set_defaults(fn=build)
     p = sub.add_parser("audit")
     p.add_argument("--manifest", type=Path, required=True)

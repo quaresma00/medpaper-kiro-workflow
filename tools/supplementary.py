@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Supplementary-file builders (1.15.0, E5).
 
-    figures --number 3 --output 08_submission/bundle/ESM_3.pdf [--figure "Figure S1" ...]
+    figures --number 3 --output 08_submission/bundle/ [--figure "Figure S1" ...] [--title ...]
         supplementary figures PDF: information page, then each figure with its legend
-    xlsx --input 04_tables/supplementary/tables.xlsx --number 2 --output 08_submission/bundle/ESM_2.xlsx
+        (1.19.0: a bundle directory as --output gives Supplemental_File_3_Supplementary_Figures.pdf)
+    xlsx --input 04_tables/supplementary/tables.xlsx --number 2 --output 08_submission/bundle/
         workbook with an "Info" sheet ("Online Resource 2", title, authors, journal)
     rebuild --receipt 08_submission/build_receipts/<name>.json   (used by `wf rebuild`)
 
@@ -29,7 +30,10 @@ def main() -> int:
     ap.add_argument("--figure", action="append", default=[],
                     help="figures: a planned figure id (default: every supplementary figure)")
     ap.add_argument("--input", type=Path, help="xlsx: the certified supplementary workbook")
-    ap.add_argument("--output", type=Path, help="the upload file in 08_submission/bundle/")
+    ap.add_argument("--output", type=Path, help="the upload file in 08_submission/bundle/, or the "
+                    "bundle directory: then named Supplemental_File_<n>_<Title> (1.19.0)")
+    ap.add_argument("--title", default=None, help="descriptive title (default Supplementary "
+                    "Figures / Supplementary Tables)")
     ap.add_argument("--receipt", type=Path, help="rebuild: a build receipt")
     ap.add_argument("--project", type=Path, default=None)
     args = ap.parse_args()
@@ -43,12 +47,13 @@ def main() -> int:
             raise ValueError("--output is required")
         output = wfpaths.paper_output_path(args.output)
         if args.command == "figures":
-            out, rec = supplementary.figures_pdf(project, output, args.number, args.figure or None)
+            out, rec = supplementary.figures_pdf(project, output, args.number, args.figure or None,
+                                                 args.title)
         else:
             if args.input is None:
                 raise ValueError("xlsx needs --input <workbook>")
             out, rec = supplementary.xlsx_info(project, wfpaths.resolve_paper_path(args.input),
-                                               output, args.number)
+                                               output, args.number, args.title)
     except (OSError, ValueError, KeyError) as exc:
         print(f"supplementary builder error: {exc}", file=sys.stderr)
         return 2

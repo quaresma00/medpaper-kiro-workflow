@@ -57,7 +57,8 @@ TYPED_FIELDS = ("limits.main_text_words", "limits.abstract_words", "limits.refer
                 "highlights", "key_points", "cover_letter", "required_uploads", "figure",
                 "orcid_required", "running_title_position", "line_numbers", "figure_dpi",
                 "declarations_order", "main_text_headings", "blinded_main_manuscript",
-                "double_blind", "journal_requires_checklist", "si_format", "reference_separator")
+                "double_blind", "journal_requires_checklist", "si_format", "reference_separator",
+                "figures.placement", "tables.placement", "supplementary_file_pattern")
 # Typed fields a builder applies (enforcement "builder").
 BUILDER_FIELDS = ("main_text_headings", "keywords.separator", "legend_style", "reference_separator",
                   "line_numbers", "abbreviation_list", "si_format", "supplementary_label",
@@ -66,7 +67,10 @@ BUILDER_FIELDS = ("main_text_headings", "keywords.separator", "legend_style", "r
                   "double_blind", "running_title_position", "docx_style", "csl", "reference_rules",
                   "figure.formats", "figure.colour", "declarations_heading", "declarations_order",
                   "abstract.headings", "presentation", "figures_at_end", "language", "spelling",
-                  "number_format")
+                  "number_format",
+                  # 1.19.0 (M1/M2/M4): layout placement and supplementary file naming
+                  "title_page.placement", "figures.placement", "figures.also_separate",
+                  "tables.placement", "supplementary_file_pattern")
 
 
 def _json(path: Path):

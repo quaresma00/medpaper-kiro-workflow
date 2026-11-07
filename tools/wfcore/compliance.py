@@ -338,9 +338,12 @@ ZH_STATUS = {PASS: "通过", FAIL: "未通过", WARN: "警告", CANNOT: "无法�
 
 def summary_zh(project: Path) -> list[str]:
     """K5: the short Chinese compliance summary shown to the user at S24."""
+    from . import layout
     data = _json(Path(project) / MATRIX_JSON)
+    # 1.19.0 (M5): one line per layout decision with its basis (guide line + quote, or default)
+    lay = layout.decisions_zh(project) if (Path(project) / "08_submission/target_journal.json").is_file() else []
     if not isinstance(data, dict):
-        return []
+        return lay
     rows = data.get("rows") or []
     c = data.get("counts") or {}
     cat = lambda r: rq.CATEGORIES.get(r.get("category"), r.get("category"))  # noqa: E731
@@ -355,4 +358,4 @@ def summary_zh(project: Path) -> list[str]:
             out.append(f"{title}：")
             out += [f"- {r['id']}［{cat(r)}］{(r.get('quote') or r.get('evidence'))[:70]}"
                     f"（{r.get('lines') or '-'}）：{r.get('evidence', '')[:60]}" for r in items]
-    return out
+    return out + lay

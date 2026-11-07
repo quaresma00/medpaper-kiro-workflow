@@ -14,7 +14,7 @@
 
 [meta]
 name = "medpaper"
-version = "1.18.0"
+version = "1.19.0"
 schema = 1
 description = "Medical/clinical research pipeline: idea -> feasibility -> data -> analysis -> artifacts -> manuscript -> submission package."
 
@@ -147,6 +147,15 @@ body_list_share_max = 0.10
 # is left as written. A chosen journal's target_journal.json "spelling" takes precedence.
 spelling = ""
 reference_verification_age_days_max = 90
+# 1.19.0 (M3): the Discussion interprets, it does not restate the Results (S16
+# section_language_clean). A paper changes these in its .wf/config.toml [targets] together with
+# discussion_thresholds_reason (>= 20 characters); an override without a reason is ignored.
+discussion_supp_citations_max = 0
+discussion_display_citations_max = 2
+discussion_result_sentences_max = 3
+discussion_restated_sentences_max = 2
+discussion_prior_studies_min = 5
+discussion_restate_jaccard = 0.6
 
 # ==============================================================================
 # STAGES
@@ -769,6 +778,13 @@ since = "1.9.0"
 check = "section_language_clean"
 path = "07_manuscript/discussion.md"
 since = "1.13.0"
+# 1.19.0 (M3): + no supplementary display citations, <= 2 table/figure citations, <= 3
+# sentences with the study's own numbers, <= 2 restated Results sentences, >= 5 prior studies
+# (warning); applies to a paper pinned to 1.19.0+.
+discussion_checks = true
+[[stage.gate]]
+check = "discussion_outline_ready"
+since = "1.19.0"
 [[stage.gate]]
 check = "clinical_labels_used"
 paths = ["07_manuscript/discussion.md"]
@@ -1126,6 +1142,11 @@ since = "1.18.0"
 [[stage.gate]]
 check = "compliance_matrix_complete"
 since = "1.18.0"
+# 1.19.0 (M1/M2/M4): title page, figure/table placement and supplementary file names follow
+# the typed fields or the engine defaults; a non-default value needs a guideline requirement.
+[[stage.gate]]
+check = "layout_from_guideline"
+since = "1.19.0"
 [[stage.gate]]
 check = "reference_provenance"
 live = true

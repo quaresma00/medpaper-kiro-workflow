@@ -659,7 +659,14 @@ def bundle_complete(ctx: Ctx) -> Result:
     items = man.get("items", [])
     problems = []
     roles = {str(i.get("role", "")).lower() for i in items}
-    for need in ("title_page", "manuscript", "cover_letter", "figures", "tables", "checklist"):
+    from .. import journalspec, layout
+    tj = journalspec.load(ctx.project)
+    needs = ["title_page", "manuscript", "cover_letter", "figures", "tables", "checklist"]
+    if layout.title_page_placement(tj, ctx.project) == "in_manuscript":
+        needs.remove("title_page")  # 1.19.0 (M1): on the manuscript's first page
+    if layout.explicit(tj, "figures") and not layout.figures_separate(tj, ctx.project):
+        needs.remove("figures")  # 1.19.0 (M2): embedded per the guide, no separate files
+    for need in needs:
         if need not in roles:
             problems.append(f"no bundle item with role '{need}'")
     listed = set()

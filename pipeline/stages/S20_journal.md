@@ -22,10 +22,11 @@ Details (typed-field JSON, docx_style.json template, evidence rules, switching j
    `legend_style`, `supplementary_aliases`, `reference_separator`, `si_format`,
    `abbreviation_placement` (`self_contained` unless `central_required` + source),
    `line_numbers`, `journal_requires_checklist` only if required, `csl` {style_id, issn}
-   (`tools/refs/csl_index.py fetch --issn <ISSN>`), `presentation` (complete after a journal
-   switch; a change is a re-render via `wf rebuild`, never science), and since 1.18.0
-   `abstract`, `title_page`, `highlights`/`key_points`, `cover_letter`, `required_uploads`,
-   `figure`, `orcid_required` (absent = journal silent).
+   (`tools/refs/csl_index.py fetch --issn`), `presentation`, 1.18.0 `abstract`,
+   `title_page`, `highlights`/`key_points`, `cover_letter`, `required_uploads`, `figure`,
+   `orcid_required`; 1.19.0 `title_page.placement`, `figures.placement`, `tables.placement`,
+   `supplementary_file_pattern` ONLY from a guide rule (requirement, quote + line; 'e.g.'
+   is no mandate). Absent = default.
 6. `08_submission/guidelines_extract.md` citing `guidelines_source.txt` lines (`L0012`),
    `08_submission/docx_style.json` (fallbacks under `fallbacks`) and
    `08_submission/guideline_requirements.json` (`reference/guideline_requirements.schema.json`):

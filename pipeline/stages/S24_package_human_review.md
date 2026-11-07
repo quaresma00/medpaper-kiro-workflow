@@ -33,7 +33,8 @@ Details (presentation vs science, rework kinds, Word layout edits): `reference/s
 ```
 4. ONE message: findings by severity, changes, kept items, bundle paths
    (`08_submission/bundle/`, previews), pending author decisions, and the Chinese compliance
-   summary `close` prints (`wf compliance summary`; every FAIL/无法评估/portal item), then:
+   summary `close` prints (`wf compliance summary`; every FAIL/无法评估/portal item and,
+   since 1.19.0, one line per layout decision with its basis), then:
    > 本轮审阅与修改已完成。需要再审一轮请直接说明；确认当前版本请回复：我确认这一版
 5. Record the answer:
 ```

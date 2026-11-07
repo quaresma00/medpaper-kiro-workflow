@@ -13,11 +13,12 @@ Details (builder, manifest roles, checklist format, portal to-do): `reference/st
 .\.venv\Scripts\python.exe tools/manuscript/build_docx.py build --kind manuscript --input project/08_submission/manuscript/full_manuscript.md --output project/08_submission/bundle/manuscript.docx --style-config project/08_submission/docx_style.json --bibliography project/06_refs/refs.bib --csl <journal.csl> --wait
 .\.venv\Scripts\python.exe tools/manuscript/build_docx.py build --kind title_page --input project/08_submission/manuscript/title_page.md --output project/08_submission/bundle/title_page.docx --style-config project/08_submission/docx_style.json
 ```
-   Same for the cover letter. Supplementary Methods: `--kind supplementary --esm-number <n>
-   --pdf` (header "Online Resource n"). Supplementary figures PDF and workbook info sheet:
-   `tools/supplementary.py figures --number <n> --output ...` / `xlsx --input ... --number
-   <n> --output ...`. No black squares (zero keep markers). Keep any helper script you need
-   later in `.wf/scripts/` - never in `temp/` (`wf clean` empties it).
+   Same for the cover letter. 1.19.0: title page/figure/table placement and file names
+   follow `wf compliance layout` (title page DOCX only for separate/both). Supplementary:
+   `--kind supplementary --esm-number <n> --pdf --output project/08_submission/bundle/`,
+   `tools/supplementary.py figures|xlsx --number <n> [--input ...] --output
+   project/08_submission/bundle/` (Supplemental_File_n_Title, header "Online Resource n:
+   Title"). No keep markers. Helper scripts in `.wf/scripts/`, never `temp/`.
 3. Write `08_submission/bundle/manifest.json` (every upload, role, rule). Main figure TIFFs
    and table workbooks are added automatically when the journal wants separate files.
    From now on ONE command rebuilds what an edit affects and re-measures (audit,
@@ -52,7 +53,7 @@ Details (builder, manifest roles, checklist format, portal to-do): `reference/st
 
 ## Gate
 bundle complete, DOCX ready (no tracked changes/comments/placeholders), measured checklist,
-journal fields met, compliance matrix (no FAIL), package baseline, visual debts, reporting
+journal fields met, compliance matrix (no FAIL), layout from guideline, package baseline, visual debts, reporting
 checklist, reproduces, no orphans, journal CSL. Never recapture the baseline for a Word edit.
 
 ## Close

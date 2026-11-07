@@ -170,6 +170,7 @@ class State:
             self._note_v1160(old_version, pipeline_version)
             self._note_v1170(old_version, pipeline_version)
             self._note_v1180(old_version, pipeline_version)
+            self._note_v1190(old_version, pipeline_version)
             self.save()
         return changed
 
@@ -213,6 +214,28 @@ class State:
                    "DOCX preflight (tracked changes, comments, placeholders) in docx_bundle_ready, "
                    "figure format conversion and the manuscript running title. Paper files were "
                    "not modified.")
+
+    def _note_v1190(self, old_version: str, new_version: str) -> None:
+        """1.19.0: one event; no file or stage is touched."""
+        if (version_tuple(old_version) >= (1, 19, 0) or version_tuple(new_version) < (1, 19, 0)
+                or self.data.get("v1190_migration_noted")):
+            return
+        self.data["v1190_migration_noted"] = True
+        self.event("requirements_changed",
+                   "1.19.0: explicit typed fields in target_journal.json work now on the next "
+                   "`wf rebuild` - title_page.placement (in_manuscript|separate|both), "
+                   "figures.placement (separate_files|in_text|end_of_manuscript), "
+                   "tables.placement (end_of_manuscript|in_text), supplementary_file_pattern - "
+                   "and `wf compliance layout` / the S24 summary show each layout decision with "
+                   "its basis; a package change still needs the user's new confirmation. The S16 "
+                   "writer bundle (key findings in words, no tables or display IDs), the outline "
+                   "and the Discussion guidance apply whenever the Discussion is written or "
+                   "rewritten. New defaults and checks apply only after `wf migrate --yes` (or "
+                   "for S20-S25 after `wf journal switch`): title page on the manuscript's first "
+                   "page (separate file only when required), figures as separate files with "
+                   "legends at the end, tables after the references, Supplemental_File_{n}_{Title} "
+                   "names, layout_from_guideline at S23, discussion_outline_ready and the "
+                   "Discussion checks at S16. Paper files were not modified.")
 
     def _note_v1160(self, old_version: str, new_version: str) -> None:
         """1.16.0: one event; no file or stage is touched."""

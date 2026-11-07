@@ -103,7 +103,11 @@ def wanted(project: Path) -> tuple[list[tuple[Path, str, str]], list[str]]:
         names = {**names, "figure": str(Path(names["figure"]).with_suffix(PIL_FORMAT[fmt][1]))}
     plan = _plan(project)
     out, problems = [], list(conv_problems)
-    for n, e in enumerate(plan.get("main_figures", []) or [], 1):
+    from . import layout
+    # 1.19.0 (M2): figures embedded per figures.placement are not also uploaded separately
+    # unless the guide asks for both.
+    figures = plan.get("main_figures", []) or [] if layout.figures_separate(target, project) else []
+    for n, e in enumerate(figures, 1):
         master = tiff_master(project, e)
         if master is None:
             problems.append(f"{e.get('id', f'Figure {n}')}: no TIFF master next to {e.get('file')} "

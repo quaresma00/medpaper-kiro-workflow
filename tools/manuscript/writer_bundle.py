@@ -406,6 +406,91 @@ def _journal_md(project: Path) -> str:
     return "\n".join(rows) + "\n"
 
 
+# 1.19.0 (M3): the S16 bundle gives key findings in words, not tables or display ids.
+_EST_LINE = re.compile(r"^- (?P<head>.+?): (?P<est>-?\d+(?:\.\d+)?)(?: \((?:(?P<lvl>[\d.]+)% CI |"
+                       r"CI level not recorded; )(?P<lo>-?[\d.]+|\?) to (?P<hi>-?[\d.]+|\?)\))?")
+
+
+def _ratio_words(est: float) -> tuple[str, str]:
+    up = est >= 1
+    f = est if up else (1 / est if est else 99)
+    size = ("little or no difference" if f < 1.1 else "slightly" if f < 1.5 else
+            "moderately" if f < 2 else "about two- to threefold" if f < 3 else
+            "more than threefold")
+    return ("higher" if up else "lower"), size
+
+
+def findings_in_words(project: Path, data: dict | None) -> tuple[list[str], str]:
+    """(key findings in words - direction, rough size, certainty, primary/secondary -, the
+    primary estimate written out once for the principal-findings sentence)."""
+    lines, _gaps = results_in_words(project, data)
+    stems = [f.stem for f in sorted((Path(project) / "03_analysis/results").glob("*.json"))]
+    has_primary = any("primary" in s.casefold() for s in stems)
+    out, primary, cur, first_set = [], "", "", None
+    for ln in lines:
+        m = re.match(r"^## Result set (\d+)", ln)
+        if m:
+            i = int(m.group(1)) - 1
+            cur = stems[i] if 0 <= i < len(stems) else ""
+            continue
+        e = _EST_LINE.match(ln)
+        if not e:
+            continue
+        head = e.group("head")
+        measure = head.split(",")[0].strip().casefold()
+        context = head.split(",", 1)[1].strip() if "," in head else head
+        est = float(e.group("est"))
+        lo = None if e.group("lo") in (None, "?") else float(e.group("lo"))
+        hi = None if e.group("hi") in (None, "?") else float(e.group("hi"))
+        ratio = "ratio" in measure or measure in ("relative risk",)
+        diff = any(w in measure for w in ("difference", "coefficient"))
+        if not (ratio or diff) or (ratio and est <= 0):
+            continue
+        null = 1.0 if ratio else 0.0
+        if ratio:
+            direction, size = _ratio_words(est)
+            what = direction if size == "little or no difference" else f"{size} {direction}"
+            if size == "little or no difference":
+                what = size
+        else:
+            what = "higher" if est > 0 else "lower" if est < 0 else "no difference"
+        if lo is not None and hi is not None:
+            cert = ("the interval excludes no difference" if (lo > null or hi < null) else
+                    "imprecise - the interval includes no difference")
+        else:
+            cert = "certainty not quantified"
+        if first_set is None:
+            first_set = cur
+        is_primary = ("primary" in cur.casefold()) if has_primary else cur == first_set
+        tag = "primary" if is_primary else "secondary"
+        if is_primary and not primary:
+            primary = ln[2:].strip()
+        out.append(f"- [{tag}] {context}: {what} ({measure}); {cert}.")
+    return out[:15], primary
+
+
+def strip_display_ids(text: str) -> str:
+    """'... higher (Table 2; Figure S1)' -> '... higher' - the S16 bundle has no display ids."""
+    from wfcore import discussion
+    text = discussion.MAIN_RE.sub("\x00", discussion.SUPP_RE.sub("\x00", text))
+    text = re.sub(r"\(\s*(?:see\s+)?\x00(?:\s*(?:[;,]|and)\s*\x00)*\s*\)", "", text, flags=re.I)
+    text = text.replace("\x00", "")
+    return re.sub(r"[ \t]+([.,;)])", r"\1", re.sub(r"[ \t]{2,}", " ", text))
+
+
+def _notes_md(project: Path, names: dict[str, str]) -> str:
+    """Limitations, likely bias sources and discussion points recorded during the analysis."""
+    text = _read(project / "03_analysis/notes.md")
+    rows = ["# Known limitations and likely bias sources (from the analysis notes)", ""]
+    for m in re.finditer(r"(?ms)^#{1,6}\s+(Limitations?|Discussion points|Surprises|Bias\w*)\s*$"
+                         r"(.*?)(?=^#{1,6}\s|\Z)", text):
+        rows += [f"## {m.group(1)}", "", clean(strip_display_ids(m.group(2).strip()), names), ""]
+    if len(rows) == 2:
+        rows.append("(no limitations recorded in the analysis notes; derive them from the design "
+                    "in comparison_points.md and say the likely direction of each bias)")
+    return "\n".join(rows) + "\n"
+
+
 def gaps_path(project: Path, stage: str) -> Path:
     return Path(project) / BUNDLE_DIR / f"{stage}_GAPS.md"
 
@@ -424,21 +509,40 @@ def build(project: Path, stage: str, target: str | None = None) -> Path:
     files: dict[str, str] = {"display_dictionary.md": _dictionary_md(data)}
     words, gaps = results_in_words(project, data)
     terms: list[str] = []  # 1.14.0 (B): text identifiers without a label, listed not dropped
-    files["results_in_words.md"] = "\n".join(
-        ["# Results in words (copy numbers exactly; round only as the tables do)", ""] + words
-        + ([f"({len(gaps)} result value(s) are not shown because they have no clinical label "
-            "yet; the orchestrator is fixing the display dictionary - do not guess them.)"]
-           if gaps else [])) + "\n"
-    files["tables.md"] = _tables_md(project, names)
-    files["legends.md"] = clean(_read(project / clinical.LEGENDS), names, terms, "legends")
+    discussion_stage = stage == "S16_discussion"
+    if discussion_stage:
+        # 1.19.0 (M3): interpretation material only - no result tables, legends or display ids.
+        found, primary = findings_in_words(project, data)
+        files["key_findings.md"] = "\n".join(
+            ["# Key findings in words (interpret these; do not restate the Results)", "",
+             "Primary estimate - write it ONCE, in the principal-findings sentence, exactly as "
+             "here:", "", f"> {primary or '[no primary estimate recorded]'}", "",
+             "Each finding below: direction, rough size and certainty. Elsewhere in the "
+             "Discussion use these words, not numbers, and never cite tables or figures.", ""]
+            + (found or ["- (no ratio or difference estimates; describe the main result in words "
+                         "from current_draft.md and the deep-read comparison)"])) + "\n"
+        notes = sorted((project / "06_refs/deepread").glob("*.md"))
+        files["comparison_points.md"] = "\n".join(
+            ["# Comparison points from the deep reads (design, population and definition "
+             "differences, their findings, agreement or disagreement, proposed mechanisms)", ""]
+            + [strip_display_ids(clean(_read(n), names)) for n in notes]) + "\n"
+        files["limitations.md"] = _notes_md(project, names)
+    else:
+        files["results_in_words.md"] = "\n".join(
+            ["# Results in words (copy numbers exactly; round only as the tables do)", ""] + words
+            + ([f"({len(gaps)} result value(s) are not shown because they have no clinical label "
+                "yet; the orchestrator is fixing the display dictionary - do not guess them.)"]
+               if gaps else [])) + "\n"
+        files["tables.md"] = _tables_md(project, names)
+        files["legends.md"] = clean(_read(project / clinical.LEGENDS), names, terms, "legends")
     proto = next((p for p in (project / "01_protocol/protocol_final.md",
                               project / "01_protocol/protocol_v1.md") if p.is_file()), None)
-    if proto:
+    if proto and not discussion_stage:
         # 1.13.0 (#8): plan-versus-practice history never reaches the writer - a protocol
         # section on deviations (older papers) is dropped; the paper describes what was done.
         text = re.sub(r"(?ms)^#{1,6}\s+Deviations\b.*?(?=^#{1,6}\s|\Z)", "", _read(proto))
         files["protocol_summary.md"] = clean(text, names, terms, "protocol")
-    if stage in ("S16_discussion", "S19_human_review"):
+    if stage == "S19_human_review":
         notes = sorted((project / "06_refs/deepread").glob("*.md"))
         if notes:
             files["deepread_notes.md"] = "\n\n".join(clean(_read(n), names) for n in notes)
@@ -450,7 +554,8 @@ def build(project: Path, stage: str, target: str | None = None) -> Path:
     if ex_text.strip():
         files["exemplars.md"] = clean(ex_text, names)
     if (project / target).is_file():
-        files["current_draft.md"] = clean(_read(project / target), names, terms, "draft")
+        draft = clean(_read(project / target), names, terms, "draft")
+        files["current_draft.md"] = strip_display_ids(draft) if discussion_stage else draft
     for name, body in files.items():
         (out / name).write_text(body, encoding="utf-8")
     # For the orchestrator, outside the writer's folder: what the writer could not be given.
@@ -476,11 +581,22 @@ def build(project: Path, stage: str, target: str | None = None) -> Path:
             budget = str(registry.effective_targets(project).get(key, ""))
         except Exception:  # noqa: BLE001
             budget = ""
+    rule = ("Read only the files below (all in this folder). Clinical labels only; numbers "
+            "only from results_in_words.md or tables.md; citations only from library.md.")
+    if discussion_stage:
+        from wfcore import discussion
+        rule = ("Read only the files below (all in this folder). Clinical labels only; citations "
+                "only from library.md. FIRST write the outline (<= 200 words, a working file, "
+                f"never part of the manuscript) to {discussion.OUTLINE} with these labels: "
+                + "; ".join(discussion.LABELS) + ". Number each key finding F1, F2 ... under "
+                "Principal findings; in Comparison with previous studies give for each Fn the "
+                "citekeys and why results differ (or 'no prior study'); under Strengths and "
+                "limitations the likely direction of each bias. THEN write the Discussion from the "
+                "outline: the primary estimate once (key_findings.md), no other result numbers, no "
+                "table/figure or supplementary citations, continuous prose without subheadings.")
     manifest = [f"# Writer bundle ({stage})", "",
                 f"Write: {target}" + (f" (soft budget about {budget} words)" if budget else ""),
-                "Read only the files below (all in this folder). Clinical labels only; numbers "
-                "only from results_in_words.md or tables.md; citations only from library.md.", "",
-                "## Files", ""] + [f"- {n}" for n in files]
+                rule, "", "## Files", ""] + [f"- {n}" for n in files]
     (out / "MANIFEST.md").write_text("\n".join(manifest) + "\n", encoding="utf-8")
     return out
 

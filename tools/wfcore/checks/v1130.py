@@ -59,6 +59,15 @@ def section_language_clean(ctx: Ctx) -> Result:
     warn += [f"{x['kind']}: {x['detail'][:100]}" for x in struct + style
              if x["kind"] not in SECTION_BLOCKING and x["severity"] == "blocking"]
     tier_b = sum(1 for x in ai if x["tier"] == "B")
+    from .. import layout
+    if ctx.spec.get("discussion_checks") and layout.since_1190(ctx):
+        # 1.19.0 (M3): the Discussion interprets; it does not restate the Results.
+        from .. import discussion
+        res_rel = ctx.src("07_manuscript/results.md")
+        d_block, d_warn = discussion.analyse(ctx.project, text,
+                                             ctx.read(res_rel) if ctx.p(res_rel).is_file() else "")
+        block += [f"discussion: {x}" for x in d_block]
+        warn += [f"discussion: {x}" for x in d_warn]
     hints = [f"Polish this section now: python tools/text/polish.py lint --file {rel} - rewrite "
              "every blocking item in clinical prose without changing a number, citation or "
              "table/figure reference; a genuine exception goes in "

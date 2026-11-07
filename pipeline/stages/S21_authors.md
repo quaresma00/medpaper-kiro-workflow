@@ -26,7 +26,11 @@ put the printed statement in `statements.md` (audits read the fact).
 1. Write the answers faithfully to `00_input/author_info.json` (administrative; does not touch
    the reproduction proof); `corresponding` = {name, email, affiliation}.
 2. In the journal variant (`08_submission/manuscript/`, never `07_manuscript/`): `title_page.md`
-   with the selected title unchanged, and `statements.md` with the user's facts, the
+   with the selected title unchanged (1.19.0: the one source of the title page - the builder
+   also puts it on the manuscript's first page unless the journal is blinded or
+   `title_page.placement` is separate; title, running title, authors as provided,
+   affiliations, corresponding author with address/email/phone, ORCID when collected, the
+   counts/keywords the journal asks for), and `statements.md` with the user's facts, the
    declarations the journal requires (its heading names and order from `target_journal.json`);
    an abbreviation list, if any, as `## Abbreviations` - the builder places it after the
    keywords (`abbreviation_list`), never inside Declarations. Each display keeps its own

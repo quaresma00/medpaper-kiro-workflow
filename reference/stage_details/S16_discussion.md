@@ -1,5 +1,22 @@
 # S16 - Discussion - details
 
+> 1.19.0 supersedes older wording below where they differ: the S16 writer bundle holds
+> `key_findings.md` (direction, rough size, certainty, primary vs secondary, the primary
+> estimate written out once), `comparison_points.md` (deep reads), `limitations.md` (analysis
+> notes), library, journal profile - never result tables, legends or display ids. The writer
+> first writes `.wf/writer/discussion_outline.md` (<= 200 words; labels Principal findings,
+> Comparison with previous studies, Possible mechanisms, Clinical and research implications,
+> Strengths and limitations, Conclusion; each key finding F1, F2 ... compared with a verified
+> citekey or 'no prior study'); `discussion_outline_ready` checks it. The section-language
+> gate adds the Discussion checks (tools/wfcore/discussion.py): no Table S*/Figure S*/
+> Supplementary Table/Online Resource/eTable/ESM citation, <= 2 main table/figure citations,
+> <= 3 sentences with the study's own result numbers (a cited prior study's number does not
+> count), <= 2 sentences restating a Results sentence (Jaccard >= 0.6 on content words and
+> numbers), a warning below 5 distinct verified prior studies. Thresholds: pipeline.toml
+> [targets] `discussion_*`; a paper changes them only in `.wf/config.toml` [targets] with
+> `discussion_thresholds_reason`. Rewriting the Discussion of a paper past S19 is a content
+> change that goes through review again - ask the user first.
+
 > Long form of `pipeline/stages/S16_discussion.md` (moved out of the card in 1.12.0 so the
 > card stays short). Read only the section you need; the card has the commands.
 >

@@ -110,6 +110,8 @@ def build_command(project: Path, rec: dict) -> list[str]:
         cmd.append("--pdf")
     if args.get("esm_number"):
         cmd += ["--esm-number", str(args["esm_number"])]
+        if args.get("title"):
+            cmd += ["--title", str(args["title"])]
     return cmd
 
 
@@ -190,7 +192,19 @@ def run(project: Path, everything: bool = False, dry: bool = False) -> int:
     py = sys.executable
     st = _state(project)
     in_round = bool(st.get("active_revision_round"))
+    # 1.19.0 (M4): numbered supplementary uploads take the naming pattern in force
+    # (supplementary_file_pattern, or Supplemental_File_{n}_{Title} for new papers).
+    from . import layout
+    renamed = layout.rename_supplementary(project, dry=dry)
+    for line in renamed:
+        print(("would rename " if dry else "renamed ") + line)
     todo, notes = plan(project, everything)
+    moved = {line.split(" -> ", 1)[1] for line in renamed}
+    have = {rec["output"] for rec in todo}
+    for rec in receipts(project) if not dry else []:
+        if rec["output"] in moved and rec["output"] not in have:
+            rec["_why"] = ["renamed: header '<label> n: <Title>'"]
+            todo.append(rec)
     scripts, orphans = presentation_rerenders(project)
     for n in notes:
         print(n)

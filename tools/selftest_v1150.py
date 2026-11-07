@@ -234,6 +234,10 @@ def run_e3(tmp: Path, record, section) -> None:
     from wfcore import rebuild, supplementary
     section("1.15.0 E3: one command rebuilds the affected package outputs")
     p = _supp_paper(tmp / "rb")
+    # 1.19.0 (M4): a 1.19.0 paper renames ESM_3.pdf to Supplemental_File_3_...; this test is
+    # about the rebuild mechanism, so the fixture keeps the 1.18.0 names.
+    _st = json.loads((p / ".wf/state.json").read_text(encoding="utf-8"))
+    (p / ".wf/state.json").write_text(json.dumps({**_st, "engine_pin": "1.18.0"}), encoding="utf-8")
     with _envset(MEDPAPER_PROJECT=p):
         out, rec = supplementary.figures_pdf(p, p / "08_submission/bundle/ESM_3.pdf", 3)
     before = out.read_bytes()
@@ -359,7 +363,10 @@ def run_e5(tmp: Path, record, section) -> None:
            "the same header block (table sheets unchanged); Word supplementary files use the "
            "same 'Online Resource n' header (--esm-number)",
            "Li Wei" not in btxt and "Online Resource 3" in btxt and len(PdfReader(str(b)).pages) == 2
-           and wb.sheetnames == ["Info", "Table 1"] and info[0] == "Electronic Supplementary Material 2"
+           and wb.sheetnames == ["Info", "Table 1"]
+           # 1.19.0 (M4): '<label> n: <Title>' for a 1.19.0 paper
+           and info[0] in ("Electronic Supplementary Material 2",
+                           "Electronic Supplementary Material 2: Supplementary Tables")
            and wb["Table 1"]["B2"].value == 61 and page.startswith("# Electronic Supplementary Material 1"),
            f"{btxt[:200]} {wb.sheetnames} {info[:3]} {page[:60]}")
     _w(p, "temp/logs/x.log", "log\n")
@@ -612,7 +619,7 @@ def run_r(tmp: Path, record, section) -> None:
     from wfcore import journalspec
     record("R pipeline 1.15.0; a 1.14.1 paper gets exactly one 1.15.0 event and stays pinned "
            "(package changes and stricter checks only after wf migrate --yes); cards <= limit",
-           pipe.meta.get("version") in ("1.15.0", "1.16.0", "1.17.0", "1.18.0") and len(notes) == 1 and st.engine_pin == "1.14.1"
+           pipe.meta.get("version") in ("1.15.0", "1.16.0", "1.17.0", "1.18.0", "1.19.0") and len(notes) == 1 and st.engine_pin == "1.14.1"
            and not journalspec.since_1150(q) and max(sizes.values()) <= registry.CARD_MAX_CHARS,
            f"{len(notes)} {max(sizes.values())} {sorted(sizes.items(), key=lambda kv: -kv[1])[:2]}")
 

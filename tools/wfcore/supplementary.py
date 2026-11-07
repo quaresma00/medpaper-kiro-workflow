@@ -30,11 +30,11 @@ def _sha(p: Path) -> str:
     return hashlib.sha256(Path(p).read_bytes()).hexdigest().upper()
 
 
-def info_lines(project: Path, number: int | None) -> list[str]:
-    from . import journalspec
+def info_lines(project: Path, number: int | None, title: str | None = None) -> list[str]:
+    from . import journalspec, layout
     project = Path(project)
     target = journalspec.load(project)
-    head = f"{journalspec.esm_label(target)} {number}" if number else "Supplementary information"
+    head = layout.header(target, number, title, project)  # 1.19.0 (M4): '<label> n: <Title>'
     out = [head]
     title_path = project / "07_manuscript/title.md"
     if title_path.is_file():
@@ -134,15 +134,17 @@ def _receipt(project: Path, output: Path, kind: str, sources: list[Path], args: 
 
 
 def figures_pdf(project: Path, output: Path, number: int | None = None,
-                ids: list[str] | None = None) -> tuple[Path, Path]:
+                ids: list[str] | None = None, title: str | None = None) -> tuple[Path, Path]:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib.backends.backend_pdf import PdfPages
     from PIL import Image
-    from . import determinism, docxaudit, journalspec
+    from . import determinism, docxaudit, journalspec, layout
     from .revision import guard_outputs, record_derived
     project, output = Path(project), Path(output)
+    title = title or layout.default_title("esm_figures")
+    output = layout.named_output(project, output, number, title, ".pdf")
     entries = figure_entries(project, ids)
     if not entries:
         raise ValueError("no supplementary figures in artifact_plan.json (supp_figures)")
@@ -159,7 +161,7 @@ def figures_pdf(project: Path, output: Path, number: int | None = None,
     from .packagecontent import build_receipt_path
     guard_outputs(project, [output, build_receipt_path(project, output)])
     output.parent.mkdir(parents=True, exist_ok=True)
-    head = info_lines(project, number)
+    head = info_lines(project, number, title)
     matplotlib.rcParams.update({"pdf.fonttype": 42, "font.family": "DejaVu Sans",
                                 "svg.hashsalt": "medpaper"})
     a4 = (8.27, 11.69)
@@ -201,17 +203,22 @@ def figures_pdf(project: Path, output: Path, number: int | None = None,
     determinism.normalize(output)
     sources = [project / "05_figures/legends.md", *[img for _e, img, _l in images]]
     rec = _receipt(project, output, "esm_figures", sources,
-                   {"number": number, "figures": [str(e.get("id")) for e, _i, _l in images]})
+                   {"number": number, "figures": [str(e.get("id")) for e, _i, _l in images],
+                    "title": title})
     record_derived(project, [output, rec])
     return output, rec
 
 
-def xlsx_info(project: Path, src: Path, output: Path, number: int | None = None) -> tuple[Path, Path]:
+def xlsx_info(project: Path, src: Path, output: Path, number: int | None = None,
+              title: str | None = None) -> tuple[Path, Path]:
     from openpyxl import load_workbook
     from openpyxl.styles import Font
+    from . import layout
     from .revision import guard_outputs, record_derived
     from .packagecontent import build_receipt_path
     project, src, output = Path(project), Path(src), Path(output)
+    title = title or layout.default_title("esm_xlsx")
+    output = layout.named_output(project, output, number, title, ".xlsx")
     if not src.is_file():
         raise ValueError(f"workbook missing: {src}")
     guard_outputs(project, [output, build_receipt_path(project, output)])
@@ -219,7 +226,7 @@ def xlsx_info(project: Path, src: Path, output: Path, number: int | None = None)
     if "Info" in wb.sheetnames:
         del wb["Info"]
     ws = wb.create_sheet("Info", 0)
-    lines = info_lines(project, number)
+    lines = info_lines(project, number, title)
     for r, line in enumerate(lines, 1):
         ws.cell(row=r, column=1, value=line)
     ws.cell(row=1, column=1).font = Font(bold=True, size=13)
@@ -242,7 +249,7 @@ def xlsx_info(project: Path, src: Path, output: Path, number: int | None = None)
     except Exception:  # noqa: BLE001 - normalisation is best effort for workbooks
         pass
     rec = _receipt(project, output, "esm_xlsx", [src],
-                   {"number": number, "input": src.relative_to(project).as_posix()})
+                   {"number": number, "input": src.relative_to(project).as_posix(), "title": title})
     record_derived(project, [output, rec])
     return output, rec
 
@@ -252,7 +259,9 @@ def rebuild_from(project: Path, receipt: Path) -> Path:
     args = rec.get("args") or {}
     out = Path(project) / rec["output"]
     if rec.get("kind") == "esm_figures":
-        return figures_pdf(project, out, args.get("number"), args.get("figures"))[0]
+        return figures_pdf(project, out, args.get("number"), args.get("figures"),
+                           args.get("title"))[0]
     if rec.get("kind") == "esm_xlsx":
-        return xlsx_info(project, Path(project) / args["input"], out, args.get("number"))[0]
+        return xlsx_info(project, Path(project) / args["input"], out, args.get("number"),
+                         args.get("title"))[0]
     raise ValueError(f"not a supplementary-builder receipt: {receipt}")

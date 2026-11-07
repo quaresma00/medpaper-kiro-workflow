@@ -1328,6 +1328,14 @@ def cmd_compliance(args) -> int:
         print("\n".join(lines) if lines else "还没有合规矩阵：先建立 08_submission/guideline_requirements.json，"
               "再运行 wf compliance write")
         return 0
+    if args.action == "layout":  # 1.19.0 (M5): layout decisions and their basis
+        from . import layout
+        for r in layout.decisions(proj):
+            print(f"{r['item']}: {r['value'] or '-'}  |  {r['text_zh']}  |  依据: {r['basis_zh']}")
+        probs = layout.problems(proj)
+        for p in probs:
+            print(f"  PROBLEM {p}")
+        return 2 if probs else 0
     if not (proj / requirements.REQ_REL).is_file():
         print(f"compliance: {requirements.REQ_REL} missing - write the requirement list at S20 first")
         return 2
@@ -2335,8 +2343,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("compliance", help="compliance matrix (1.18.0): write (regenerate "
                                           "08_submission/compliance_matrix.md/.json from the "
-                                          "requirement list) | summary (Chinese, for the user)")
-    p.add_argument("action", choices=("write", "summary"))
+                                          "requirement list) | summary (Chinese, for the user) | "
+                                          "layout (title page / figure / table placement, "
+                                          "supplementary names and their basis, 1.19.0)")
+    p.add_argument("action", choices=("write", "summary", "layout"))
     p.set_defaults(fn=cmd_compliance)
 
     p = sub.add_parser("doctor", help="environment and wiring check")

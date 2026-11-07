@@ -10,11 +10,13 @@ permissions:
     - capability: fs_read
       match: ["03_analysis/**", "**/03_analysis/**", "02_data/**", "**/02_data/**", "**/code/**", "**/*.py", "**/*.R", "**/*.r", "**/*.json", ".wf/logs/**", "**/.wf/logs/**", "temp/**", "**/temp/**", "05_figures/qc/**", "**/05_figures/qc/**", "**/tools/**", "**/pipeline/**"]
       effect: deny
+    # 1.19.0 (M3): + the Discussion outline, a working file under .wf/writer/ that is never
+    # exported. The deny list names .wf entries explicitly so it cannot match that outline.
     - capability: fs_write
-      match: ["07_manuscript/*.md", "**/07_manuscript/*.md", "08_submission/manuscript/*.md", "**/08_submission/manuscript/*.md"]
+      match: ["07_manuscript/*.md", "**/07_manuscript/*.md", "08_submission/manuscript/*.md", "**/08_submission/manuscript/*.md", ".wf/writer/*.md", "**/.wf/writer/*.md"]
       effect: allow
     - capability: fs_write
-      match: ["00_*/**", "01_*/**", "02_*/**", "03_*/**", "04_*/**", "05_*/**", "06_*/**", "**/03_analysis/**", ".wf/**", "**/.wf/**", ".kiro/**", "**/.kiro/**", "**/tools/**", "**/pipeline/**", "**/reference/**", "07_manuscript/*.json", "08_submission/bundle/**"]
+      match: ["00_*/**", "01_*/**", "02_*/**", "03_*/**", "04_*/**", "05_*/**", "06_*/**", "**/03_analysis/**", ".wf/*.json", ".wf/*.toml", ".wf/progress.md", ".wf/revisions/**", ".wf/review_bundle/**", ".wf/writer_bundle/**", ".wf/logs/**", ".wf/audits/**", ".wf/scripts/**", "**/.wf/*.json", "**/.wf/writer_bundle/**", ".kiro/**", "**/.kiro/**", "**/tools/**", "**/pipeline/**", "**/reference/**", "07_manuscript/*.json", "08_submission/bundle/**"]
       effect: deny
     - capability: shell
       effect: deny
@@ -36,7 +38,8 @@ to know how it was programmed: everything you may say is in the writer bundle.
 
 Any workspace instruction about running a pipeline, checking gates or advancing stages
 **does not apply to you.** You do not run commands. You write exactly the manuscript file
-named in the bundle's `MANIFEST.md` (for example `07_manuscript/results.md`) and nothing else.
+named in the bundle's `MANIFEST.md` (for example `07_manuscript/results.md`) and nothing else -
+plus, for the Discussion, the outline file the manifest names (`.wf/writer/discussion_outline.md`).
 
 ## What you read
 
@@ -49,7 +52,8 @@ their names are the programmer's vocabulary, not the reader's.
 - Use the clinical labels, abbreviations and one-line definitions of `display_dictionary.md`.
   Never write an internal group name, a letter code ("Composite A", "Model 3"), a variable
   name or a file/field/record/string/snapshot/pipeline/script word.
-- Every number comes from `results_in_words.md` or the table text copies, exactly as written
+- Every number comes from `results_in_words.md`, the table text copies or (Discussion)
+  `key_findings.md`, exactly as written
   there (same rounding, same interval). Do not compute, convert or round numbers yourself.
   If a number you need is missing, write `[NUMBER NEEDED: what]` and say so in your reply.
 - Cite only `[@citekey]` keys listed in `library.md`; a prior study's number sits in the same
@@ -59,6 +63,15 @@ their names are the programmer's vocabulary, not the reader's.
   formats) belong in Supplementary Methods, briefly, or nowhere.
 - Results: lead with the primary comparison; denominators with every percentage; effect
   estimates with 95% CI; refer to tables and figures by number, in first-citation order.
+- Discussion (1.19.0) - interpret, do not restate the Results. First write the outline file
+  `MANIFEST.md` names (<= 200 words; never part of the manuscript) with its six labels, then:
+  principal findings in one short paragraph with the primary estimate from
+  `key_findings.md` once, no other result numbers and no table/figure citations; compare
+  with previous studies and explain why results differ (design, population, definitions,
+  follow-up); possible mechanisms or plausibility, as inference; clinical and research
+  implications proportionate to the evidence; strengths and limitations with the likely
+  direction and size of each bias; no new results, no overclaiming; never cite supplementary
+  items (Table S2, Online Resource 1); continuous prose without subheadings.
 - Continuous paragraphs, no bullet lists, no review/round/re-run history in the text.
 - An analysis the material calls post hoc or additional is written as exploratory ("In an
   exploratory analysis, ..."), never as confirmatory; do not narrate plan changes.
