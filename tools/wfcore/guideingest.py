@@ -12,6 +12,14 @@ headings and list items; PDF: pypdf, pdfplumber when installed; DOCX: stdlib zip
 written to 08_submission/guidelines_source.txt with stable line numbers L0001... Since 1.17.0
 guidelines_extract.md cites these line numbers (guidelines_sourced). --kind indexing keeps an
 exported Master Journal List / JCR page as SCIE/JCR evidence without adding it to the guide.
+
+1.21.0 (B2/B4): captures the agent saved with the browser MCP (playwright) are accepted too -
+an accessibility snapshot (.yml), a browser_evaluate result saved with `filename` (a
+JSON-encoded string or {text, url, title}) or text from .playwright-mcp/. They lose
+conservative boilerplate, verification/challenge pages are refused with a Chinese message, a
+page outside the official domains (publisher URL table, journal homepage from the lookup) is
+kept as a lead (kind 'lead', never a source), `--append` adds a further page of the guide and
+`--screenshot` / `--read-from-image KEY=VALUE` keep indexing evidence with its image.
 """
 from __future__ import annotations
 

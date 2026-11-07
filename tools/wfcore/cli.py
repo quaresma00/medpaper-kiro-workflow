@@ -2472,7 +2472,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("guidelines", help="journal guideline snapshot: status | ingest --from "
                                           "FILE --url URL [--title T] [--kind indexing] (1.17.0) "
-                                          "| refresh --from EXTRACT.md [--source URL]")
+                                          "[--append] [--screenshot PNG] [--read-from-image K=V] "
+                                          "(1.21.0) | confirm-image --why W | refresh --from "
+                                          "EXTRACT.md [--source URL]")
     p.add_argument("action", choices=("status", "ingest", "refresh", "confirm-image"))
     p.add_argument("--from", dest="from_file", type=Path, default=None,
                    help="ingest: the guide saved in the browser (HTML/PDF/DOCX/TXT) or a browser "
