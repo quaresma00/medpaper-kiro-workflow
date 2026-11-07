@@ -2,8 +2,15 @@
 
 一套面向医学与临床研究的 Kiro 工作流。它把“研究想法”推进为经过数据、文献、统计结果、图表、人工复核和期刊规则共同校验的投稿包，而不是只让 AI 一次性写出一篇看似完整的论文。
 
-当前版本：`1.18.0`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE + R 4.3+
+当前版本：`1.19.0`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE + R 4.3+
 
+## 1.19.0 变化（题名页放入正文、图表位置按指南、讨论不复述结果并加深、补充文件按序号加类型命名）
+- **题名页放入正文**：`title_page.placement` = in_manuscript | separate | both。非盲审期刊默认 in_manuscript：正文首页就是 S21 题名页（题名、短标题、作者、单位、通讯作者地址/邮箱/电话、ORCID、期刊要求的计数），分页后接摘要；`required_uploads` 要求题名页时为 both（另交单独文件）；盲审期刊只用单独题名页、正文保持匿名。两处同一来源，参考文献计数、`journal_fields_met` 和盲审审计对两处都适用。
+- **图表位置由类型字段决定，不由代理判断**：`figures.placement` = separate_files（默认：正文不嵌图，图注在末尾另起一页，图片单独上传）| in_text | end_of_manuscript；`tables.placement` = end_of_manuscript（默认：参考文献后每表一页）| in_text。非默认值必须有指南要求（`guideline_requirements.json` 中 rule.field + 原文 + 行号），S23 新门禁 `layout_from_guideline` 检查；图片不会既嵌入又单独上传，除非指南要求。1.18 及以前“图放在正文末尾”来自 S20 写入的 `embed_figures: true`（构建器照做、未要求指南依据），现在被标出。
+- **讨论解释而不复述**：S16 写作包只给关键发现的文字描述（方向、大致幅度、确定性、主要/次要）、主要估计值一次、精读对比要点和已知局限，不再给结果表和图表编号；写作者先写 ≤200 词提纲（`.wf/writer/discussion_outline.md`，不导出），新门禁 `discussion_outline_ready`；S16 语言门禁增加讨论检查：不得引用补充材料（Table S2 等）、正文图表引用 ≤2 次、含本研究结果数字的句子 ≤3 句、复述结果的句子 ≤2 句、已核实的既往研究 <5 篇时警告；阈值只能在论文 `.wf/config.toml` 中连同理由修改。审阅者评分表增加讨论检查。
+- **补充文件命名**：默认 `Supplemental_File_{n}_{Title}`（如 Supplemental_File_1_Supplementary_Methods.docx），文件内抬头为“Online Resource 1: Supplementary Methods”；只有指南强制命名规则时才写 `supplementary_file_pattern`（“e.g.”示例不算）。`wf rebuild` 自动改名并同步清单、上传列表和终稿副本。
+- **透明**：S24 中文合规摘要（`wf compliance summary`）和 `wf compliance layout` 逐条列出题名页、图片、表格、补充文件命名、缩略语表的位置及依据（指南行号 + 原文，或引擎默认）。
+- **在途论文**：显式设置上述字段后下一次 `wf rebuild` 立即生效（投稿包变化仍需用户重新回复“我确认这一版”）；新默认值和新门禁（since 1.19.0）在 `wf migrate --yes` 或换刊后适用；S16 写作包和讨论指导在重写讨论时即适用；只记一条迁移事件，论文文件不改。
 ## 1.18.0 变化（投稿指南逐条要求清单、合规矩阵、缺失期刊字段接入、终审逐条对照原文、投稿前预检）
 
 - **要求清单（S20）**：根据带行号的 `guidelines_source.txt`，为所选文章类型写 `08_submission/guideline_requirements.json`：每条要求有原文引文、行号、类别（26 类固定）、规则（类型字段或检查名）和执行方式（auto/builder/manual/portal/n.a.）。新门禁 `guideline_requirements_mapped`：每个类别都有要求或“未提及”条目（列出搜索词）；引文须逐字出现在所引行；引文中的数字须等于 target_journal.json 的类型字段；原文中每个含 must/required/should/maximum/no more than 等义务词的句子都要被某条要求或 n.a. 范围覆盖，未覆盖的行号会列出。

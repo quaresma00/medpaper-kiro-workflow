@@ -383,6 +383,16 @@ def run_names(tmp: Path, record, section) -> None:
     _pin(q, "1.18.0")
     record("M4 a pinned paper keeps the names it chose until wf migrate --yes or a journal switch",
            layout.supplementary_pattern({}, q) is None and not layout.rename_supplementary(q))
+    st = json.loads((q / ".wf/state.json").read_text(encoding="utf-8"))
+    st["journal_gate_pin"] = {"version": "1.19.0", "stages": ["S20_journal", "S21_authors",
+                                                              "S22_polish", "S23_package",
+                                                              "S24_package_human_review",
+                                                              "S25_submission_audit"]}
+    (q / ".wf/state.json").write_text(json.dumps(st), encoding="utf-8")
+    record("M4/M1/M2 after a journal switch the new journal's package uses the 1.19.0 defaults",
+           layout.supplementary_pattern({}, q) == layout.DEFAULT_SUPP_PATTERN
+           and layout.title_page_placement({}, q) == "in_manuscript"
+           and layout.table_placement({}, q) == "end_of_manuscript")
 
 
 # ------------------------------------------------------------------------------ M5
