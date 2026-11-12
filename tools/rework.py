@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -149,6 +150,22 @@ def _next_round_id(state: State) -> str:
         if path.stem[1:].isdigit():
             numbers.append(int(path.stem[1:]))
     return f"R{max(numbers, default=0) + 1:03d}"
+
+
+def _was_certified(project: Path, revision: dict, rel: str) -> bool:
+    """1.22.0 (C3): the file existed at the round's baseline, or a closed round, the scientific
+    freeze or an engine build receipt certified it."""
+    if rel in (revision.get("baseline") or {}):
+        return True
+    if rel in scoped.certified_receipts(project):
+        return True
+    from wfcore import rebuild, scifreeze
+    try:
+        if scifreeze.is_frozen(project) and rel in scifreeze.load_freeze(project).get("files", {}):
+            return True
+    except SystemExit:
+        pass
+    return any(str(r.get("output")) == rel for r in rebuild.receipts(project))
 
 
 def _valid_project_rel(value: object) -> bool:
@@ -543,8 +560,14 @@ REWIND_PHRASES = ("我确认回退", "I confirm the rewind")
 
 
 def _is_rewind_confirmation(words: str) -> bool:
+    """1.22.0 (U3): '我确认回退' (or 'I confirm the rewind') inside an explicit sentence counts;
+    negations and vague answers never do."""
     text = str(words or "").strip().strip("\"'“”‘’「」『』").rstrip("。.!！ ").strip()
-    return text == REWIND_PHRASES[0] or text.casefold() == REWIND_PHRASES[1].casefold()
+    if text == REWIND_PHRASES[0] or text.casefold() == REWIND_PHRASES[1].casefold():
+        return True
+    if re.search(r"(?i)不确认|不要回退|别回退|\bnot\b|\bdon'?t\b", text):
+        return False
+    return REWIND_PHRASES[0] in text or REWIND_PHRASES[1].casefold() in text.casefold()
 
 
 def _record_rewind(revision: dict, words: str) -> bool:
@@ -829,8 +852,14 @@ def _cmd_progress(args, project: Path, state: State) -> int:
     if len((args.summary or "").strip()) < 10:
         raise ValueError("progress needs --summary of what is done so far")
     files = []
-    for rel in args.changed_file:
-        if not _valid_project_rel(rel) or not (project / rel).is_file():
+    for rel in [*args.changed_file, *(getattr(args, "deleted_file", []) or [])]:
+        if not _valid_project_rel(rel):
+            raise ValueError(f"unsafe changed-file path: {rel}")
+        if not (project / rel).is_file():
+            # 1.22.0 (C3): progress on a deletion of a certified file is recorded as such.
+            if _was_certified(project, revision, Path(rel).as_posix()):
+                files.append({"path": Path(rel).as_posix(), "sha256": scoped.DELETED, "deleted": True})
+                continue
             raise ValueError(f"changed file does not exist: {rel}")
         files.append({"path": Path(rel).as_posix(), "sha256": _sha256_file(project / rel)})
     if item.get("status") != "done":
@@ -984,9 +1013,17 @@ def _cmd_mark(args, project: Path, state: State) -> int:
         if not _valid_project_rel(rel):
             raise ValueError(f"unsafe changed-file path: {rel}")
         source = project / rel
-        if not source.is_file():
-            raise ValueError(f"changed file does not exist: {rel}")
         normalized = Path(rel).as_posix()
+        if not source.is_file():
+            # 1.22.0 (C3): a certified file this item deleted gets a deletion credential
+            # instead of a hash it cannot have.
+            if _was_certified(project, revision, normalized):
+                changed_names.add(normalized)
+                changed.append({"path": normalized, "sha256": scoped.DELETED, "deleted": True})
+                print(f"{normalized}: deleted - recorded as a deletion credential")
+                continue
+            raise ValueError(f"changed file does not exist: {rel} (a deleted certified file "
+                             "is recorded with --deleted-file)")
         changed_names.add(normalized)
         changed.append(scoped.receipt(project, normalized))
     required_sources = {Path(rel).as_posix() for rel in item.get("affected_sources", [])}
@@ -1127,7 +1164,15 @@ def _main() -> int:
     parser.add_argument("command", choices=["plan", "start", "batch", "seal", "check", "build",
                                             "refresh", "status", "mark", "close", "suspend",
                                             "resume", "progress", "layout", "preview",
-                                            "confirm-rewind", "meaning-decide", "meaning-ingest"])
+                                            "confirm-rewind", "meaning-decide", "meaning-ingest",
+                                            "bookkeep"])
+    # 1.22.0 (C2): bookkeeping round at any stage (register only, never a content change).
+    parser.add_argument("--deleted", action="append", default=[],
+                        help="bookkeep: a certified file that was deleted (repeatable)")
+    parser.add_argument("--replaced", action="append", default=[],
+                        help="bookkeep: a certified file replaced without a fact change")
+    parser.add_argument("--renew", action="append", default=[],
+                        help="bookkeep: a derived file renewed from its current build receipt")
     parser.add_argument("--from", dest="from_file", type=Path, default=None,
                         help="meaning-ingest: the reviewer's saved reply or a workflow-state JSON")
     parser.add_argument("--pair", help="meaning-decide: the pair id (P01) or hash from the check output")
@@ -1191,6 +1236,12 @@ def _main() -> int:
         pipe = _pipeline(state)
         if args.command == "status":
             return _cmd_status(state, args.full)
+        if args.command == "bookkeep":
+            from wfcore import bookkeeping
+            _rid, lines = bookkeeping.run(project, state, args.why or "", args.deleted,
+                                          args.replaced, args.renew)
+            print("\n".join(lines))
+            return 0
         if args.command == "batch":
             if args.plan is None:
                 raise ValueError("batch requires --plan <revision-plan.json>")

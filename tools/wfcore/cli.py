@@ -1994,6 +1994,8 @@ def cmd_run_script(args) -> int:
                         out[p] = p.stat().st_mtime_ns
         return out
     before = _derived()
+    from . import rebuild as _rebuild
+    pngs = _rebuild.png_state(proj)
     try:
         outcome = runner.run_paper_script(proj, script, args.script_args)
     except runner.RunnerError as exc:
@@ -2009,6 +2011,14 @@ def cmd_run_script(args) -> int:
         print("The command is failed even if the script exited 0. Inspect/revert those engine "
               "changes before continuing; paper code may write only under the paper root.")
         return 2
+    # 1.22.0 (C4): once a journal is in play (after a switch, a render-parameter change or a
+    # re-render), figure QC runs at once at the new size and fails here with figure + problem.
+    if outcome.returncode == 0 and (proj / "08_submission/target_journal.json").is_file() \
+            and os.environ.get("MEDPAPER_FIGURE_QC_BY_PARENT") != "1":
+        fails = _rebuild.figure_qc(proj, pngs)
+        if fails:
+            print("\n".join(_rebuild.qc_message(fails)))
+            return 2
     return int(outcome.returncode)
 
 
@@ -2327,8 +2337,15 @@ def cmd_config(args) -> int:
     if args.action == "get":
         print(pipe.targets.get(args.key, "<unset>"))
         return 0
+    if args.key == "review_mode" and str(args.value) not in ("standard", "fast"):
+        print("review_mode 只能是 standard 或 fast")
+        return 2
     st.set_config(args.key, args.value)
     print(f"{args.key} = {args.value}   (project override written to {paths.rel(st.config_file)})")
+    if args.key == "review_mode":  # 1.22.0 (U4): what fast mode means, once, in Chinese
+        print("快速模式：稿件审阅 1 轮完整 + 最多 1 轮增量；投稿包只做合规检查（不启动审稿代理，除非您要求）；"
+              "S25 一轮以合规为主的审计。安全门禁不会跳过。" if args.value == "fast" else
+              "标准模式：稿件审阅最多 3 轮，投稿包审阅最多 2 轮，每个期刊 S25 审计最多 2 轮。")
     return 0
 
 

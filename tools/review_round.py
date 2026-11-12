@@ -51,6 +51,10 @@ def _main() -> int:
     ap.add_argument("--scope", choices=sorted(rr.SCOPES))
     ap.add_argument("--project", type=Path, default=None)
     ap.add_argument("--delta", action="store_true")
+    ap.add_argument("--llm", action="store_true",
+                    help="start (fast mode, package scope): the user asked for a reviewer subagent")
+    ap.add_argument("--recommend", nargs=2, action="append", default=[], metavar=("ID", "CHOICE"),
+                    help="close: your recommendation (change|keep) for a finding handed to the author")
     ap.add_argument("--findings", default="")
     ap.add_argument("--finding", nargs=4, action="append", default=[],
                     metavar=("ID", "CATEGORY", "STATUS", "SUMMARY"))
@@ -72,11 +76,23 @@ def _main() -> int:
     scope = args.scope or ("package" if state.current >= "S24" else "manuscript")
     try:
         if args.command == "start":
-            rnd = rr.start(project, scope, state.current, delta=args.delta)
+            from wfcore import convergence as cv
+            rnd = rr.start(project, scope, state.current, delta=args.delta, llm=args.llm)
             bundle = rr.write_bundle(project, rnd)
             reviewguard.take(project, rnd["id"])  # 1.15.0 (E2): the review writes only its report
+            if rnd["mode"] == "compliance":
+                # 1.22.0 (U4/J5): fast mode / repackage - compliance only, no subagent.
+                (bundle / "report.md").write_text(cv.compliance_report(project), encoding="utf-8")
+                print(f"投稿包审阅 {rnd['id']}（快速模式：只做合规检查，不启动审稿代理）：报告已由引擎生成 "
+                      f"{bundle / 'report.md'}。下一步：review_round.py close --findings \"\"，"
+                      "然后把合规摘要和确认请求一次发给用户。用户要求时才用 start --llm 启动审稿代理。")
+                return 0
             print(f"review round {rnd['id']} ({rnd['mode']}) opened, {len(rnd['reviewed'])} file(s)."
                   + (f" Linked to {rnd['linked_to']} (awaiting the user)." if rnd.get("linked_to") else ""))
+            if rnd["mode"] == "regression":
+                print("\n".join(cv.cap_summary_zh(project, scope)))
+            # 1.22.0 (O1): the exact subagent call; close ingests report.md by default.
+            print(cv.subagent_call(bundle, bundle / "report.md"))
             print(f"Pass the medpaper-reviewer subagent this ONE path (it reads everything itself):\n"
                   f"  {bundle / 'MANIFEST.md'}")
             print("Brief to send unchanged - add nothing about known deviations, earlier "
@@ -114,15 +130,24 @@ def _main() -> int:
                            [{"item": i, "reason": r} for i, r in args.kept],
                            [{"id": i, "category": c, "status": s, "summary": t}
                             for i, c, s, t in args.finding], report=args.report,
-                           preference_reason=args.preference_group or "")
+                           preference_reason=args.preference_group or "",
+                           recommendations={i: c for i, c in args.recommend})
             print(f"closed {rnd['id']}: findings {rnd['findings']}; {len(rnd['changes'])} change(s)."
                   + (f" Preference group kept: {', '.join(rnd['preference_group']['ids'])}."
                      if rnd.get("preference_group") else ""))
-            pend = rr.pending_author(rnd)
-            if pend:
-                print("List these as PENDING AUTHOR DECISIONS in the summary (the user decides each):")
-                for f in pend:
-                    print(f"  {f['id']} [{f['category']}] {f['summary']}")
+            from wfcore import convergence as cv
+            # 1.22.0 (R2): convergence verdict and cap, in Chinese for the user.
+            if rnd.get("ready"):
+                print("READY：本轮没有新的必改项（必改 = 会改变数字、结论或读者正确理解的问题）。")
+            else:
+                print(f"本轮必改项：{', '.join(rnd.get('must_fix') or []) or '见报告'}；修改后可开增量轮 "
+                      "（start --delta），只看本轮改动、回退和新的必改项。")
+            if cv.capped(project, scope):
+                print("\n".join(cv.cap_summary_zh(project, scope)))
+            # 1.22.0 (U3/U2): ONE message - the sentence, the preconditions, every pending item
+            # with a recommendation ('按你的建议' accepts all: review_round.py author all ...).
+            print("Send the user ONE message containing your summary and, unchanged, this block:")
+            print("\n".join(f"  {x}" for x in cv.confirmation_zh(project, scope)))
             if scope == "package":  # 1.18.0 (K5): the compliance summary goes into that message
                 from wfcore import compliance
                 zh = compliance.summary_zh(project)
@@ -145,8 +170,13 @@ def _main() -> int:
                   "finding(s)); close with --report (default)")
             return 0
         if args.command == "author":
+            if args.answer[:1] == ["all"]:  # 1.22.0 (U2): '按你的建议' accepts every recommendation
+                done = rr.author_accept_all(project, scope, args.words)
+                print(f"已按建议记录 {len(done)} 项：" + "，".join(
+                    f"{f['id']} {f['author_decision']['choice']}" for f in done))
+                return 0
             if len(args.answer) != 2:
-                raise ValueError("author needs ID and change|keep")
+                raise ValueError("author needs ID and change|keep (or: author all --words \"按你的建议\")")
             hit = rr.author_decide(project, scope, args.answer[0], args.answer[1], args.words)
             print(f"{hit['id']}: author decided {hit['author_decision']['choice']}")
             return 0

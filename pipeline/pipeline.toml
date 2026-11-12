@@ -163,6 +163,11 @@ discussion_restate_jaccard = 0.6
 # off for earlier pins (a rebuild never changes their displays unexpectedly); "true"/"false"
 # in the paper's .wf/config.toml decides explicitly (`wf config set display_relabel true`).
 display_relabel = ""
+# 1.22.0 (U4/R2): "standard" (manuscript review <= 3 rounds, package <= 2, S25 audits <= 2 per
+# journal epoch) or "fast" (manuscript 1 full + at most 1 delta round, package compliance-only
+# without an LLM round unless the user asks, one compliance-focused S25 audit). Safety gates are
+# never skipped. A `wf journal switch --repackage` epoch runs fast.
+review_mode = "standard"
 
 # ==============================================================================
 # STAGES

@@ -5895,6 +5895,8 @@ def main() -> int:
         selftest_v1200.run(tmp / "v1200_root", record, section)
         import selftest_v1210
         selftest_v1210.run(tmp / "v1210_root", record, section)
+        import selftest_v1220
+        selftest_v1220.run(tmp / "v1220_root", record, section)
         run_new_wiring()
         section("isolation")
         record("selftest did not touch the real papers root or user home",

@@ -210,6 +210,11 @@ def md_sections(ctx: Ctx) -> Result:
     text = ctx.read(rel)
     present = [h.lower() for h in _headings(text)]
     required = ctx.spec.get("headings", [])
+    if rel == "08_submission/journal_shortlist.md":
+        # 1.22.0 (U1): the user named the journal - S20 verifies it, no shortlist (relaxation).
+        from ..userdecisions import user_named_journal
+        if user_named_journal(ctx.project):
+            required = [h for h in required if h.casefold() == "eligibility screen"]
     missing = [h for h in required if not any(h.lower() in p for p in present)]
     if missing:
         return Result(

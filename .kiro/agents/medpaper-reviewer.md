@@ -155,6 +155,25 @@ change before submission" from "this would make it better".
 End with what you could not verify and why. That section is not a formality; the caller needs
 to know the boundary of your review.
 
+## 1.22.0 - converge, do not restart
+
+- **Must-fix, fixed definition.** A finding is MUST-FIX only when it changes a number, a
+  conclusion, or a reader's correct understanding of the study (at S25 also: it breaks a hard
+  journal requirement - a required file, statement, limit or format). Presentation, wording,
+  style and taste are OPTIONAL. Tag every finding line `MUST-FIX` or `OPTIONAL`; the same kind
+  of problem gets the same tag in every round.
+- **Delta rounds.** When the bundle lists `previous_report.md` and `closed_findings.md`, judge
+  only this round's changes, regressions and new must-fix problems. Never repeat a closed or
+  kept item unless it regressed. A round with no new MUST-FIX finding is READY - say so.
+- **Regression-only rounds.** When the brief says the round cap is reached, report only
+  regressions and numbers that contradict `key_results.md`.
+- **Engine counts.** The brief states the abstract/main-text words, references, display items
+  and pages counted by the engine with the journal's rule. Quote them; do not recount.
+- **Key results.** Check every number against `key_results.md` (estimates, units, CI level,
+  population, comparison, model, covariates, conversions). Do not write "cannot verify" for a
+  number listed there; name the line that disagrees instead.
+- **Stale renders.** A file marked STALE in the MANIFEST is not a basis for judgement.
+
 Do not soften a verdict to be agreeable. If the honest answer is that this is not ready, say
 that, and say what would make it ready. If the honest answer is that it is ready, say that
 too - inventing objections to look thorough wastes the caller's revision budget.

@@ -129,6 +129,8 @@ def _write_build_receipt(args, project: Path) -> Path:
                                if getattr(args, "esm_number", None) else None))
                  if v not in (None, False) and not (isinstance(v, Path) and not v.is_file())},
     }
+    from wfcore.rebuild import engine_version  # 1.22.0 (C3): inputs + command + engine
+    payload["engine"] = engine_version()
     receipt.parent.mkdir(parents=True, exist_ok=True)
     receipt.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
                        encoding="utf-8")

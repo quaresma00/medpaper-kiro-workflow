@@ -342,9 +342,13 @@ def run_review(tmp: Path, record, section) -> None:
     uncounted = cli("close", "--findings", "major=2", "--finding", "F1", "other", "changed", "x")
     closed = cli("close", "--findings", "major=2", "--finding", "F1", "grouping", "author", "Merge age bands",
                  "--finding", "F2", "other", "kept", "Style preference")
+    # 1.22.0 (U2): the protected finding handed to the author is asked in ONE Chinese message
+    # with the agent's recommendation (default keep) instead of a bare English list.
     record("a numbers/grouping/conclusion finding cannot be closed as kept; every finding is listed",
            kept.returncode != 0 and "cannot be kept" in kept.stderr and uncounted.returncode != 0
-           and closed.returncode == 0 and "PENDING AUTHOR" in closed.stdout,
+           and closed.returncode == 0 and "待您决定的条目 1 项" in closed.stdout
+           and "F1［grouping］" in closed.stdout and "建议：保留" in closed.stdout
+           and "按你的建议" in closed.stdout,
            kept.stderr[-200:] + uncounted.stderr[-200:] + closed.stdout[-200:])
     hr = (p / "07_manuscript/human_review.md").read_text(encoding="utf-8")
     words = [cli("decide", "no_further_review", "--words", w) for w in ("无需审阅", "OK", "可以")]

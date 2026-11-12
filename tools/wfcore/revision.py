@@ -85,14 +85,36 @@ def renewable(rel: str) -> bool:
 
 def receipt(project: Path, rel: str) -> dict:
     """A changed-file credential: raw SHA-256 plus the visible-content hash (1.9.0), so an
-    identical rebuild with new container timestamps still matches."""
+    identical rebuild with new container timestamps still matches. 1.22.0 (C2): Markdown
+    credentials also keep their facts, so a later bookkeeping round can prove a replacement
+    changed no fact."""
     from .determinism import content_sha256
     path = Path(project) / rel
     out = {"path": rel, "sha256": sha256(path)}
     content = content_sha256(path)
     if content.startswith("c:"):
         out["content_sha256"] = content
+    if rel.endswith(".md"):
+        try:
+            from . import presentation
+            facts = presentation.facts(project, rel)
+            if facts is not None:
+                out["facts"] = facts
+        except Exception:  # noqa: BLE001 - facts are an aid, never a reason to fail a receipt
+            pass
     return out
+
+
+def build_receipt_current(project: Path, rel: str) -> bool:
+    """1.22.0 (C3): a derived file is certified by its build receipt (input source hashes,
+    builder command and engine version), not by its own bytes. True when an engine build
+    receipt names this output, every input still matches and the bytes are the builder's."""
+    try:
+        from . import rebuild
+        recs = [r for r in rebuild.receipts(project) if str(r.get("output")) == rel]
+    except Exception:  # noqa: BLE001
+        return False
+    return any(not rebuild.stale(project, r) and not rebuild.hand_edited(project, r) for r in recs)
 
 
 def receipt_holds(project: Path, rec: dict) -> bool:
@@ -101,7 +123,47 @@ def receipt_holds(project: Path, rec: dict) -> bool:
     path = Path(project) / str(rec.get("path", ""))
     if rec.get("deleted") or rec.get("sha256") == DELETED:
         return not path.exists()
-    return same(path, rec.get("sha256"), rec.get("content_sha256"))
+    if same(path, rec.get("sha256"), rec.get("content_sha256")):
+        return True
+    # 1.22.0 (C3): a rebuilt derived file whose build inputs match is not drift.
+    return path.is_file() and build_receipt_current(project, str(rec.get("path", "")))
+
+
+# 1.22.0 (C1): the journal layer of a paper - certified per journal epoch.
+JOURNAL_LAYER = ("08_submission/", "submission_packages/")
+
+
+def journal_layer(rel: str) -> bool:
+    rel = str(rel).replace("\\", "/")
+    return rel.startswith(JOURNAL_LAYER) and not rel.startswith("08_submission/journal_archives/")
+
+
+def earlier_epoch(data: dict, started: float | None) -> bool:
+    """A closed round of an earlier journal epoch: marked by `wf journal switch`, or (papers that
+    switched before 1.22.0) closed before the current epoch started."""
+    if data.get("journal_layer_superseded"):
+        return True
+    if started is None:
+        return False
+    from .journalepoch import seconds
+    t = seconds(data.get("completed_at") or data.get("created_at"))
+    return t is not None and t < started - 1
+
+
+def supersede_journal_layer(project: Path, epoch: int) -> int:
+    """`wf journal switch`: every closed round's journal-layer receipts belong to `epoch`."""
+    n = 0
+    directory = Path(project) / ".wf" / "revisions"
+    for path in sorted(directory.glob("R*.json")) if directory.is_dir() else []:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if data.get("status") == "complete" and not data.get("journal_layer_superseded"):
+            data["journal_layer_superseded"] = epoch
+            atomic_json(path, data)
+            n += 1
+    return n
 
 
 def atomic_json(path: Path, payload: dict) -> None:
@@ -263,15 +325,26 @@ def latest_receipts(project: Path, rounds: list[tuple[str, dict]] | None = None
             if data.get("status") == "complete":
                 rounds.append((data.get("round_id", path.stem), data))
     strict = _pin_at_least(project, (1, 14, 1))
+    try:
+        from .journalepoch import started_at
+        started = started_at(project)
+    except Exception:  # noqa: BLE001
+        started = None
     out: dict[str, tuple[str, str, dict]] = {}
     for i, (name, data) in enumerate(rounds):
+        # 1.22.0 (C1): journal-layer receipts of an earlier journal epoch never certify the
+        # new journal's files; science-layer receipts are untouched.
+        old = earlier_epoch(data, started)
         for item in data.get("items", []) or []:
             for rec in item.get("changed_files", []) or []:
                 if isinstance(rec, dict) and rec.get("path") and rec.get("sha256") \
-                        and not renewable(str(rec["path"])):
+                        and not renewable(str(rec["path"])) \
+                        and not (old and journal_layer(str(rec["path"]))):
                     out[str(rec["path"])] = (name, str(item.get("id", "?")), rec)
         newest = i == len(rounds) - 1
         for rel, label, rec in round_certificates(data):
+            if old and journal_layer(rel):
+                continue
             if strict or newest or rel in out:
                 out[rel] = (name, label, rec)
     return out

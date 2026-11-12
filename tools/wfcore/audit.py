@@ -293,11 +293,31 @@ def start(project: Path, files: list[str]) -> tuple[Path, str]:
         lines.append(f"- {out / 'previous_findings.md'} (check each: RESOLVED or OPEN)")
         if (out / "open_rows.md").is_file():
             lines.append(f"- {out / 'open_rows.md'} (compliance rows to re-check)")
-    lines += [f"- {project / rel}" for rel in files if (project / rel).is_file()]
+    # 1.22.0 (C5): every Word file is listed with its build currency; a stale one is marked.
+    from . import convergence as cv
+    for rel in files:
+        if not (project / rel).is_file():
+            continue
+        note = ""
+        if rel.endswith(".docx"):
+            cur, why, _s = cv.render_currency(project, rel)
+            note = " (current build)" if cur else f" (STALE: {why} - not a basis for judgement)"
+        lines.append(f"- {project / rel}{note}")
     from .reviewitems import write as _write_items  # 1.16.0: cases a gate could not decide
     listed = _write_items(project, out)
     if listed:
         lines.append(f"- {listed} (cases the deterministic checks could not decide)")
+    # 1.22.0 (R2/R3/C6/U4): must-fix rule, engine counts, key results, cap and fast mode.
+    (out / "key_results.md").write_text(cv.key_results(project), encoding="utf-8")
+    lines.append(f"- {out / 'key_results.md'} (key results from the results JSON)")
+    conv = ["", cv.MUSTFIX, cv.counts_line(project), cv.KEY_RESULTS_RULE]
+    if cv.review_mode(project) == "fast":
+        conv.append("FAST MODE / REPACKAGE: one compliance-focused audit - journal requirements, "
+                    "old-journal traces and guideline obligations; the science is frozen and was "
+                    "audited before: do not re-audit it.")
+    if len(past) >= cv.cap(project, "audit"):
+        conv.append(cv.REGRESSION_RULE)
+    lines[3:3] = conv + [""]
     (out / "MANIFEST.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     reviewguard.take(project, aid)
     return out, mode

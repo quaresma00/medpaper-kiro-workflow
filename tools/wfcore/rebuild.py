@@ -42,6 +42,22 @@ def _abs(project: Path, raw: str) -> Path:
     return p if p.is_absolute() else Path(project) / p
 
 
+_ENGINE_VERSION: list[str] = []
+
+
+def engine_version() -> str:
+    """1.22.0 (C3): the engine version a build receipt records with its inputs and command."""
+    if not _ENGINE_VERSION:
+        import tomllib
+        try:
+            data = tomllib.loads((Path(__file__).resolve().parents[2] / "pipeline/pipeline.toml")
+                                 .read_text(encoding="utf-8"))
+            _ENGINE_VERSION.append(str(data.get("meta", {}).get("version", "")))
+        except (OSError, ValueError):
+            _ENGINE_VERSION.append("")
+    return _ENGINE_VERSION[0]
+
+
 def receipts(project: Path) -> list[dict]:
     root = Path(project) / RECEIPTS
     out = []
@@ -125,7 +141,7 @@ class _Log:
 
     def run(self, label: str, cmd: list[str], project: Path, ok_codes=(0,)) -> int:
         env = {**os.environ, "MEDPAPER_PROJECT": str(project), "PYTHONIOENCODING": "utf-8",
-               "MEDPAPER_WAIT_CHILD": "1"}
+               "MEDPAPER_WAIT_CHILD": "1", "MEDPAPER_FIGURE_QC_BY_PARENT": "1"}
         self.fh.write(f"\n=== {label}\n$ {' '.join(cmd)}\n")
         self.fh.flush()
         # list arguments, never a shell: Chinese paths reach the tool unchanged (UTF-8).
@@ -186,6 +202,46 @@ def presentation_rerenders(project: Path) -> tuple[list[str], list[str]]:
     return scripts, orphans
 
 
+def png_state(project: Path) -> dict[str, int]:
+    root = Path(project) / "05_figures/out"
+    return {p.relative_to(project).as_posix(): p.stat().st_mtime_ns
+            for p in root.glob("*.png")} if root.is_dir() else {}
+
+
+def figure_qc(project: Path, before: dict[str, int]) -> list[str]:
+    """1.22.0 (C4): deterministic figure QC (overlap, clipping, panel collisions, minimum font
+    at the final size) runs at once on every figure re-rendered since `before`; returns one
+    'Figure n: check: detail' line per failure (empty = all pass or nothing re-rendered)."""
+    project = Path(project)
+    changed = {r for r, m in png_state(project).items() if before.get(r) != m}
+    if not changed:
+        return []
+    try:
+        plan = json.loads((project / "01_protocol/artifact_plan.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    ids = [str(e.get("id")) for g in ("main_figures", "supp_figures") for e in plan.get(g) or []
+           if isinstance(e, dict) and str(e.get("file", "")).replace("\\", "/") in changed]
+    out = []
+    tools = Path(__file__).resolve().parents[1]
+    env = {**os.environ, "MEDPAPER_PROJECT": str(project), "PYTHONIOENCODING": "utf-8"}
+    for fid in ids:
+        proc = subprocess.run([sys.executable, str(tools / "figures/qc.py"), "--figure", fid],
+                              capture_output=True, text=True, encoding="utf-8", errors="replace",
+                              env=env, cwd=str(project), timeout=600)
+        fails = [ln.strip()[len("[FAIL]"):].strip() for ln in (proc.stdout or "").splitlines()
+                 if ln.strip().startswith("[FAIL]")]
+        if proc.returncode != 0:
+            out += [f"{fid}: {f}" for f in fails] or [f"{fid}: figure QC failed (rc={proc.returncode})"]
+    return out
+
+
+def qc_message(fails: list[str]) -> list[str]:
+    return (["图表质控（按新尺寸立即运行）未通过 - 先修好再继续：", *[f"  {f}" for f in fails[:12]],
+             "  修改作图脚本后重新运行 wf run-script <脚本>（或 wf rebuild），质控会再次自动运行。"]
+            if fails else [])
+
+
 def run(project: Path, everything: bool = False, dry: bool = False) -> int:
     project = Path(project)
     tools = Path(__file__).resolve().parents[1]
@@ -220,9 +276,16 @@ def run(project: Path, everything: bool = False, dry: bool = False) -> int:
     log = _Log(project / ".wf/logs/rebuild.log")
     try:
         # 1.17.0 (J7): displays rendered with another journal's parameters are re-rendered first.
+        pngs = png_state(project)
         for s in scripts:
             log.run(f"re-render {s} (presentation)", [py, str(tools / "wf.py"), "run-script", s],
                     project)
+        # 1.22.0 (C4): figure QC at the new size, on the spot (run-script already ran it for a
+        # paper with a journal; this covers a re-render whose QC output went to the log).
+        if scripts:
+            for f in figure_qc(project, pngs):
+                if not any(f in x for x in log.failures):
+                    log.failures.append(f"FAIL figure QC {f}")
         for d in orphans:
             log.failures.append(f"FAIL re-render {d}: no script recorded; run its script with "
                                 "wf run-script")

@@ -80,13 +80,39 @@ def brief(project, rnd: dict, bundle) -> str:
     if rnd.get("scope") == "package":  # 1.15.0 (E4/E11): engine-owned items, checklist order
         from .audit import engine_text
         rules = [*rules, engine_text()]
+    # 1.22.0 (R1/R2/R3/C6): fixed must-fix rule, delta/regression scope, engine counts, results.
+    from . import convergence as cv
+    conv = [cv.MUSTFIX]
+    if rnd.get("mode") == "regression":
+        conv.append(cv.REGRESSION_RULE)
+    elif rnd.get("mode") == "delta":
+        conv.append(cv.DELTA_RULE)
+    try:
+        conv.append(cv.counts_line(project))
+    except Exception:  # noqa: BLE001 - the brief must always print
+        pass
+    conv.append(cv.KEY_RESULTS_RULE)
+    rules = [*rules, *conv]
     return text + ("\n" + "\n".join(rules) if rules else "")
 
 
-def is_confirmation(words: str) -> bool:
+_VERSION_WORDS = ("这一版", "此版", "本版", "这个版本", "这版")
+_NOT_CONFIRM = re.compile(r"(?i)不确认|未确认|没有确认|别确认|不要确认|无需审阅|\bnot\b|\bdon'?t\b")
+
+
+def is_confirmation(words: str, phrase: str = "") -> bool:
+    """1.22.0 (U3): an explicit confirmation sentence - the exact phrase, or any sentence that
+    contains 确认 plus 这一版/此版/本版/这个版本 (or 'I confirm this version'); 'OK', '可以',
+    '好的', '没问题', '无需审阅' and negations are never a confirmation."""
     text = str(words or "").strip().strip("\"'“”‘’「」『』").strip()
     text = text.rstrip("。.!！ ").strip()
-    return text == CONFIRM_PHRASES[0] or text.casefold() == CONFIRM_PHRASES[1].casefold()
+    if text == CONFIRM_PHRASES[0] or text.casefold() == CONFIRM_PHRASES[1].casefold():
+        return True
+    if _NOT_CONFIRM.search(text):
+        return False
+    if "确认" in text and any(w in text for w in _VERSION_WORDS):
+        return True
+    return CONFIRM_PHRASES[1].casefold() in text.casefold()
 
 
 def version_id(hashes: dict[str, str]) -> str:
@@ -170,9 +196,11 @@ def _changed_since(prev: dict | None, current: dict[str, str],
     return sorted(out)
 
 
-def start(project: Path, scope: str, stage: str, delta: bool = False) -> dict:
+def start(project: Path, scope: str, stage: str, delta: bool = False, llm: bool = False) -> dict:
     data = load(project)
     rounds = data[scope]
+    from . import convergence as cv
+    capped = cv.capped(project, scope)
     if rounds and not rounds[-1].get("closed_at"):
         raise ValueError(f"round {rounds[-1]['id']} is still open; close it first")
     linked = None
@@ -197,6 +225,13 @@ def start(project: Path, scope: str, stage: str, delta: bool = False) -> dict:
         mode = "delta"
     else:
         reviewed, mode = set(current), "full"
+    # 1.22.0 (U4/J5): fast mode / a repackage epoch - the package review is compliance-only
+    # (no reviewer subagent) unless the user asks for one (--llm).
+    if scope == "package" and cv.review_mode(project) == "fast" and not llm:
+        mode = "compliance"
+    # 1.22.0 (R2): after the cap only regressions are checked.
+    elif capped and prev:
+        mode = "regression"
     rid = f"{SCOPES[scope]['prefix']}{len(rounds) + 1:03d}"
     rnd = {"id": rid, "scope": scope, "stage": stage, "mode": mode, "started_at": _now(),
            "inputs": current, "reviewed": sorted(reviewed), "closed_at": None,
@@ -222,14 +257,37 @@ def report_ids(text: str) -> list[str]:
 
 
 def preference_ids(text: str) -> list[str]:
-    """Finding ids whose own line is tagged PREFERENCE (1.15.0, E4)."""
+    """Finding ids whose own line is tagged PREFERENCE (1.15.0, E4) or OPTIONAL (1.22.0, R2:
+    optional findings of every scope close as one group with one reason)."""
     out = []
     for line in (text or "").splitlines():
         m = FINDING_ID_RE.match(line)
-        if m and re.search(r"(?i)\bPREFERENCE\b", line) and not re.search(
-                r"(?i)\b(BLOCKING|MINOR)\b", line) and m.group(1) not in out:
+        if m and re.search(r"(?i)\b(PREFERENCE|OPTIONAL)\b", line) and not re.search(
+                r"(?i)\b(BLOCKING|MINOR|MUST[- ]FIX)\b", line) and m.group(1) not in out:
             out.append(m.group(1))
     return out
+
+
+ACCEPT_ALL = re.compile(r"按你的建议|按您的建议|都按建议|全部按建议|(?i:as you recommend)")
+
+
+def author_accept_all(project: Path, scope: str, words: str) -> list[dict]:
+    """1.22.0 (U2): '按你的建议' accepts the agent's recommendation for every pending item."""
+    if not ACCEPT_ALL.search(str(words or "")):
+        raise ValueError("author all needs the user's words accepting all recommendations, e.g. "
+                         "'按你的建议'")
+    data = load(project)
+    rnd = data[scope][-1] if data[scope] else None
+    if not rnd or not rnd.get("closed_at"):
+        raise ValueError("no closed round to decide on")
+    done = []
+    for f in pending_author(rnd):
+        f["author_decision"] = {"choice": f.get("recommendation") or "keep", "words": words.strip(),
+                                "at": _now(), "accepted_recommendation": True}
+        done.append(f)
+    _save(project, data)
+    _write_summary(project, scope, data[scope])
+    return done
 
 
 def _closure(rnd: dict) -> list[str]:
@@ -286,8 +344,11 @@ def write_bundle(project: Path, rnd: dict) -> Path:
         dst = out / "files" / rel.replace("/", "__")
         shutil.copyfile(src, dst)
         lines.append(f"- {dst} <- {rel} ({digest[:16]})")
+    from .convergence import render_currency as _currency
+    early_stale = {r for r in rnd["reviewed"] if r.endswith(".docx") and not _currency(project, r)[0]}
     for rel in write_text_copies(project, round_id=rnd["id"], rels=[r for r in rnd["reviewed"]
-                                           if r.endswith((".docx", ".xlsx"))]):
+                                           if r.endswith((".docx", ".xlsx"))
+                                           and r not in early_stale]):
         dst = out / "files" / Path(rel).name
         shutil.copyfile(project / rel, dst)
         lines.append(f"- {dst} (hash-bound text copy)")
@@ -304,10 +365,22 @@ def write_bundle(project: Path, rnd: dict) -> Path:
     if listed:
         lines.append(f"- {listed} (cases the deterministic checks could not decide; judge "
                      "each one in the report)")
+    # 1.22.0 (R1/R3): the previous round's report, the closed/kept findings and the results.
+    from . import convergence as cv
+    lines += cv.previous_materials(project, rnd["scope"], rnd, out)
+    kr = out / "files" / "key_results.md"
+    kr.write_text(cv.key_results(project), encoding="utf-8")
+    lines.append(f"- {kr} (key results from the results JSON: check every number against it)")
     stage = str(rnd.get("stage", ""))
     docx += [p.relative_to(project).as_posix() for p in project.glob("08_submission/bundle/*.docx")
              if p.relative_to(project).as_posix() not in docx]
-    paths = [project / rel for rel in docx]
+    # 1.22.0 (C5): a stale build (inputs changed, hand edit) is never rendered for a reviewer.
+    currency: dict[str, tuple[bool, str, dict]] = {rel: cv.render_currency(project, rel) for rel in docx}
+    stale = [rel for rel in docx if not currency[rel][0]]
+    if stale:
+        lines += ["", "## Omitted stale Word builds (not a basis for judgement; rebuilt by wf rebuild)", ""]
+        lines += [f"- {rel}: STALE - {currency[rel][1]}" for rel in stale]
+    paths = [project / rel for rel in docx if rel not in stale]
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "manuscript"))
     if stage >= "S17" and not any("manuscript" in p.name for p in paths):
@@ -330,13 +403,18 @@ def write_bundle(project: Path, rnd: dict) -> Path:
             import preview  # tools/manuscript/preview.py
             import tempfile
             for src in paths[:3]:
+                rel = src.relative_to(project).as_posix() if src.is_relative_to(project) else src.name
+                cur = currency.get(rel, (True, "built for this bundle", {}))
+                origin = (f"rendered from {rel} sha256 {hashlib.sha256(src.read_bytes()).hexdigest()[:16]}"
+                          f"; sources " + (", ".join(f"{k} {v}" for k, v in cur[2].items()) or "-")
+                          + f"; CURRENT ({cur[1]})")
                 with tempfile.TemporaryDirectory(prefix="mp_bundle_") as tmp:
                     pdf = preview.to_pdf(src, Path(tmp))
                     for i, img in enumerate(preview.rasterise(pdf, Path(tmp), None, 80), 1):
                         dst = out / "preview" / f"{src.stem}-p{i:02d}.png"
                         dst.parent.mkdir(exist_ok=True)
                         shutil.copyfile(img, dst)
-                        pages.append(dst)
+                        pages.append((dst, origin))
         except Exception as exc:  # noqa: BLE001 - preview is best effort; the text copies remain
             lines += ["", f"(DOCX page preview unavailable - no Word/LibreOffice converter: "
                       f"{type(exc).__name__}: {exc}; read the DOCX text copy)"]
@@ -344,7 +422,7 @@ def write_bundle(project: Path, rnd: dict) -> Path:
         lines += ["", "(DOCX page preview skipped: MEDPAPER_NO_PREVIEW=1; read the DOCX text copy)"]
     if pages:
         lines += ["", "## Rendered Word pages (read them as the reader will see the paper)", ""]
-        lines += [f"- {p}" for p in pages]
+        lines += [f"- {p} ({origin})" for p, origin in pages]
     (out / "MANIFEST.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     return out
 
@@ -382,7 +460,8 @@ def _display_text_files(project: Path, out: Path) -> list[str]:
 
 def close(project: Path, scope: str, findings: dict[str, int], changes: list[dict],
           not_changed: list[dict], finding_list: list[dict] | None = None,
-          report: Path | None = None, preference_reason: str = "") -> dict:
+          report: Path | None = None, preference_reason: str = "",
+          recommendations: dict[str, str] | None = None) -> dict:
     data = load(project)
     if not data[scope] or data[scope][-1].get("closed_at"):
         raise ValueError("no open review round; start one first")
@@ -429,6 +508,14 @@ def close(project: Path, scope: str, findings: dict[str, int], changes: list[dic
                              "judgement: change it, or mark it 'author' so the user decides")
     finding_list += [{"id": i, "category": "other", "status": "kept",
                       "summary": "preference (closed as a group)"} for i in group]
+    # 1.22.0 (U2): a protected finding handed to the author carries the agent's recommendation
+    # (default keep: had the agent agreed it would have applied the fix as 'changed').
+    for f in finding_list:
+        if f.get("status") == "author":
+            rec = (recommendations or {}).get(f.get("id"), "keep")
+            if rec not in ("change", "keep"):
+                raise ValueError(f"--recommend {f.get('id')}: change or keep")
+            f["recommendation"] = rec
     probe = dict(rnd, finding_list=finding_list, not_changed=not_changed, closed_at="probe")
     open_items = _closure(probe)
     if open_items:
@@ -437,6 +524,9 @@ def close(project: Path, scope: str, findings: dict[str, int], changes: list[dic
                          "or handed to the author")
     rnd.update(findings=counts, changes=changes, not_changed=not_changed,
                finding_list=finding_list, after=inputs(project, scope), closed_at=_now())
+    from . import convergence as cv  # 1.22.0 (R2): no new must-fix -> READY
+    rnd["ready"] = cv.ready(rnd, text)
+    rnd["must_fix"] = cv.must_fix_ids(text)
     _save(project, data)
     _write_summary(project, scope, data[scope])
     return rnd

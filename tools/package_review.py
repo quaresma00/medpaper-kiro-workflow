@@ -58,6 +58,8 @@ def main() -> int:
         except (OSError, ValueError) as exc:
             print(f"package review error: {exc}", file=sys.stderr)
             return 2
+        from wfcore import convergence as cv  # 1.22.0 (O1): the exact subagent call
+        print(cv.subagent_call(out, out / "report.md"))
         print(f"S25 audit bundle ({mode}): pass the medpaper-reviewer agent this ONE path and "
               f"nothing else:\n  {out / 'MANIFEST.md'}")
         print(f"It writes {out / 'report.md'}; then run package_review.py audit-save (or "

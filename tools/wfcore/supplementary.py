@@ -128,6 +128,8 @@ def _receipt(project: Path, output: Path, kind: str, sources: list[Path], args: 
         timespec="seconds"), "output": output.relative_to(project).as_posix(),
         "output_sha256": _sha(output), "sources": rows(sources), "auxiliaries": rows(aux),
         "args": args}
+    from .rebuild import engine_version  # 1.22.0 (C3): receipt = inputs + command + engine
+    payload["engine"] = engine_version()
     rec_path.parent.mkdir(parents=True, exist_ok=True)
     rec_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return rec_path

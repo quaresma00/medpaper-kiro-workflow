@@ -359,6 +359,8 @@ def switch(project: Path, pipe, st, to: str, confirm_old: str, why: str,
     removed = scifreeze.reset_journal(project, archive=archive)
     since = seconds(prev.get("started_at")) if prev.get("started_at") else None
     moved = _wf_layer(project, archive, since, old_no, old)
+    # 1.22.0 (C1): closed rounds' journal-layer receipts belong to the old epoch.
+    superseded = revision.supersede_journal_layer(project, old_no)
     # 3) old S20+ handoff notes no longer count for the new epoch
     marked = 0
     for h in st.data.get("handoff", []):
