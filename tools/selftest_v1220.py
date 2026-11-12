@@ -293,4 +293,108 @@ def run_review(tmp: Path, record, section) -> None:
            and cv.cap(p, "audit") == 2, _out(cfg)[-300:])
 
 
-GROUPS = [("certs", run_certs), ("qc", run_qc), ("review", run_review)]
+# ------------------------------------------------------------------------------ U1-U5
+def run_user(tmp: Path, record, section) -> None:
+    import subprocess
+    import selftest_v181 as v181
+    from selftest_v1170 import _frozen_paper
+    from wfcore import reviewrounds as rr, userdecisions
+    import rework
+    section("1.22.0 U1-U5: user decisions recorded once, fewer pauses, equivalent confirmation, "
+            "stage time, Chinese messages")
+    p = _paper(tmp / "u1", "S20_journal")
+    _w(p, "08_submission/target_journal.json", {"journal": "Journal X", "chosen_by_user": True})
+    _w(p, "00_input/author_info.json", {"authors": [{"name": "A"}, {"name": "B"}]})
+    s1 = _run(p, "tools/wf.py", "status", "--brief", cwd=p)
+    s2 = _run(p, "tools/wf.py", "status", "--brief", cwd=p)
+    dec = userdecisions.load(p)["decisions"]
+    events = [e for e in json.loads((p / ".wf/state.json").read_text(encoding="utf-8"))["events"]
+              if e.get("kind") == "user_decisions_seeded"]
+    record("U1 the first wf command seeds .wf/user_decisions.json from the paper's state (one "
+           "event; the second command adds none)", dec.get("target_journal", {}).get("value") == "Journal X"
+           and "authors" in dec and len(events) == 1 and "已记录用户既定决定" in _out(s1)
+           and "已记录用户既定决定" not in _out(s2), _out(s1)[-400:])
+    st = _run(p, "tools/wf.py", "decisions", "set", "apc_policy", "APC <= 2000 USD", "--words",
+              "版面费不超过2000美元", cwd=p)
+    bad = _run(p, "tools/wf.py", "decisions", "set", "nonsense", "x", "--words", "随便", cwd=p)
+    show = _run(p, "tools/wf.py", "decisions", "show", cwd=p)
+    ho = _run(p, "tools/wf.py", "handoff", cwd=p)
+    card = _run(p, "tools/wf.py", "card", cwd=p)
+    record("U1 `wf decisions set/show` records the user's words with date and source; handoff "
+           "lists the decisions; every card says to read them before asking",
+           st.returncode == 0 and "已记录：apc_policy" in _out(st) and bad.returncode == 2
+           and "版面费不超过2000美元" in _out(show) and "apc_policy=APC <= 2000 USD" in _out(ho)
+           and "`wf decisions show`" in _out(card) and "ONE Chinese line" in _out(card),
+           _out(st)[-200:] + _out(ho)[-300:])
+    _w(p, "08_submission/journal_shortlist.md", "# Journal\n\n## Eligibility screen\n\nJournal X: "
+                                                "SCIE, Q2, no integrity warning.\n")
+    named = _gate(p, "md_sections", "S20_journal", path="08_submission/journal_shortlist.md",
+                  headings=["Eligibility screen", "Ranking basis", "Shortlist", "Reject-fallback cascade"])
+    q = _paper(tmp / "u1b", "S20_journal")
+    _w(q, "08_submission/journal_shortlist.md", "# Journal\n\n## Eligibility screen\n\nx\n")
+    unnamed = _gate(q, "md_sections", "S20_journal", path="08_submission/journal_shortlist.md",
+                    headings=["Eligibility screen", "Ranking basis", "Shortlist", "Reject-fallback cascade"])
+    record("U1 S20 with a user-named journal verifies it only (no shortlist); without a named "
+           "journal the shortlist is still required", named.ok and not unnamed.ok,
+           named.detail + " | " + unnamed.detail)
+    f = _frozen_paper(tmp / "sw")
+    userdecisions.put(f, "spelling", "US", "用美式拼写")
+    userdecisions.put(f, "portal_check", "yes", "你帮我看投稿系统")
+    sw = _run(f, "tools/wf.py", "journal", "switch", "--to", "Journal B", "--confirm-old", "Journal A",
+              "--why", "rejected after peer review: scope", "--outcome", "rejected")
+    d2 = userdecisions.load(f)
+    record("U1 a journal switch keeps journal-independent decisions, archives journal-dependent "
+           "ones and records the new journal as the user's decision",
+           sw.returncode == 0 and d2["decisions"]["spelling"]["value"] == "US"
+           and "portal_check" not in d2["decisions"]
+           and d2["decisions"]["target_journal"]["value"] == "Journal B"
+           and any(h.get("key") == "portal_check" for h in d2.get("history", []))
+           and "用户既定决定" in _out(sw), _out(sw)[-300:])
+
+    # U2/U3 through the CLI
+    r, env = v181._review_paper(tmp / "rev")
+
+    def cli(*args):
+        args = v181.with_report(list(args), r)
+        return subprocess.run([sys.executable, "-B", str(ROOT / "tools/review_round.py"), *args,
+                               "--project", str(r)], capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", env=env)
+    cli("start")
+    other = cli("close", "--findings", "major=1", "--finding", "F1", "other", "author", "label wording")
+    closed = cli("close", "--findings", "major=2", "--finding", "F1", "numbers", "author", "HR rounding",
+                 "--finding", "F2", "grouping", "author", "merge age bands", "--recommend", "F2", "change")
+    record("U2 presentation/label findings are never handed to the author; protected findings "
+           "proposed for keeping are asked in ONE message with a recommendation each",
+           other.returncode != 0 and "不要交给作者" in other.stderr and closed.returncode == 0
+           and "待您决定的条目 2 项" in closed.stdout and "F1［numbers］HR rounding -> 建议：保留" in closed.stdout
+           and "F2［grouping］merge age bands -> 建议：修改" in closed.stdout,
+           other.stderr[-200:] + closed.stdout[-600:])
+    vague = cli("author", "all", "--words", "好的")
+    allr = cli("author", "all", "--words", "按你的建议")
+    last = rr.latest(r, "manuscript")
+    choices = {x["id"]: (x.get("author_decision") or {}).get("choice") for x in last["finding_list"]}
+    record("U2 '按你的建议' accepts every recommendation in one reply; a vague reply does not",
+           vague.returncode != 0 and allr.returncode == 0 and "已按建议记录 2 项" in allr.stdout
+           and choices == {"F1": "keep", "F2": "change"}, allr.stdout[-200:] + str(choices))
+    record("U3 the first confirmation request states the sentence, the preconditions and every "
+           "pending item at once", "回复“我确认这一版”" in closed.stdout and "确认前提" in closed.stdout
+           and "“OK / 可以 / 好的 / 没问题 / 无需审阅”不算确认" in closed.stdout)
+    yes = ["我确认这一版", "我确认此版", "确认这个版本，可以投了", "好的，我确认本版。", "I confirm this version."]
+    no = ["OK", "可以", "好的", "没问题", "无需审阅", "不确认这一版", "这一版还要改", "我确认"]
+    ry = ["我确认回退", "好的，我确认回退。", "I confirm the rewind, go ahead"]
+    rn = ["可以回退", "OK", "我不确认回退", "不要回退"]
+    ok = cli("decide", "no_further_review", "--words", "确认这一版，没有其他修改")
+    record("U3 equivalent explicit sentences confirm (确认 + 这一版/此版/本版/这个版本; 我确认回退 "
+           "inside a sentence); OK/可以/好的/没问题/无需审阅 and negations never do",
+           all(rr.is_confirmation(w) for w in yes) and not any(rr.is_confirmation(w) for w in no)
+           and all(rework._is_rewind_confirmation(w) for w in ry)
+           and not any(rework._is_rewind_confirmation(w) for w in rn) and ok.returncode == 0,
+           str([w for w in yes if not rr.is_confirmation(w)]) + str([w for w in no if rr.is_confirmation(w)])
+           + ok.stderr[-200:])
+    tm = _run(p, "tools/wf.py", "status", "--brief", cwd=p)
+    record("U4/U5 wf status shows the stage's expected duration/credit class and the time spent, "
+           "in Chinese", "预计耗时/额度：中（medium，约 15-40 分钟）" in _out(tm) and "本阶段已用" in _out(tm),
+           _out(tm)[:600])
+
+
+GROUPS = [("certs", run_certs), ("qc", run_qc), ("review", run_review), ("user", run_user)]

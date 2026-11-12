@@ -506,6 +506,10 @@ def close(project: Path, scope: str, findings: dict[str, int], changes: list[dic
         if f["category"] in PROTECTED and f["status"] == "kept":
             raise ValueError(f"finding {f['id']} ({f['category']}) cannot be kept on your own "
                              "judgement: change it, or mark it 'author' so the user decides")
+        if f["category"] not in PROTECTED and f["status"] == "author":
+            # 1.22.0 (U2): presentation and label findings are the agent's call - no pause.
+            raise ValueError(f"finding {f['id']} (other): 展示/标签类问题由你自己决定 - 'changed' "
+                             "或 'kept'（如留给排版，写明原因），不要交给作者")
     finding_list += [{"id": i, "category": "other", "status": "kept",
                       "summary": "preference (closed as a group)"} for i in group]
     # 1.22.0 (U2): a protected finding handed to the author carries the agent's recommendation

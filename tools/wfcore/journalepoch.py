@@ -385,6 +385,14 @@ def switch(project: Path, pipe, st, to: str, confirm_old: str, why: str,
                            "gate_set": engine, "carried": carried,
                            "restore": {"items": items, "answer": None}})
     _save(project, data)
+    # 1.22.0 (U1): journal-independent user decisions carry over; journal-dependent ones are
+    # archived with the old epoch; the new journal is the user's decision (the switch words).
+    from . import userdecisions
+    userdecisions.carry_over_switch(project, old_no)
+    userdecisions.put(project, "target_journal", to, f"wf journal switch --to {to}: {why}")
+    kept_dec = [k for k in sorted(userdecisions.load(project)["decisions"]) if k != "target_journal"]
+    if kept_dec:
+        carried.append("用户既定决定（" + "、".join(kept_dec) + "）")
     st.data["journal_gate_pin"] = {"version": engine, "stages": list(JOURNAL_STAGES),
                                    "epoch": new_no, "at": now}
     st.event("journal_switch", f"epoch {old_no} {old} ({outcome}) -> epoch {new_no} {to}: {why}")

@@ -26,15 +26,19 @@ Details (fixing rules, rework routing, preview/confirm-rewind): `reference/stage
    (listed with their source), deletions and reviewer-driven wording are presentation.
    Never request multi-person coding for automated extraction, nor protocol-deviation text.
 3. Close against the saved report (default: the bundle's report.md); every F-numbered finding
-   listed once; numbers/grouping/conclusion_strength are changed or `author`, never kept:
+   listed once. 1.22.0: numbers/grouping/conclusion_strength are fixed by default
+   (`changed`); `author` + `--recommend <id> keep` only to propose keeping one; `other`
+   findings are yours (changed/kept). OPTIONAL lines: one group, `--preference-group "<why>"`:
 ```
 .\.venv\Scripts\python.exe tools/review_round.py close --findings critical=<n>,major=<n>,minor=<n> --finding <id> <category> <status> "<one line>" --change <file> "<one line>" --kept "<id>" "<why not changed>"
 ```
-   Author answers: `review_round.py author <id> change|keep --words-file <utf-8 file>`.
+   Author answers: `review_round.py author <id> change|keep --words-file <utf-8 file>`;
+   "按你的建议" = `review_round.py author all --words "按你的建议"`.
 4. ONE message to the user: findings by severity, changes (file + one line), what was kept
-   and why, paths, pending author decisions. End with:
+   and why, paths, and the block `close` prints unchanged (sentence, preconditions, every
+   pending item with your recommendation). End with:
    > 本轮审阅与修改已完成。需要再审一轮请直接说明；确认当前版本请回复：我确认这一版
-   Only that sentence (or "I confirm this version") confirms.
+   Also valid: a sentence with 确认 + 这一版/此版/本版/这个版本, or "I confirm this version".
 5. Record the answer (Chinese words: prefer `--words-file`; mojibake is refused):
 ```
 .\.venv\Scripts\python.exe tools/review_round.py decide another_round --words "<user's words>"

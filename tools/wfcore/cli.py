@@ -198,6 +198,7 @@ def _load(need_state: bool = True, warn_stderr: bool = True):
         st.migrate_pipeline(str(pipe.meta.get("version", "0")),
                             [stage.id for stage in pipe.stages], STAGE_ALIASES)
         _refresh_adapters(pipe, st, proj)
+        _seed_decisions(st, proj)
         history_problems = overrides.validate_against_state(paper_over, st)
         if history_problems:
             raise SystemExit(
@@ -222,6 +223,21 @@ def _refresh_adapters(pipe, st, proj: Path) -> None:
           file=sys.stderr)
     st.event("adapters_refreshed", f"engine {version}: {', '.join(changed)}")
     st.save()
+
+
+def _seed_decisions(st, proj: Path) -> None:
+    """1.22.0 (U1): the user's decisions already in the paper's state are recorded once in
+    .wf/user_decisions.json (one line and one event), so no card asks for them again."""
+    from . import userdecisions
+    try:
+        seeded = userdecisions.seed(proj, st)
+    except Exception:  # noqa: BLE001 - seeding never blocks a paper command
+        return
+    if seeded:
+        print(f"[medpaper] 已记录用户既定决定（不再重复询问）：{', '.join(seeded)} -> "
+              f"{userdecisions.REL}", file=sys.stderr)
+        st.event("user_decisions_seeded", ", ".join(seeded))
+        st.save()
 
 
 def _mark(pipe, st, stage) -> str:
@@ -661,6 +677,7 @@ def cmd_status(args) -> int:
     if st.engine_pin != str(pipe.meta.get("version")):
         print(f"pin     paper pinned to engine {st.engine_pin} (engine {pipe.meta.get('version')}); "
               "completed stages keep their gate set - `wf migrate` to adopt the new one")
+    print(f"time    {_stage_time_zh(st, stage.id)}")
     if (proj / "project").is_dir():
         print(f'!! {proj / "project"} exists - "project/" in cards means this paper folder; '
               "move its contents up one level")
@@ -716,6 +733,22 @@ def cmd_status(args) -> int:
             print(f"!! card file missing: {card}")
         print(DASH)
     return 0
+
+
+def _stage_time_zh(st, sid: str) -> str:
+    """1.22.0 (U4): expected duration/credit class of the stage and the time spent so far."""
+    from datetime import datetime, timezone
+    from . import convergence as cv
+    cls, span = cv.COST.get(sid[:3], ("medium", "?"))
+    started = st.stage_info(sid).get("started_at") if st is not None else None
+    used = ""
+    try:
+        t0 = datetime.strptime(str(started), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        mins = int((datetime.now(timezone.utc) - t0).total_seconds() // 60)
+        used = f"，本阶段已用 {mins // 60} 小时 {mins % 60} 分钟" if mins >= 60 else f"，本阶段已用 {mins} 分钟"
+    except (TypeError, ValueError):
+        pass
+    return f"预计耗时/额度：{cv.COST_ZH[cls]}（{cls}，约 {span}）{used}；审阅模式 {cv.review_mode(st.project)}"
 
 
 def _data_lines(proj: Path) -> list[str]:
@@ -800,6 +833,11 @@ def handoff_lines(pipe, st, proj: Path) -> list[str]:
     debts = [n for n, _, _ in parked_visual(pipe, st, mode)]
     if debts:
         out.append(f"visual looks owed at S23: {', '.join(debts)}")
+    from . import userdecisions  # 1.22.0 (U1): never re-ask what the user decided
+    dec = userdecisions.load(proj)["decisions"]
+    out.append("user decisions (never re-ask; wf decisions show): "
+               + ("; ".join(f"{k}={str(v.get('value'))[:40]}" for k, v in sorted(dec.items()))
+                  if dec else "none recorded"))
     out.append("pending user questions: " + ("none" if not questions else ""))
     out += [f"  - {q}" for q in questions[:8]]
     out.append("last events:")
@@ -813,6 +851,29 @@ def handoff_lines(pipe, st, proj: Path) -> list[str]:
         nxt = f"fix the failing gate(s), then {wf()} check"
     out.append(f"next: {nxt}")
     return out
+
+
+def cmd_decisions(args) -> int:
+    """1.22.0 (U1): `wf decisions show | set KEY VALUE --words "<the user's words>"`."""
+    _pipe, st, proj = _load()
+    from . import userdecisions
+    if args.action == "set":
+        if not args.key or args.value is None:
+            print("wf decisions set <key> <value> --words \"<用户原话>\"；可用的 key："
+                  + "、".join(userdecisions.KEYS))
+            return 2
+        try:
+            rec = userdecisions.put(proj, args.key, args.value, args.words or "")
+        except ValueError as exc:
+            print(f"记录被拒绝：{exc}")
+            return 2
+        st.event("user_decision", f"{args.key}={args.value}: {rec['words'][:120]}")
+        st.save()
+        print(f"已记录：{args.key} = {args.value}（{rec['at'][:10]}，用户原话：“{rec['words'][:80]}”）。"
+              "之后不再询问，除非事实变化。")
+        return 0
+    print("\n".join(userdecisions.show_lines(proj)))
+    return 0
 
 
 def cmd_handoff(args) -> int:
@@ -860,6 +921,16 @@ def cmd_card(args) -> int:
     return 0
 
 
+CARD_FOOTER = (  # 1.22.0 (U1/U3/U4/U5): appended to every card printed in a paper workspace
+    "## Every stage (1.22.0)\n"
+    "- Before asking the user anything: `wf decisions show` and `wf handoff`; never re-ask a "
+    "recorded decision unless the facts changed; record a new answer with `wf decisions set "
+    "<key> <value> --words \"<user's words>\"`.\n"
+    "- At stage start tell the user in ONE Chinese line what you will do and roughly how long "
+    "(`wf status` line `time`). Every pause asks ALL open questions in ONE Chinese message, "
+    "each with your recommendation.")
+
+
 def _card_text(card: Path, proj: Path | None) -> str:
     """The card with its details pointer made absolute (readable from a paper workspace)."""
     text = card.read_text(encoding="utf-8").rstrip()
@@ -867,7 +938,7 @@ def _card_text(card: Path, proj: Path | None) -> str:
         return text
     text = text.replace("reference/stage_details/",
                         (paths.repo_root() / "reference" / "stage_details").as_posix() + "/")
-    return _loc(text, proj)
+    return _loc(text, proj) + "\n\n" + CARD_FOOTER
 
 
 def cmd_check(args) -> int:
@@ -2442,6 +2513,15 @@ def build_parser() -> argparse.ArgumentParser:
                                        "step (pass this instead of a hand-written brief)")
     p.add_argument("--md", action="store_true", help="Markdown list output")
     p.set_defaults(fn=cmd_handoff)
+
+    p = sub.add_parser("decisions", help="the user's recorded decisions (1.22.0): show | set KEY "
+                                         "VALUE --words \"<the user's words>\"; read before "
+                                         "asking the user anything")
+    p.add_argument("action", choices=("show", "set"), nargs="?", default="show")
+    p.add_argument("key", nargs="?")
+    p.add_argument("value", nargs="?")
+    p.add_argument("--words", default="")
+    p.set_defaults(fn=cmd_decisions)
 
     p = sub.add_parser("migrate", help="adopt this engine's full gate set for completed stages "
                                        "(the paper is pinned to the engine it ran under)")
