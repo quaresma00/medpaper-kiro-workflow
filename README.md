@@ -2,7 +2,17 @@
 
 一套面向医学与临床研究的 Kiro 工作流。它把“研究想法”推进为经过数据、文献、统计结果、图表、人工复核和期刊规则共同校验的投稿包，而不是只让 AI 一次性写出一篇看似完整的论文。
 
-当前版本：`1.22.0`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE + R 4.3+
+当前版本：`1.23.0`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE + R 4.3+
+
+## 1.23.0 变化（写作前把关、医学语言）
+- **可发表性检查点**：S02/S04/S06 各记录一次结论（GO / CONDITIONAL / NO-GO）和可争取的文章类型，并立即用中文告诉用户；CONDITIONAL 或 NO-GO 时只问一个问题并附建议；S04 按 `reference/publishability.toml` 的设计下限核对实际数量；追加分析前先说明可能改变的结论和大致成本，收益低的建议跳过（`wf publishability`）。
+- **参照同类论文规划图表**：S07 用 `tools/pubmed/benchmark.py` 从 3-5 篇同类论文（开放获取时只读图表题注）建立 `01_protocol/display_benchmark.json`；正文图表数不低于中位数，多数同类论文都有的图表类型要么做、要么写一句理由（`display_plan_benchmarked`）。
+- **写作前独立科学审阅**：S11 之后、写 Results 之前，`review_round.py start --scope science`；审稿代理看方法、结果、图表和同类基准，主代理先改再写；用户回复“继续写作”才进入写作（`science_review_before_writing`），结果或图表变动后需增量轮。
+- **全文获取级联（只用合法途径）**：本地缓存 → PMC/Europe PMC → Unpaywall → OpenAlex（含机构库作者稿）→ Semantic Scholar → CORE（需用户自己的 key）→ 预印本 → 可见浏览器中用用户自己的机构账号 → 作者索取邮件草稿与馆际互借清单 → 一条消息列出剩余论文和投放文件夹（`fulltext.py remaining | ingest-drop`）。
+- **逐节医学润色**：每节由临床写作代理起草、新的 `medpaper-medical-editor` 代理立即润色（回执：写作包 → 草稿 → 润色稿；数字和引用不变）；之后改动只重润色改过的段落（`section_polished`）；工程/数据处理叙述词表扩充。
+- **公开事实自行查证**：能从公开来源查到的声明、数据集访问方式和许可先查证再起草（`wf decisions verify`，记录来源网址）；数据可获得性声明由 `wf data licence` 记录生成并按 DOI 引用（`data_availability_verified`）。
+- **派生变量与多重插补**：`analysis.units` / `medunits.R` 声明单位和合理范围（拒绝重复除以体重），换算系数只来自有出处的 `reference/conversion_factors.json`；`analysis.imputation` / `medimpute.R` 默认按 Rubin 规则合并，只用单个插补数据集需说明理由并自动写入 Methods。
+- **在途论文**：命令和工具立即可用，卡片指导到达该阶段时适用；新门禁（since 1.23.0）在 `wf migrate --yes` 后对尚未完成的阶段生效；只记一条迁移事件，论文文件不改。
 
 ## 1.22.0 变化（少暂停、快收敛、换刊与投稿包）
 - **证书与即时质控**：换刊后旧期刊的投稿层证书按期刊分期失效，`wf rebuild` 不再因旧证书失败；`rework.py bookkeep` 在任意阶段登记删除/替换/续期（有事实变化则拒绝）；派生文件按构建回执认证；换刊或重渲染后图表质控立即按新尺寸运行；审阅包不再含过期渲染；字数、参考文献数等由引擎统一计数写入审阅说明。

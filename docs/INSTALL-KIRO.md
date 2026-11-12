@@ -22,10 +22,13 @@ environment, without it run `bootstrap.py` with Python 3.12 or newer.
 `--global` matters if you work in more than one folder. A workspace-level skill is only
 discoverable in that workspace, so typing `/` elsewhere will not find it. The global copy
 carries the engine's absolute path, so the agent can locate `tools/wf.py` from anywhere.
-It also installs the three delegated agents (`medpaper-reviewer`, which may write only its
-own `report.md` in a review bundle; `medpaper-deepreader`, read-only; and, from 1.12.0,
+It also installs the delegated agents (`medpaper-reviewer`, which may write only its
+own `report.md` in a review bundle; `medpaper-deepreader`, read-only; from 1.12.0
 `medpaper-clinical-writer`, which writes manuscript prose from a writer bundle and never
-reads analysis code). Re-run it if you ever move the engine.
+reads analysis code; and from 1.23.0 `medpaper-medical-editor`, which polishes one section
+right after its draft and writes only its `polished.md`). Re-run it if you ever move the engine.
+Optional (1.23.0): `$env:CORE_API_KEY = "..."` (your own CORE key) adds the CORE aggregator
+to the lawful full-text cascade.
 
 Set these before running searches:
 
