@@ -19,10 +19,19 @@ and `reference/methods-structure.md`.
    statistics); implementation detail - parsing, matching rules, character handling, file
    formats, re-execution - goes to `07_manuscript/supplementary_methods.md` (prose only, no
    tables or rules) or nowhere. Clinical labels from the display dictionary only.
-5. Polish this section now (medical register, de-AI, de-engineering, no pipeline or plan
-   history, prose not lists, abbreviations), fix every blocking item, then `wf check`
-   (`section_language_clean` for methods.md and supplementary_methods.md). Describe the
-   analysis performed; never an initial plan or protocol deviations.
+5. 1.23.0: polish this section right after the draft, by an independent medical editor
+   (medical register, de-AI, no engineering or data-processing narration - "duplicate reports
+   were removed following the FDA-recommended approach" - prose not lists, abbreviations;
+   numbers and citations unchanged). `required_statements.md` in the bundle (pooling,
+   single-imputation reason, derived-variable units) must be stated. Describe the analysis
+   performed; never an initial plan or protocol deviations:
+```
+.\.venv\Scripts\python.exe tools/manuscript/writer_bundle.py receipt --stage S08_methods --section methods
+.\.venv\Scripts\python.exe tools/manuscript/writer_bundle.py edit --section methods
+.\.venv\Scripts\python.exe tools/manuscript/writer_bundle.py polished --section methods
+```
+   Delegate `edit`'s MANIFEST to `medpaper-medical-editor` between the last two commands;
+   the same for `supplementary_methods` when written (`section_polished`). Then lint:
 ```
 .\.venv\Scripts\python.exe tools/text/polish.py lint --file 07_manuscript/methods.md
 ```
@@ -33,7 +42,7 @@ and `reference/methods-structure.md`.
 
 ## Gate
 numbers traceable to results JSON, citations live-verified, engineering language (warning
-in Methods), clinical labels, continuous prose (`prose_not_lists`), no placeholders, only
+in Methods; 1.23.0 `section_polished` blocks it in the polished text), clinical labels, continuous prose (`prose_not_lists`), no placeholders, only
 this stage's file written. Past tense, declarative.
 
 ## Close

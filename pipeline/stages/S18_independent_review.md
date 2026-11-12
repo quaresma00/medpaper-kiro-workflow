@@ -11,7 +11,9 @@ Details (what the reviewer must check, verdict meanings): `reference/stage_detai
 ```
    It writes `.wf/review_bundle/<round>/MANIFEST.md` (copies, hash-bound text copies, figure
    PNGs, a Word build of the draft with page previews when a converter exists) and prints the
-   neutral brief and the `reviewed_artifacts` json block.
+   neutral brief and the `reviewed_artifacts` json block. 1.23.0: after a science round
+   before writing (S09), the brief focuses on writing quality, consistency and readability and
+   does not reopen closed science items unless results or displays changed since.
 2. Delegate to the `medpaper-reviewer` agent with that ONE bundle path and the brief,
    unchanged. Add nothing about known deviations, earlier conclusions or what you expect. It
    reads as a first-time clinical reader, an editor checking engineering language and

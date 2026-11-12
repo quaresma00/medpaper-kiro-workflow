@@ -3,6 +3,7 @@
 ## Purpose
 Write the Results from the final tables and figures (1.10.0: S09 runs after S10/S11;
 `displays_final_for_results`). S12 then only cross-checks.
+Details (science review, hard rules): `reference/stage_details/S09_results.md`.
 
 ## Inputs
 - the rendered tables (`04_tables/`) and figures (`05_figures/out/`) - write from these
@@ -21,25 +22,30 @@ Write the Results from the final tables and figures (1.10.0: S09 runs after S10/
    analysis report; delegate `.wf/writer_bundle/displays/MANIFEST.md` to the
    `medpaper-clinical-writer` (answer in `.wf/writer/display_wording.md`), `wf displays apply`,
    apply the listed wording, re-render, repeat until clean (`display_text_resolved`).
+   1.23.0, still before writing: the independent science review (`medpaper-reviewer`, science
+   mode); revise analyses, displays and Methods; ONE Chinese summary and ONE question (another
+   round, or proceed); record the answer (details):
+```
+.\.venv\Scripts\python.exe tools/review_round.py start --scope science
+```
 1. Order the Results the way the artifact plan is ordered: cohort/flow, baseline
    characteristics, primary analysis, secondary analyses, sensitivity analyses.
    1.12.0: build the writer bundle (results rendered as sentences with clinical labels, table
    text, legends - no code, JSON keys or logs) and delegate the prose to the
-   `medpaper-clinical-writer` agent with the printed MANIFEST path; then `wf check`
-   (engineering language, provenance):
+   `medpaper-clinical-writer` agent with the printed MANIFEST path:
 ```
 .\.venv\Scripts\python.exe tools/manuscript/writer_bundle.py build --stage S09_results
 ```
    Build exits 2 while a result lacks a clinical label or CI level (`S09_results_GAPS.md`);
    fix the dictionary or results first, never let the writer guess.
-2. Write `project/07_manuscript/results.md`. Every display item in the plan must be cited
-   at least once, in order, as `(Figure 1)`, `(Table 2)`, `(Figure S1)`, `(Table S1)`.
-   The gate rejects citations to items not in the plan, and items never cited.
-3. Effects: estimate, CI (recorded level), then P - never a bare P; values exactly as in the
-   result JSONs.
-4. Do not interpret (no "importantly", no mechanism) and do not restate tables row by row.
-5. Polish this section before advancing (medical register, de-AI, de-engineering, no
-   processing log, prose not lists); fix every blocking item (`section_language_clean`):
+2. `project/07_manuscript/results.md`: every display item in the plan cited at least once, in
+   order, as `(Figure 1)`, `(Table 2)`, `(Figure S1)`, `(Table S1)` (the gate rejects
+   citations to items not in the plan, and items never cited). Effects: estimate, CI
+   (recorded level), then P - never a bare P; values exactly as in the result JSONs. No
+   interpretation, no row-by-row restating.
+3. 1.23.0: right after the draft, `writer_bundle.py receipt --stage S09_results`, then the
+   `medpaper-medical-editor` polishes it (`writer_bundle.py edit --section results`, then
+   `polished --section results`; `section_polished`). Lint:
 ```
 .\.venv\Scripts\python.exe tools/text/polish.py lint --file 07_manuscript/results.md
 ```
@@ -47,17 +53,9 @@ Write the Results from the final tables and figures (1.10.0: S09 runs after S10/
 ## Outputs
 - `07_manuscript/results.md`
 
-## Hard rules
-- Effects as the protocol's Statistical reporting plan says (estimate + interval, then P); `effects_with_intervals` warns on P-value-only sentences.
-- Body text is continuous paragraphs (1.9.0). Lists only where a sentence truly cannot carry the content (rarely more than one short list per section); every result, count, criterion, covariate and sensitivity finding is written as a sentence. `prose_not_lists` fails above `body_list_items_max` items or `body_list_share_max` of the blocks.
-- ONE section file this stage.
-- Every number traceable to results JSON, told in its own context (1.16.0): the measure, time
-  window and dictionary labels of the result it comes from; a small integer next to n=, %, a CI
-  or an effect measure is a finding. Sentences combining results go to the reviewer list.
-- Every figure/table citation matches `artifact_plan.json` exactly, including
-  supplementary numbering.
-- No claim about a result you did not compute. If a reviewer would ask "where is the
-  test for that", either run it (loop to S05) or do not claim it.
+## Hard rules (full list in details)
+ONE section file; continuous paragraphs; every number traceable to results JSON in its own
+context; citations match `artifact_plan.json`; no claim about a result you did not compute.
 
 ## Close
 ```

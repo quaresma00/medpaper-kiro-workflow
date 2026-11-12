@@ -5,8 +5,9 @@ consolidated visual pass (every look deferred at S10/S11 comes due here).
 Details (builder, manifest roles, checklist format, portal to-do): `reference/stage_details/S23_package.md`.
 
 ## Do
-1. `08_submission/cover_letter.md` (states every `cover_letter.must_state` item); highlights
-   if required. Sync any title-page reference count:
+1. `08_submission/cover_letter.md` (every `cover_letter.must_state` item; 1.23.0 writer +
+   medical editor: `writer_bundle.py receipt|edit|polished --section cover_letter`);
+   highlights if required. Sync a reference count:
    `.\.venv\Scripts\python.exe tools/manuscript/reference_count.py sync`
 2. Build every prose upload once from `08_submission/manuscript/` (never `07_manuscript/`):
 ```
@@ -21,8 +22,8 @@ Details (builder, manifest roles, checklist format, portal to-do): `reference/st
    Title"). No keep markers. Helpers in `.wf/scripts/`, never `temp/`.
 3. Write `08_submission/bundle/manifest.json` (every upload, role, rule). Main figure TIFFs
    and table workbooks are added automatically when the journal wants separate files.
-   From now on ONE command rebuilds what an edit affects and re-measures (audit,
-   `submission_qc.md`, `compliance_matrix.md`, capture, polish lint):
+   From now on ONE command rebuilds what an edit affects and re-measures (audit, QC,
+   `compliance_matrix.md`, polish lint):
 ```
 .\.venv\Scripts\python.exe tools/wf.py rebuild --wait
 ```
@@ -42,7 +43,7 @@ Details (builder, manifest roles, checklist format, portal to-do): `reference/st
    Render each DOCX (`tools/manuscript/preview.py 08_submission/bundle/manuscript.docx`) and
    inspect pages; then record `submission_files_visually_confirmed YES`.
 5. `08_submission/reporting_checklist.md` only if `journal_requires_checklist` is set (or
-   PRISMA for a meta-analysis); it is numbered after the content supplementary files.
+   PRISMA); numbered after the content supplementary files.
 
 ## Outputs
 - `08_submission/cover_letter.md`
@@ -52,9 +53,9 @@ Details (builder, manifest roles, checklist format, portal to-do): `reference/st
 - `08_submission/submission_qc.md`
 
 ## Gate
-bundle complete, DOCX ready (no tracked changes, comments, placeholders), measured checklist,
-journal fields met, compliance matrix (no FAIL), layout from guideline, display text, package baseline, visual debts, reporting
-checklist, reproduces, no orphans, journal CSL. Never recapture the baseline for a Word edit.
+bundle, DOCX ready (no tracked changes, comments, placeholders), measured checklist, journal
+fields, compliance matrix (no FAIL), layout, display text, baseline, visual debts, reporting
+checklist, reproduces, no orphans, CSL, cover letter polished. Never recapture the baseline.
 
 ## Close
 ```

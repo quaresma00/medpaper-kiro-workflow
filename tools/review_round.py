@@ -48,7 +48,9 @@ def _main() -> int:
     ap.add_argument("--from", dest="from_file", type=Path, default=None,
                     help="ingest: the reviewer's saved reply or a host workflow-state JSON")
     ap.add_argument("answer", nargs="*")
-    ap.add_argument("--scope", choices=sorted(rr.SCOPES))
+    ap.add_argument("--scope", choices=sorted(rr.SCOPES),
+                    help="manuscript (S18/S19), package (S24), science (1.23.0: after S11, "
+                         "before the Results; default at S09)")
     ap.add_argument("--project", type=Path, default=None)
     ap.add_argument("--delta", action="store_true")
     ap.add_argument("--llm", action="store_true",
@@ -73,7 +75,8 @@ def _main() -> int:
     args = ap.parse_args(argtext.fix_argv(sys.argv[1:]))
     project = wfpaths.paper_from_cli(args.project)
     state = State(project, ".wf").load()
-    scope = args.scope or ("package" if state.current >= "S24" else "manuscript")
+    scope = args.scope or ("package" if state.current >= "S24" else
+                           "science" if state.current == "S09_results" else "manuscript")
     try:
         if args.command == "start":
             from wfcore import convergence as cv
@@ -154,6 +157,11 @@ def _main() -> int:
                 if zh:
                     print("Include this compliance summary unchanged in the message to the user:")
                     print("\n".join(f"  {x}" for x in zh))
+            if scope == "science":  # 1.23.0 (S3)
+                print("Now give the user ONE Chinese summary (problems by severity, what you "
+                      "changed in analyses/displays/Methods, what you did not change and why) and "
+                      "ask ONE question: another round, or proceed to writing?")
+                return 0
             print("Now give the user ONE summary and ask: another review round, or confirm with "
                   f"the exact sentence '{rr.CONFIRM_PHRASES[0]}'?")
             return 0
@@ -188,8 +196,11 @@ def _main() -> int:
             if answer == rr.DONE:
                 cfg = rr.SCOPES[scope]
                 state.record_decision(cfg["decision"], cfg["value"],
-                                      f"review round {rnd['id']}: user confirmed version "
-                                      f"{rnd['confirmed_version'][:12]}: \"{rnd['user_words']}\"")
+                                      f"review round {rnd['id']}: user "
+                                      + ("decided to proceed to writing with"
+                                         if scope == "science" else "confirmed")
+                                      + f" version {rnd['confirmed_version'][:12]}: "
+                                      f"\"{rnd['user_words']}\"")
                 print(f"{rnd['id']}: confirmed; {cfg['decision']}={cfg['value']} recorded")
                 if scope == "package":  # 1.22.0 (J4): read-only copy named by journal and date
                     from wfcore import packagefolders

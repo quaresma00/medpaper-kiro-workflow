@@ -138,12 +138,16 @@ def allowlist(project: Path) -> dict[str, str]:
 
 
 def engineering_hits(text: str, allowed: dict[str, str] | None = None,
-                     where: str = "all") -> list[tuple[str, str, str]]:
-    """(term, matched text, suggestion) for every engineering-language hit."""
+                     where: str = "all", extended: bool = False) -> list[tuple[str, str, str]]:
+    """(term, matched text, suggestion) for every engineering-language hit. `extended`
+    (1.23.0, S5): also the data-processing narration list [[engineering_v1230]], used by the
+    medical-editor checks (section_polished) so earlier gates keep their 1.11 word list."""
     text = re.sub(r"```.*?```", " ", text, flags=re.S)
     text = re.sub(r"\[[^\]\n]*@[^\]\n]*\]", " ", text)
     out = []
-    for entry in rules().get("engineering", []):
+    entries = rules().get("engineering", []) + (rules().get("engineering_v1230", []) if extended
+                                                 else [])
+    for entry in entries:
         scope = (allowed or {}).get(entry["term"].casefold())
         if scope == "all" or (scope == "methods" and where == "methods"):
             continue

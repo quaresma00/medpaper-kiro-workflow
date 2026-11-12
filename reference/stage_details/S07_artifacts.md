@@ -28,6 +28,19 @@ first keep panels from filling up with explanatory text later.
    `Comparable papers surveyed`, `Figure/table counts observed`, `Chosen inventory and why`.
    Record the observed range (e.g. "4-6 main figures, 2-3 main tables, n=8 papers"), and
    justify your inventory against it. Fewer, better displays beat padding.
+   1.23.0 (`display_plan_benchmarked`): `tools/pubmed/benchmark.py add --pmid P --design KEY`
+   per comparable paper (3-5) builds `01_protocol/display_benchmark.json` from open-access
+   JATS captions (Europe PMC), else a full text the cascade retrieved, else the counts and
+   types you read from the abstract. `benchmark.py types --design KEY` lists the display types
+   of `reference/display_types.toml` (e.g. pharmacovigilance: case-selection flow diagram,
+   forest plot of reporting odds ratios, time-to-onset distribution, outcome seriousness,
+   trend by year, signal heatmap, sensitivity forest). The plan needs at least the benchmark
+   median of main items (capped by `main_figures_max + main_tables_max` or the provisional
+   journal profile's `display_items`; extra items go to the supplement) and every type used by
+   at least half of the papers: give an item `"display_type": "<key>"` (its archetype and
+   wording also count), or `"benchmark_omissions": {"<key>": "<one-line reason>"}` in the plan.
+   The 1.12 non_redundancy rule still applies. `benchmark.py show` prints the Chinese lines
+   (benchmark counts and types, the plan against them) for the S07 message to the user.
 2. **Plan.** Write `project/01_protocol/artifact_plan.json`. Every entry needs a
    `source_results` list pointing at the result JSONs it is built from - an artifact with
    no numeric source cannot be built:

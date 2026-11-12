@@ -657,14 +657,62 @@ def lint(project: Path, stage: str) -> list[str]:
     return problems
 
 
+def _polish_cli(project: Path, args) -> int:
+    """1.23.0 (S5): receipt (writer draft) -> edit (editor bundle) -> polished (accept)."""
+    from wfcore import sectionpolish as sp
+    stage_sections = {}
+    for sec, (stg, _rel) in sp.SECTIONS.items():
+        stage_sections.setdefault(stg, []).append(sec)
+    try:
+        if args.command == "receipt":
+            if not args.stage:
+                raise ValueError("receipt needs --stage (the stage whose writer bundle was used)")
+            secs = [args.section] if args.section else stage_sections.get(args.stage, [])[:1]
+            if not secs:
+                raise ValueError(f"no section for {args.stage}; pass --section")
+            rec = sp.record_draft(project, args.stage, secs[0])
+            print(f"writer receipt {secs[0]}: bundle {rec['bundle_sha256'][:12]} -> draft "
+                  f"{rec['draft_sha256'][:12]}. Next: writer_bundle.py edit --section {secs[0]} "
+                  f"and delegate to {sp.EDITOR}.")
+            return 0
+        if not args.section:
+            raise ValueError(f"{args.command} needs --section")
+        if args.command == "edit":
+            out = sp.build_edit(project, args.section)
+            print(f"invoke subagent: name={sp.EDITOR}, prompt=\"Read {out / 'MANIFEST.md'} and "
+                  f"follow it; write the polished section to {out / 'polished.md'}\" (run it in "
+                  "the paper's main chat)")
+            print(f"then: writer_bundle.py polished --section {args.section}")
+            return 0
+        rec = sp.accept_polished(project, args.section, args.from_file)
+        print(f"polished {args.section}: {rec['file']} = polished text {rec['polished_sha256'][:12]} "
+              f"(numbers, citations and display references unchanged; language clean)")
+        return 0
+    except (OSError, ValueError) as exc:
+        print(f"writer bundle error: {exc}", file=sys.stderr)
+        return 2
+
+
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="clinical writer bundle (1.12.0)")
-    ap.add_argument("command", choices=("build", "lint"))
-    ap.add_argument("--stage", required=True)
+    ap = argparse.ArgumentParser(description="clinical writer bundle (1.12.0); 1.23.0 writer "
+                                             "receipts and the medical editor pass")
+    ap.add_argument("command", choices=("build", "lint", "receipt", "edit", "polished"))
+    ap.add_argument("--stage", default="", help="build/lint/receipt: the writing stage")
     ap.add_argument("--target", default=None, help="manuscript file to write (default per stage)")
+    ap.add_argument("--section", default="", help="receipt/edit/polished (1.23.0): methods, "
+                                                   "results, introduction, discussion, abstract, "
+                                                   "title, legends, table_captions, "
+                                                   "supplementary_methods, cover_letter")
+    ap.add_argument("--from", dest="from_file", type=Path, default=None,
+                    help="polished: the editor's text (default .wf/editor_bundle/<section>/polished.md)")
     ap.add_argument("--project", type=Path, default=None)
     args = ap.parse_args(argv)
     project = wfpaths.paper_from_cli(args.project)
+    if args.command in ("receipt", "edit", "polished"):
+        return _polish_cli(project, args)
+    if not args.stage:
+        print("writer bundle error: --stage is required", file=sys.stderr)
+        return 2
     try:
         if args.command == "build":
             out = build(project, args.stage, args.target)

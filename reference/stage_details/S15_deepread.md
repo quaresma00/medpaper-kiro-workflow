@@ -54,13 +54,32 @@ effect sizes with prior work. Fetch and read ~5 full texts properly.
 3. If a scholarly retrieval skill supplies an open-access file, or the user legally
    obtains one through institutional access, register the local copy before reading it:
 ```
-.\.venv\Scripts\python.exe tools/pubmed/fulltext.py register --citekey smith2023 --file "C:\path\paper.pdf" --access oa --source-url "https://publisher.example/article" --route scansci-pdf
+.\.venv\Scripts\python.exe tools/pubmed/fulltext.py register --citekey smith2023 --file "C:\path\paper.pdf" --access oa --source-url "https://publisher.example/article" --route repository-pdf
 ```
    For institutional access, use `--access authorized --authorization-note "<basis>"`.
-   Do not use Sci-Hub or another unauthorized source. Do not request browser login,
-   cookies or credentials unless the user explicitly authorizes that route. If only a
-   paywalled link or abstract is available, replace the paper or leave the stage blocked;
-   it does not count as a deep read.
+   1.23.0 (S4) - lawful routes only, in this order, each recorded per paper: the automatic
+   cascade of `fetch` (local cache, PMC/Europe PMC, Unpaywall best OA location, OpenAlex OA
+   locations incl. repository author manuscripts, Semantic Scholar openAccessPdf, CORE only
+   with the user's own `CORE_API_KEY`, preprint versions linked by the DOI's Crossref
+   relations); then the publisher page in the **visible** browser window with the user's own
+   institutional or library login - the user logs in once themselves, you download only the
+   listed papers, one at a time at a human pace, never in bulk, within the licence terms, and
+   register each with `--route browser-institutional --access authorized --authorization-note
+   "<institution> subscription, user's own login"`; never store logins, cookies or
+   credentials. Still missing:
+```
+.\.venv\Scripts\python.exe tools/pubmed/fulltext.py remaining --all-deepread
+```
+   writes author-request e-mail drafts and a document-delivery list (`06_refs/fulltext/requests/`)
+   and prints ONE Chinese message (DOI + title per paper, the drop folder
+   `06_refs/fulltext/drop/`). PDFs the user places there are ingested with the same
+   front-matter identity check:
+```
+.\.venv\Scripts\python.exe tools/pubmed/fulltext.py ingest-drop
+```
+   A preprint copy is recorded as a preprint (route `preprint`); check cited numbers against
+   the published version. If only a paywalled link or abstract is available in the end,
+   replace the paper or leave the stage blocked; it does not count as a deep read.
 4. **Delegate each full text to the `medpaper-deepreader` agent, one invocation per paper.**
    Do not read the full texts in this context: a single paper is tens of thousands of tokens
    and five will not fit, which is exactly how a deep read silently degrades into an abstract

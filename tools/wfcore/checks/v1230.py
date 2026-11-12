@@ -9,6 +9,16 @@ derived_units_checked       S7 (S05, S06): derived dose / standardised variables
 imputation_pooled           S8 (S05, S06): analyses of multiply imputed data are pooled (m,
                             pooling method, df recorded) or the single imputed dataset is declared
                             with a reason and a Methods sentence.
+display_plan_benchmarked    S2 (S07): the artifact plan reaches the benchmark median of main
+                            display items (within the journal limits) and covers every display type
+                            of at least half of the 3-5 comparable papers (or a reason per type).
+science_review_before_writing  S3 (S09): the latest science round is closed and the user's
+                            proceed decision recorded, bound to the results/display hashes.
+section_polished            S5 (S07, S08, S09, S14, S16, S17, S23): each prose section drafted by
+                            the clinical writer from its bundle, polished by the medical editor,
+                            the file equal to the polished text and free of engineering narration.
+data_availability_verified  S6 (S21): every data source has a verified licence/access record and
+                            the Data availability statement states it (dataset DOIs cited).
 """
 from __future__ import annotations
 
@@ -176,3 +186,88 @@ def imputation_pooled(ctx: Ctx) -> Result:
         return Result(True, name, "no multiple imputation in the analysis")
     return Result(True, name, f"{len(blocks)} imputation record(s): pooled across imputations"
                   + ("; single-dataset use declared with a Methods sentence" if single else ""))
+
+
+# ------------------------------------------------------------------------------ S2
+@check("display_plan_benchmarked")
+def display_plan_benchmarked(ctx: Ctx) -> Result:
+    name = "display_plan_benchmarked"
+    if not since_1230(ctx):
+        return _pinned(name)
+    from .. import displaybench as db
+    probs = db.plan_problems(ctx.project)
+    if probs:
+        return Result(False, name, "; ".join(probs[:6]),
+                      ["tools/pubmed/benchmark.py add --pmid <comparable paper> --design <key> "
+                       "(3-5 papers: same design and data-source family, recent SCIE journals, one "
+                       "from the target journal or tier); then benchmark.py show and send its "
+                       "Chinese lines with the plan to the user."])
+    s = db.summary(db.load(ctx.project))
+    return Result(True, name, f"plan meets the benchmark of {s['n']} paper(s) (median "
+                              f"{s['median_main_items']} main items; {len(s['majority_types'])} "
+                              "majority display type(s) covered or explained)")
+
+# ------------------------------------------------------------------------------ S3
+@check("science_review_before_writing")
+def science_review_before_writing(ctx: Ctx) -> Result:
+    name = "science_review_before_writing"
+    if not since_1230(ctx):
+        return _pinned(name)
+    from .. import reviewrounds as rr
+    cfg = rr.SCOPES["science"]
+    rounds = rr.load(ctx.project)["science"]
+    probs = rr.problems(ctx.project, "science", ctx.state.decision(cfg["decision"]))
+    if rounds and not any(r.get("mode") == "full" for r in rounds):
+        probs.append("no full science round (start without --delta first)")
+    if probs:
+        return Result(False, name, "science review before writing: " + "; ".join(probs[:5]),
+                      ["After S11 and before writing the Results: review_round.py start --scope "
+                       "science, invoke medpaper-reviewer with the printed MANIFEST, revise "
+                       "analyses/displays/Methods, close --report, ONE Chinese summary and ONE "
+                       "question (another round, or proceed), then review_round.py decide "
+                       "no_further_review --scope science --words \"<the user's words>\". A later "
+                       "change of results or displays needs a delta round (--delta)."])
+    last = rounds[-1]
+    return Result(True, name, f"science round {last['id']} closed; the user decided to proceed "
+                              f"(\"{str(last.get('user_words', ''))[:40]}\"); results and displays "
+                              "unchanged since")
+
+# ------------------------------------------------------------------------------ S5
+@check("section_polished")
+def section_polished(ctx: Ctx) -> Result:
+    name = "section_polished"
+    if not since_1230(ctx):
+        return _pinned(name)
+    from .. import sectionpolish as sp
+    secs = list(ctx.spec.get("sections") or [])
+    optional = set(ctx.spec.get("optional") or [])
+    probs = []
+    for s in secs:
+        probs += sp.problems(ctx.project, s, optional=s in optional)
+    if probs:
+        return Result(False, name, "; ".join(probs[:6]),
+                      ["Each section: medpaper-clinical-writer drafts it from the stage's writer "
+                       "bundle (writer_bundle.py build, then receipt), the medpaper-medical-editor "
+                       "polishes it at once (writer_bundle.py edit --section S, then polished "
+                       "--section S); a later edit re-polishes only the changed paragraphs."])
+    return Result(True, name, f"{', '.join(secs)}: drafted by the clinical writer and polished by "
+                              "the medical editor; file = polished text; language clean")
+
+# ------------------------------------------------------------------------------ S6
+@check("data_availability_verified")
+def data_availability_verified(ctx: Ctx) -> Result:
+    name = "data_availability_verified"
+    if not since_1230(ctx):
+        return _pinned(name)
+    from .. import dataavail as da
+    probs = da.problems(ctx.project)
+    if probs:
+        return Result(False, name, "; ".join(probs[:6]),
+                      ["Check each data source's public pages (dataset descriptor paper, portal and "
+                       "licence page; API first, browser when needed), then `wf data licence NAME "
+                       "--licence ... --access ... --url ... [--doi ...] --source <page>`; paste "
+                       "`wf data availability` into the Data availability section. Ask the user "
+                       "only when the facts cannot be established."])
+    n = len(da.load(ctx.project)["sources"])
+    return Result(True, name, f"{n} data source(s) with verified licence and access mode; the "
+                              "statement names each with its access mode and DOI")

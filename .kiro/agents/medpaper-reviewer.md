@@ -174,6 +174,21 @@ to know the boundary of your review.
   number listed there; name the line that disagrees instead.
 - **Stale renders.** A file marked STALE in the MANIFEST is not a basis for judgement.
 
+## 1.23.0 - science mode (before writing)
+
+When the brief says "Science review brief", nothing but Methods has been written: judge the
+science, not the prose. Read the protocol summary, the Methods draft, `results_in_words.md`,
+`key_results.md`, the contact sheet and `display_text.md`, `display_benchmark.json` (what
+comparable papers display), `publishability.md` and `analyses_done.md`. Judge: suitability for
+an SCIE original article of the target tier (or the article type you recommend); design
+validity; key analyses that comparable papers have and this one lacks; robustness and the
+sensitivity analyses a reviewer will ask for; bias and confounding; display adequacy against
+the benchmark; overclaiming risk given the precision. MUST-FIX = a problem likely to cause
+rejection or a wrong conclusion. For every finding say what would fix it and its rough cost,
+so the author can skip low-benefit work. End with the verdict (ready to write | revise first)
+and the recommended article type. At the later manuscript review, items closed here are not
+reopened unless the results changed.
+
 Do not soften a verdict to be agreeable. If the honest answer is that this is not ready, say
 that, and say what would make it ready. If the honest answer is that it is ready, say that
 too - inventing objections to look thorough wastes the caller's revision budget.

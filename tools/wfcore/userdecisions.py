@@ -160,9 +160,37 @@ def carry_over_switch(project: Path, old_epoch: int) -> list[str]:
     return moved
 
 
+def verify(project: Path, key: str, text: str, sources: list[str], fact: str) -> dict:
+    """1.23.0 (S6): a declaration, dataset access mode or journal-specific statement the agent
+    established from public sources (descriptor paper, data portal / licence page, journal
+    policy page, comparable papers) - recorded with the URLs, never asked of the user."""
+    import re
+    key = str(key or "").strip()
+    if not re.match(r"^[a-z][a-z0-9_.-]{1,60}$", key):
+        raise ValueError("key: lower-case words, e.g. data_access_mimic or transplant_statement")
+    urls = [s.strip() for s in sources or [] if s and s.strip()]
+    if not urls or not all(re.match(r"^https?://", u) for u in urls):
+        raise ValueError("--source: at least one public http(s) URL")
+    if len(str(text).strip()) < 10 or len(str(fact).strip()) < 10:
+        raise ValueError("--text (the drafted statement) and --fact (what the source says) are "
+                         "required")
+    data = load(project)
+    rec = {"text": text.strip(), "fact": fact.strip(), "sources": urls, "checked": _now(),
+           "source": "self-verified"}
+    old = data.setdefault("verified", {}).get(key)
+    if old:
+        data.setdefault("history", []).append({"key": key, **old, "replaced_at": rec["checked"]})
+    data["verified"][key] = rec
+    _save(project, data)
+    return rec
+
+
 def show_lines(project: Path) -> list[str]:
     data = load(project)
     out = ["用户既定决定（.wf/user_decisions.json；已记录的不再重复询问，除非事实变化）："]
+    for key, rec in sorted((data.get("verified") or {}).items()):
+        out.append(f"  - {key}（自行查证）= {str(rec.get('text'))[:80]}  [来源 "
+                   + ", ".join(rec.get("sources", [])[:2]) + "]")
     if not data["decisions"]:
         out.append("  （暂无）")
     for key, rec in sorted(data["decisions"].items()):

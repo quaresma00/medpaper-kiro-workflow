@@ -15,9 +15,8 @@ open questions this prints:
 .\.venv\Scripts\python.exe tools/declarations.py assess
 ```
 Record answers with `tools/declarations.py answer <id> "<value>"`. No registration statement
-unless the journal requires one (an eligible review states its PROSPERO ID or 'not registered'
-+ reason; an ineligible one only the reason). Never infer a
-missing item. AI/LLM use: show the user the journal's rule
+unless the journal requires one (eligible review: PROSPERO ID or 'not registered' + reason).
+Never infer a missing item. AI/LLM use: show the user the journal's rule
 (`tools/declarations.py ai-rule`) in the same message and record the factual answer:
 `tools/declarations.py ai --used yes|no [--tool "<tool>" --purpose "<purpose>"] --words "<user's words>"`;
 put the printed statement in `statements.md` (audits read the fact).
@@ -35,6 +34,10 @@ put the printed statement in `statements.md` (audits read the fact).
    an abbreviation list, if any, as `## Abbreviations` - the builder places it after the
    keywords (`abbreviation_list`), never inside Declarations. Each display keeps its own
    abbreviation definitions unless the journal records `abbreviation_placement=central_required`.
+   1.23.0: what public sources settle (descriptor paper, portal/licence page, journal policy,
+   comparable papers) you draft and record with URLs (`wf decisions verify`), never ask. Per
+   data source `wf data licence NAME --licence ... --access open|registration|credentialed|
+   application --url ... [--doi] --source <page>`; Data availability = `wf data availability`.
 3. Reference count only if the title-page guide requires it (never the library size):
 ```
 .\.venv\Scripts\python.exe tools/manuscript/reference_count.py show
@@ -48,7 +51,7 @@ put the printed statement in `statements.md` (audits read the fact).
 - `07_manuscript/statements.md` (written to `08_submission/manuscript/statements.md`)
 
 ## Gate
-declarations assessed, structure and declarations order, title-page reference count,
+data availability verified (1.23.0), declarations assessed, structure and declarations order, title-page reference count,
 abbreviations, freeze intact and variant ready. No down-arrow characters or manual line breaks.
 
 ## Close

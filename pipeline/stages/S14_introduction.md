@@ -23,8 +23,11 @@ this stage only.
 ```
 .\.venv\Scripts\python.exe tools/manuscript/writer_bundle.py build --stage S14_introduction
 ```
-3. Polish this section now (medical register, de-AI, de-engineering, prose not lists),
-   then check the soft upper budgets (no lower bound) and `section_language_clean`:
+3. 1.23.0: right after the draft the `medpaper-medical-editor` polishes it (medical register,
+   de-AI, no engineering narration, prose not lists; facts unchanged): `writer_bundle.py
+   receipt --stage S14_introduction`, `edit --section introduction`, delegate, `polished
+   --section introduction` (`section_polished`). Then the soft upper budgets (no lower bound)
+   and `section_language_clean`:
 ```
 .\.venv\Scripts\python.exe tools/text/polish.py lint --file 07_manuscript/introduction.md
 .\.venv\Scripts\python.exe tools/wf.py config list        # intro_words_max, intro_refs_min/max

@@ -7,7 +7,9 @@ Details (selection roles, identity verdicts, registration, notes template, index
 ## Do
 1. Select by argumentative need: closest prior study, strongest disagreement, the method
    reference, the largest/most authoritative study, the one a reviewer will cite against you.
-2. Fetch legal open-access full text and check the identity verdict, not just the hash:
+2. Full text through the lawful cascade (1.23.0: cache -> PMC/Europe PMC -> Unpaywall ->
+   OpenAlex incl. repository manuscripts -> Semantic Scholar -> CORE if keyed -> preprints),
+   then check the identity verdict, not just the hash:
 ```
 .\.venv\Scripts\python.exe tools/pubmed/fulltext.py fetch --citekey smith2023 --citekey lee2021
 .\.venv\Scripts\python.exe tools/pubmed/fulltext.py verify --all-retrieved
@@ -15,8 +17,11 @@ Details (selection roles, identity verdicts, registration, notes template, index
    `identity=mismatch` -> fix `library.json` by rebuilding from EFetch; `indeterminate` -> read
    page one and confirm:
    `.\.venv\Scripts\python.exe tools/pubmed/fulltext.py verify --citekey smith2023 --confirm-identity "<title on page 1>"`.
-   A legally obtained local copy is registered first (`fulltext.py register ...`, details).
-   Never Sci-Hub; never ask for logins or cookies unless the user authorizes it.
+   Still missing: the publisher page in the visible browser with the user's own institutional
+   login (they log in once; only these papers, one at a time; `register --route
+   browser-institutional --access authorized`); then `fulltext.py remaining` -> ONE message
+   (DOI + title list, drop folder, author-request drafts, library list) and `fulltext.py
+   ingest-drop` for PDFs the user places there. Never store logins or cookies.
 3. Delegate each full text to the `medpaper-deepreader` agent, one invocation per paper (path,
    citekey, expected title, our finding). Do not read full texts in this context.
 4. Write each returned set of notes to `06_refs/deepread/<citekey>.md` (>= 400 characters,

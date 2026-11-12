@@ -286,12 +286,14 @@ def global_agents_dir() -> Path:
 
 
 GLOBAL_AGENTS = ("medpaper-reviewer.md", "medpaper-deepreader.md",
-                 "medpaper-clinical-writer.md")  # 1.12.0 (E3)
+                 "medpaper-clinical-writer.md",  # 1.12.0 (E3)
+                 "medpaper-medical-editor.md")  # 1.23.0 (S5)
 
 # 1.12.0 (E2/E3): what each delegated agent may write. None = strictly read-only.
 AGENT_WRITE_SCOPE = {"medpaper-deepreader": None,
                      "medpaper-reviewer": ".wf/review_bundle/*/report.md",
-                     "medpaper-clinical-writer": "07_manuscript/*.md"}
+                     "medpaper-clinical-writer": "07_manuscript/*.md",
+                     "medpaper-medical-editor": ".wf/editor_bundle/*/polished.md"}
 
 
 def agent_scope_problems(name: str, text: str) -> list[str]:

@@ -33,7 +33,53 @@ SCOPES = {
                 "summary": "08_submission/package_human_review.md",
                 "headings": ("Package presented", "User modifications", "Revalidation",
                              "User confirmation", "Frozen package")},
+    # 1.23.0 (S3): independent science review after S11 and before the Results are written.
+    "science": {"prefix": "X", "decision": "science_review_proceed", "value": "PROCEED",
+                "summary": ".wf/science_review.md",
+                "headings": ("Materials presented", "Independent verdict",
+                             "Changes before writing", "Revalidation", "Decision to proceed")},
 }
+# 1.23.0 (S3): what a science round covers - analyses, displays and the Methods draft.
+SCIENCE_INPUTS = ("01_protocol/protocol_final.md", "01_protocol/artifact_plan.json",
+                  "01_protocol/display_benchmark.json", "07_manuscript/methods.md",
+                  "07_manuscript/supplementary_methods.md", "03_analysis/analysis_manifest.json",
+                  "03_analysis/results/*.json", "04_tables/main/*.xlsx",
+                  "04_tables/supplementary/*.xlsx", "05_figures/out/*.png",
+                  "05_figures/legends.md", "04_tables/table_captions.md",
+                  ".wf/publishability.json")
+SCIENCE_BRIEF = """Science review brief (round {rid}, {mode}) - BEFORE the Results, Introduction, Discussion
+and Abstract are written. Read every file listed in {bundle}/MANIFEST.md. Judge, as a methods
+reviewer and handling editor of an SCIE journal of the target tier:
+  1. suitability for an original article in that tier (or the article type you recommend:
+     original article, brief report, research letter);
+  2. design validity for the question; bias and confounding handling; robustness (are the
+     sensitivity and validity analyses the ones a reviewer will ask for?);
+  3. key analyses that comparable papers have and this paper lacks (display_benchmark.json
+     lists comparable papers and their displays);
+  4. display adequacy against the benchmark: number and type of main tables and figures, each
+     readable on its own by a clinician (contact sheet, display_text.md);
+  5. the Methods draft: can a clinician reproduce the logic; is anything missing or unclear;
+  6. overclaiming risk given the precision of the main results (key_results.md).
+MUST-FIX = a problem likely to cause rejection or a wrong conclusion; everything else OPTIONAL.
+Number EVERY finding as F1, F2, ... with a category: numbers | grouping | conclusion_strength |
+other, tag it MUST-FIX or OPTIONAL, and say what would fix it and at what rough cost.
+End with: Verdict (ready to write | revise first) and Recommended article type.
+Write the complete report to {bundle}/report.md - the only file you may write."""
+# 1.23.0 (S3/S8): the explicit 'proceed to writing' answer of a science round.
+_PROCEED = re.compile(r"(?i)继续写|开始写|进入写作|可以写|继续吧|继续推进|按你的建议|按您的建议|"
+                      r"\bproceed\b|\bgo ahead\b|\bstart writing\b")
+_NOT_PROCEED = re.compile(r"(?i)不继续|先别|不要写|暂停|再审|再来一轮|另一轮|\bnot\b|\bdon'?t\b|"
+                          r"another round")
+
+
+def is_proceed(words: str) -> bool:
+    """1.23.0 (S3): the user's explicit decision to proceed to writing after a science round
+    ('继续写作', '按你的建议', 'proceed'); the version confirmation sentence counts too; 'OK' and
+    '可以' alone do not."""
+    text = str(words or "").strip()
+    if is_confirmation(text):
+        return True
+    return bool(_PROCEED.search(text)) and not _NOT_PROCEED.search(text)
 SEVERITIES = ("critical", "major", "minor")
 ANOTHER, DONE = "another_round", "no_further_review"
 # 1.10.0 (#12): findings in these categories may not be closed as "kept" on the agent's own
@@ -72,7 +118,10 @@ def brief(project, rnd: dict, bundle) -> str:
     """The neutral brief plus the study-specific rules (1.13.0: no multi-person checks for
     automated extraction, no protocol-deviation requests outside a registered meta-analysis)."""
     from .declarations import review_rules
-    text = BRIEF.format(rid=rnd["id"], scope=rnd["scope"], mode=rnd["mode"], bundle=bundle)
+    if rnd.get("scope") == "science":
+        text = SCIENCE_BRIEF.format(rid=rnd["id"], mode=rnd["mode"], bundle=bundle)
+    else:
+        text = BRIEF.format(rid=rnd["id"], scope=rnd["scope"], mode=rnd["mode"], bundle=bundle)
     try:
         rules = review_rules(project)
     except Exception:  # noqa: BLE001 - the brief must always print
@@ -92,10 +141,44 @@ def brief(project, rnd: dict, bundle) -> str:
     except Exception:  # noqa: BLE001 - the brief must always print
         pass
     conv.append(cv.KEY_RESULTS_RULE)
+    if rnd.get("scope") in ("manuscript", "science"):  # 1.23.0 (S7/S8)
+        conv.append(UNITS_IMPUTATION_RULE)
+    if rnd.get("scope") == "manuscript":  # 1.23.0 (S3): science closed before writing
+        try:
+            conv += science_closed_rule(project)
+        except Exception:  # noqa: BLE001 - the brief must always print
+            pass
     rules = [*rules, *conv]
     return text + ("\n" + "\n".join(rules) if rules else "")
 
 
+def science_closed_rule(project) -> list[str]:
+    """1.23.0 (S3): the S18/S19 brief focuses on writing when the science was reviewed before
+    writing; closed science items reopen only when results or displays changed since."""
+    rounds = load(project).get("science") or []
+    last = next((r for r in reversed(rounds) if r.get("user_decision") == DONE), None)
+    if not last:
+        return []
+    now = inputs(project, "science")
+    moved = sorted(r for r, h in now.items() if (last.get("after") or {}).get(r) != h
+                   and (r.startswith("03_analysis/results/") or r.startswith("04_tables/")
+                        or r.startswith("05_figures/out/")))
+    items = [f"{f.get('id')} {str(f.get('summary', ''))[:70]}" for f in last.get("finding_list", [])][:12]
+    head = (f"Science review before writing: round {last['id']} closed and the user decided to "
+            "proceed. Focus this review on writing quality, consistency and readability; do not "
+            "reopen the closed science items")
+    if moved:
+        return [head + " except where these changed since: " + ", ".join(moved[:8]) + "."]
+    return [head + " (results and displays unchanged since)" + (": " + "; ".join(items) if items
+                                                                  else "") + "."]
+
+
+UNITS_IMPUTATION_RULE = ("Derived variables and imputation (1.23.0): check that derived doses, "
+                         "doses per body weight or surface area and standardised equivalents carry "
+                         "units and plausible values (derived_variables in key_results.md), and that "
+                         "analyses of multiply imputed data are pooled across imputations (m, "
+                         "pooling method, df) - a single imputed dataset needs a stated reason in "
+                         "the Methods.")
 _VERSION_WORDS = ("这一版", "此版", "本版", "这个版本", "这版")
 _NOT_CONFIRM = re.compile(r"(?i)不确认|未确认|没有确认|别确认|不要确认|无需审阅|\bnot\b|\bdon'?t\b")
 
@@ -139,6 +222,14 @@ def inputs(project: Path, scope: str) -> dict[str, str]:
     if scope == "manuscript":
         from .readerreview import reader_inputs
         return reader_inputs(project)
+    if scope == "science":  # 1.23.0 (S3): results, displays and Methods, by content
+        from .determinism import content_sha256
+        out = {}
+        for pat in SCIENCE_INPUTS:
+            for p in sorted(Path(project).glob(pat)):
+                if p.is_file() and not p.name.startswith("~$"):
+                    out[p.relative_to(project).as_posix()] = content_sha256(p)
+        return out
     # 1.9.0: a package round covers the uploads by visible content; internal QC, notes and
     # receipts are evidence and never reopen review.
     from .determinism import content_sha256
@@ -333,10 +424,15 @@ def write_bundle(project: Path, rnd: dict) -> Path:
              brief(project, rnd, out), "",
              "## Files (copy -> source, sha256)", ""]
     docx = []
+    sheet = any((project / r).is_file() for r in ("05_figures/qc/displays_sheet.png",
+                                                    "05_figures/qc/contact_sheet.png"))
     for rel in rnd["reviewed"]:
         src = project / rel
         if not src.is_file():
             continue
+        if rnd.get("scope") == "science" and sheet and src.suffix.lower() in (".png", ".tif",
+                                                                             ".tiff"):
+            continue  # 1.23.0 (S3): the one contact sheet shows every figure (token economy)
         digest = hashlib.sha256(src.read_bytes()).hexdigest()
         if src.suffix.lower() in (".docx", ".xlsx"):
             docx += [rel] if src.suffix.lower() == ".docx" else []
@@ -358,8 +454,10 @@ def write_bundle(project: Path, rnd: dict) -> Path:
     if record:
         lines.append(f"- {record} (material scientific decisions: pre-specified vs decided "
                      "after the data were seen; reviewer only)")
-    if rnd.get("scope") == "manuscript":  # 1.20.0 (V6): every display as a clinician sees it
+    if rnd.get("scope") in ("manuscript", "science"):  # 1.20.0 (V6) / 1.23.0 (S3)
         lines += _display_text_files(project, out)
+    if rnd.get("scope") == "science":
+        lines += science_materials(project, out)
     from .reviewitems import write as _write_items  # 1.16.0: cases a gate could not decide
     listed = _write_items(project, out)
     if listed:
@@ -425,6 +523,48 @@ def write_bundle(project: Path, rnd: dict) -> Path:
         lines += [f"- {p} ({origin})" for p, origin in pages]
     (out / "MANIFEST.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     return out
+
+
+def science_materials(project: Path, out: Path) -> list[str]:
+    """1.23.0 (S3): results in words, the analyses done (by role) and the publishability
+    checkpoints, as plain text for the science reviewer."""
+    import importlib.util
+    from . import clinical, paths
+    from . import publishability as pb
+    lines = []
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "medpaper_writer_bundle", paths.tools_dir() / "manuscript" / "writer_bundle.py")
+        wb = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(wb)
+        words, _gaps = wb.results_in_words(project, clinical.dictionary(project))
+        dst = out / "files" / "results_in_words.md"
+        dst.write_text("# Results in words (clinical labels)\n\n" + "\n".join(words) + "\n",
+                       encoding="utf-8")
+        lines.append(f"- {dst} (every result as a sentence with its clinical label)")
+    except Exception as exc:  # noqa: BLE001 - key_results.md remains
+        lines.append(f"(results in words unavailable: {type(exc).__name__}: {exc})")
+    try:
+        man = json.loads((Path(project) / "03_analysis/analysis_manifest.json").read_text(
+            encoding="utf-8")).get("scripts", [])
+    except (OSError, ValueError, AttributeError):
+        man = []
+    rows = [f"- {e.get('role', '?')}: {e.get('path', '')}"
+            + (f" - could change: {e['decision']}" if e.get("decision") else "")
+            for e in man if isinstance(e, dict)]
+    dst = out / "files" / "analyses_done.md"
+    dst.write_text("# Analyses done (primary, secondary, validity/sensitivity, additional)\n\n"
+                   + ("\n".join(rows) or "- (no analysis_manifest.json; see results_in_words.md)")
+                   + "\n", encoding="utf-8")
+    lines.append(f"- {dst} (the analyses done by role, incl. sensitivity and validity checks)")
+    cps = pb.load(project)["checkpoints"]
+    text = ["# Publishability checkpoints", ""] + [
+        f"- {s}: {e.get('verdict')} / {e.get('article_type')} - evidence: "
+        + json.dumps(e.get("evidence"), ensure_ascii=False)[:600] for s, e in sorted(cps.items())]
+    dst = out / "files" / "publishability.md"
+    dst.write_text("\n".join(text or ["- none recorded"]) + "\n", encoding="utf-8")
+    lines.append(f"- {dst} (S02/S04/S06 verdicts and their evidence)")
+    return lines
 
 
 def _display_text_files(project: Path, out: Path) -> list[str]:
@@ -547,8 +687,11 @@ def decide(project: Path, scope: str, answer: str, words: str) -> dict:
         raise ValueError("close the round (report to the user) before recording the answer")
     from .argtext import verify as _verify_text
     _verify_text(words, "the user's words")  # 1.12.0 (C1): no mojibake ever stored
+    if answer == DONE and scope == "science" and not is_proceed(words):
+        raise ValueError("not a decision to proceed: record the user's explicit words, e.g. "
+                         "'继续写作' / '按你的建议' / 'proceed' ('OK' or '可以' alone do not count)")
     if answer == DONE:
-        if not is_confirmation(words):
+        if scope != "science" and not is_confirmation(words):
             raise ValueError(f"not a confirmation: ask the user to state exactly "
                              f"'{CONFIRM_PHRASES[0]}' (or '{CONFIRM_PHRASES[1]}'); other words "
                              "('OK', '可以', '无需审阅') do not count")
@@ -659,7 +802,9 @@ def _write_summary(project: Path, scope: str, rounds: list[dict]) -> None:
     cfg = SCOPES[scope]
     h = cfg["headings"]
     last = rounds[-1]
-    lines = [f"# {'Manuscript' if scope == 'manuscript' else 'Submission package'} review rounds",
+    title = {"manuscript": "Manuscript", "package": "Submission package",
+             "science": "Science (before writing)"}[scope]
+    lines = [f"# {title} review rounds",
              "", "Generated by tools/review_round.py from .wf/review_rounds.json.", "",
              f"## {h[0]}", ""]
     for r in rounds:

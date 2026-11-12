@@ -9,7 +9,12 @@ Details (title scoring, assembly order, statements file): `reference/stage_detai
    brevity, no overclaim) -> `07_manuscript/title.md` (one level-1 heading).
 2. `07_manuscript/abstract.md` (structure suited to the design; numbers from results JSON;
    conclusion consistent with the Discussion), polished before assembly
-   (`tools/text/polish.py lint --file 07_manuscript/abstract.md`; `section_language_clean`),
+   (`tools/text/polish.py lint --file 07_manuscript/abstract.md`; `section_language_clean`).
+   1.23.0: title and abstract drafted by the `medpaper-clinical-writer` (`writer_bundle.py
+   build --stage S17_assemble --target 07_manuscript/abstract.md`, `receipt --section
+   abstract|title`) and polished by the `medpaper-medical-editor` (`edit`/`polished
+   --section ...`); `section_polished` also re-checks every earlier section (an edit since
+   its polish -> re-polish only the changed paragraphs),
    and `07_manuscript/keywords.md` (`Keywords: a, b, c`, 3-6 terms or the journal's min/max).
 3. Central abbreviation list in `07_manuscript/statements.md` under the declarations heading
    (`## Abbreviations`); it is in addition to each display's own definitions. Then assemble:

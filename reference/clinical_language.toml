@@ -141,6 +141,76 @@ pattern = '\blook-?up\s+tables?\b|\bmapping\s+tables?\b|\bexact\s+(?:string\s+)?
 suggest = "'a predefined classification list'"
 
 # ------------------------------------------------------------------------------
+# 1.23.0 (S5): narration of code steps. Checked by the medical-editor pass (section_polished,
+# writer_bundle.py polished) in every prose section except Supplementary Methods; the 1.11
+# gates above keep their own list, so papers pinned earlier are judged as before.
+# ------------------------------------------------------------------------------
+[[engineering_v1230]]
+term = "filtered rows"
+pattern = '\bfiltered\s+(?:out\s+)?(?:rows?|records?|entries|observations)\b|\b(?:rows?|records?|entries)\s+(?:were\s+|was\s+)?(?:filtered|dropped)\b'
+suggest = "say who was excluded and why ('reports without a suspected drug were excluded')"
+
+[[engineering_v1230]]
+term = "flagged"
+pattern = '\b(?:were|was|are|is)\s+flagged\b|\bflagged\s+(?:as|rows?|records?|reports?|cases?)\b|\bflag\s+(?:variables?|columns?)\b'
+suggest = "'were identified as', 'were classified as'"
+
+[[engineering_v1230]]
+term = "merged on key"
+pattern = '\b(?:left|inner|outer|full)\s+join(?:ed|s)?\b|\b(?:merged|joined|linked)\s+(?:on|using|via)\s+(?:the\s+)?(?:\w+\s+)?(?:keys?|ids?|identifiers?)\b|\bjoined\s+(?:the\s+)?(?:tables?|files?|datasets?)\b'
+suggest = "'reports were linked to the drug and outcome information by case number'"
+
+[[engineering_v1230]]
+term = "deduplicated by key"
+pattern = '\bdeduplicat(?:ed|ion)\s+(?:by|on|using)\b|\bde-?duplicated\b'
+suggest = "'duplicate reports were removed following the FDA-recommended approach (latest version of each case)'"
+
+[[engineering_v1230]]
+term = "mapped codes"
+pattern = '\bcodes?\s+(?:were\s+|was\s+)?mapped\b|\bmapped\s+(?:to\s+)?(?:the\s+)?(?:\w+\s+)?codes?\b|\bcode\s+mapping\b|\bmapping\s+of\s+codes\b'
+suggest = "'events were classified with MedDRA preferred terms', 'drugs were classified by ATC code'"
+
+[[engineering_v1230]]
+term = "coded as 0/1"
+pattern = '\bcoded\s+(?:as\s+)?0\s*/\s*1\b|\b0\s*/\s*1\s+(?:indicator|variable|coding|flag)\b|\bdummy[- ]coded\b|\bbinary\s+(?:indicator|flag)\b|\bone-hot\b'
+suggest = "'treated as a yes/no variable', 'categorised as present or absent'"
+
+[[engineering_v1230]]
+term = "column"
+pattern = '(?<!spinal\s)(?<!vertebral\s)\bcolumns?\b'
+suggest = "name the variable ('the reported indication'), not the table column"
+
+[[engineering_v1230]]
+term = "recoded"
+pattern = '\brecod(?:ed|ing)\b|\bbinned\b|\bre-?categori[sz]ed\s+into\s+bins\b'
+suggest = "'was categorised as', 'was grouped into'"
+
+[[engineering_v1230]]
+term = "data cleaning"
+pattern = '\bdata\s+(?:were\s+|was\s+)?cleaned\b|\bdata\s+cleaning\b|\bcleaned\s+(?:the\s+)?data(?:set)?\b|\bdata\s+wrangling\b|\bpreprocess(?:ed|ing)\b'
+suggest = "'data were checked for errors and implausible values'"
+
+[[engineering_v1230]]
+term = "loaded"
+pattern = '\b(?:data(?:sets?)?|tables?|files?|records?)\s+(?:were\s+|was\s+)?(?:loaded|imported|read\s+in)\b|\bimported\s+into\s+(?:R|Python|pandas)\b'
+suggest = "name the data source and period ('reports received from 2004 to 2023 were analysed')"
+
+[[engineering_v1230]]
+term = "subset"
+pattern = '\bsubsett(?:ed|ing)\b|\bsubset\s+(?:of\s+)?(?:the\s+)?(?:rows|data\s*frame|table)\b'
+suggest = "'the analysis was restricted to ...'"
+
+[[engineering_v1230]]
+term = "missing rows dropped"
+pattern = '\b(?:rows?|records?|observations)\s+with\s+missing\s+(?:values|data)\s+(?:were\s+)?(?:dropped|removed|deleted)\b|\blistwise\s+deleted\b'
+suggest = "'participants with missing data on <variable> were excluded (complete-case analysis)'"
+
+[[engineering_v1230]]
+term = "variable name"
+pattern = '\bvariables?\s+(?:named|called)\b|\bvariable\s+names?\b'
+suggest = "use the clinical label of the display dictionary"
+
+# ------------------------------------------------------------------------------
 # Letter-code category labels: "Composite A", "Group B", "Model 3" used as the name of a
 # clinical category. Allowed only when the display dictionary (01_protocol/display_dictionary.json)
 # defines that exact label as the clinical label, or when it is a clinical name listed here.

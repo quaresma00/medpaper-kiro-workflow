@@ -27,8 +27,10 @@ Details (move-by-move structure, inputs): `reference/stage_details/S16_discussio
    - no new results, no overclaiming; a two-to-three-sentence conclusion;
    - continuous prose without subheadings (unless the journal requires them); adjacent
      citations in one group `[@a; @b]`. Never cite supplementary items (Table S2).
-3. Polish this section now (medical register, de-AI, de-engineering, no pipeline history,
-   prose not lists, abbreviations); fix every blocking item, then `wf check`
+3. 1.23.0: right after the draft the `medpaper-medical-editor` polishes it: `writer_bundle.py
+   receipt --stage S16_discussion`, `edit --section discussion`, delegate, `polished --section
+   discussion` (`section_polished`; medical register, de-AI, no engineering narration,
+   abbreviations, facts unchanged); fix every blocking item, then `wf check`
    (`section_language_clean`, citations, deep reads cited, soft word/reference budget):
 ```
 .\.venv\Scripts\python.exe tools/text/polish.py lint --file 07_manuscript/discussion.md

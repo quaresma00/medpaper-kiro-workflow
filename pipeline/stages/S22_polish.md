@@ -9,8 +9,9 @@ Details (variant comparison, trim authorisation, log headings): `reference/stage
 ```
 .\.venv\Scripts\python.exe tools/text/polish.py snapshot
 ```
-2. Each section was already polished at its own stage (`section_language_clean` at
-   S08/S09/S14/S16/S17). Here only: cross-section consistency (abbreviations defined once,
+2. Each section was already polished at its own stage (`section_language_clean`; 1.23.0
+   `section_polished`: drafted by the clinical writer, polished at once by the medical
+   editor, S07-S17); do not re-polish sections here. Here only: cross-section consistency (abbreviations defined once,
    spelling variant, P/p style, terminology) and the journal's style - abstract structure,
    limits, headings. Continuous prose; Keywords right after the Abstract; References
    heading and Figure legends kept.

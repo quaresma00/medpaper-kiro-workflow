@@ -1,13 +1,24 @@
 #!/usr/bin/env python3
-r"""Fetch open-access full text for the deep-read papers.
+r"""Fetch full text for the deep-read papers - lawful routes only.
 
-Legal open-access routes only, tried in order: Europe PMC / PMC OA -> Unpaywall ->
-OpenAlex. Paywalled papers are recorded as paywalled; they are never
-silently treated as read.
+1.23.0 (S4) cascade, tried in order and recorded per paper (route): local cache -> Europe PMC /
+PMC OA -> Unpaywall (best OA location; contact email NCBI_API_EMAIL / UNPAYWALL_EMAIL) ->
+OpenAlex OA locations incl. repository author manuscripts -> Semantic Scholar openAccessPdf ->
+CORE (only with the user's CORE_API_KEY) -> preprint versions linked by DOI relations
+(medRxiv/bioRxiv/Research Square/SSRN, via Crossref) -> the publisher page in the visible
+browser window with the user's own institutional or library login (the user logs in once; only
+the listed papers, one at a time, within licence terms; then `register --route
+browser-institutional --access authorized`) -> author-request e-mail drafts and a
+document-delivery list for the library (`remaining`) -> ONE message listing the remaining
+papers and the drop folder 06_refs/fulltext/drop/; PDFs placed there are ingested with the
+same front-matter identity check (`ingest-drop`). Paywalled papers are recorded as paywalled;
+they are never silently treated as read.
 
     .\.venv\Scripts\python.exe tools\pubmed\fulltext.py fetch --citekey smith2023
     .\.venv\Scripts\python.exe tools\pubmed\fulltext.py register --citekey smith2023 \
         --file paper.pdf --access oa --source-url https://example.org/article
+    .\.venv\Scripts\python.exe tools\pubmed\fulltext.py remaining --all-deepread
+    .\.venv\Scripts\python.exe tools\pubmed\fulltext.py ingest-drop
 """
 from __future__ import annotations
 
@@ -28,7 +39,14 @@ from pubmed import eutils as eu  # noqa: E402
 EPMC = "https://www.ebi.ac.uk/europepmc/webservices/rest"
 UNPAYWALL = "https://api.unpaywall.org/v2"
 OPENALEX = "https://api.openalex.org/works"
+S2 = "https://api.semanticscholar.org/graph/v1/paper"
+CORE = "https://api.core.ac.uk/v3/search/works"
+CROSSREF = "https://api.crossref.org/works"
 MANIFEST = "retrieval_manifest.json"
+DROP = "drop"
+REQUESTS = "requests"
+CASCADE_ZH = ("本地缓存、PMC/Europe PMC、Unpaywall、OpenAlex（含机构库作者稿）、Semantic Scholar、"
+              "CORE（如已配置）、预印本版本")
 
 
 def out_dir() -> Path:
@@ -291,6 +309,9 @@ def record_retrieval(entry: dict, result: dict) -> dict:
     }
     if result.get("pmcid"):
         record["pmcid_used"] = result["pmcid"]
+    for k in ("routes_tried", "version", "preprint_doi", "next_step", "license"):  # 1.23.0 (S4)
+        if result.get(k):
+            record[k] = result[k]
     source = record["fulltext"]
     if source and not str(source).startswith("http"):
         local = eu.project_root() / source
@@ -365,7 +386,42 @@ def try_unpaywall(entry: dict) -> dict | None:
             "source_url": url, **verdict}
 
 
+def _download(entry: dict, url: str, route: str, **extra) -> dict | None:
+    """GET one candidate URL; identity-checked like every other payload (None = no file)."""
+    try:
+        blob = eu.http_get(url)
+    except Exception:  # noqa: BLE001
+        return None
+    if len(blob) < 2000:
+        return None
+    ext = "pdf" if blob[:4] == b"%PDF" else ("xml" if blob.lstrip()[:5] == b"<?xml" else "html")
+    verdict = _guard_identity(entry, blob, ext, url)
+    return {"route": route, "access": "oa", "fulltext": _save(f"{entry['citekey']}.{ext}", blob),
+            "bytes": len(blob), "source_url": url, **extra, **verdict}
+
+
+def try_cache(entry: dict) -> dict | None:
+    """1.23.0 (S4): a file already retrieved for this paper and proven to be it."""
+    path = out_dir() / MANIFEST
+    try:
+        recs = json.loads(path.read_text(encoding="utf-8")).get("retrievals", [])
+    except (OSError, ValueError):
+        return None
+    for r in recs:
+        if r.get("citekey") != entry.get("citekey") or r.get("identity") != "match":
+            continue
+        local = eu.project_root() / str(r.get("fulltext", ""))
+        if r.get("fulltext") and local.is_file() and (not r.get("sha256")
+                                                       or _sha256(local) == r["sha256"]):
+            keep = ("route", "access", "fulltext", "source_url", "authorization_note", "identity",
+                    "identity_basis", "identity_detail", "identity_confirmed_by")
+            return {**{k: r.get(k, "") for k in keep}, "cache_hit": True}
+    return None
+
+
 def try_openalex(entry: dict) -> dict | None:
+    """OpenAlex: the best OA location, then every other OA location (repository author
+    manuscripts included), each identity-checked."""
     doi = entry.get("doi")
     if not doi:
         return None
@@ -375,29 +431,103 @@ def try_openalex(entry: dict) -> dict | None:
         data = json.loads(raw)
     except Exception:  # noqa: BLE001
         return None
-    loc = data.get("best_oa_location") or {}
-    url = loc.get("pdf_url") or loc.get("landing_page_url")
-    if not url:
+    locs = [data.get("best_oa_location") or {}] + [
+        loc for loc in (data.get("locations") or []) if isinstance(loc, dict) and loc.get("is_oa")]
+    link = None
+    seen: set[str] = set()
+    for loc in locs:
+        url = loc.get("pdf_url")
+        link = link or loc.get("landing_page_url") or url
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        host = ((loc.get("source") or {}).get("type") or "") if isinstance(loc.get("source"), dict) else ""
+        res = _download(entry, url, "openalex-repository" if host == "repository" else "openalex",
+                        version=loc.get("version") or "", license=loc.get("license") or "")
+        if res:
+            return res
+    if link:
+        return {"route": "openalex-link", "access": "link-only", "fulltext": link,
+                "source_url": link}
+    return None
+
+
+def try_semantic_scholar(entry: dict) -> dict | None:
+    doi = entry.get("doi")
+    if not doi:
         return None
     try:
-        blob = eu.http_get(url)
-        ext = "pdf" if blob[:4] == b"%PDF" else "html"
-        verdict = _guard_identity(entry, blob, ext, url)
-        return {"route": "openalex", "access": "oa",
-                "fulltext": _save(f"{entry['citekey']}.{ext}", blob), "bytes": len(blob),
-                "source_url": url, **verdict}
-    except WrongPaper:
-        raise
+        data = json.loads(eu.http_get(f"{S2}/DOI:{urllib.parse.quote(doi)}",
+                                      {"fields": "openAccessPdf,externalIds"}))
     except Exception:  # noqa: BLE001
-        return {"route": "openalex-link", "access": "link-only", "fulltext": url,
-                "source_url": url}
+        return None
+    url = ((data.get("openAccessPdf") or {}).get("url") or "") if isinstance(data, dict) else ""
+    return _download(entry, url, "semantic-scholar") if url else None
 
 
-ROUTES = (try_europepmc, try_unpaywall, try_openalex)
+def core_key() -> str:
+    import os
+    return os.environ.get("CORE_API_KEY", "").strip()
+
+
+def try_core(entry: dict) -> dict | None:
+    """CORE aggregator - only when the user configured their own CORE_API_KEY."""
+    doi, key = entry.get("doi"), core_key()
+    if not doi or not key:
+        return None
+    try:
+        data = json.loads(eu.http_get(CORE, {"q": f'doi:"{doi}"', "limit": 3, "apiKey": key}))
+    except Exception:  # noqa: BLE001
+        return None
+    for hit in (data.get("results") or []) if isinstance(data, dict) else []:
+        url = hit.get("downloadUrl") or ""
+        res = _download(entry, url, "core") if url else None
+        if res:
+            return res
+    return None
+
+
+def try_preprint(entry: dict) -> dict | None:
+    """A preprint version linked to the article's DOI (Crossref relation has-preprint):
+    medRxiv/bioRxiv/Research Square/SSRN. Recorded as a preprint, not the published version."""
+    doi = entry.get("doi")
+    if not doi:
+        return None
+    try:
+        msg = json.loads(eu.http_get(f"{CROSSREF}/{urllib.parse.quote(doi)}")).get("message", {})
+    except Exception:  # noqa: BLE001
+        return None
+    rel = (msg.get("relation") or {}).get("has-preprint") or []
+    for r in rel if isinstance(rel, list) else []:
+        pdoi = str(r.get("id", "")).strip()
+        if r.get("id-type", "doi") != "doi" or not pdoi:
+            continue
+        pentry = {**entry, "doi": pdoi}
+        try:
+            data = json.loads(eu.http_get(f"{OPENALEX}/doi:{urllib.parse.quote(pdoi)}",
+                                          {"mailto": eu.api_email() or ""}))
+        except Exception:  # noqa: BLE001
+            continue
+        loc = data.get("best_oa_location") or {}
+        url = loc.get("pdf_url")
+        if not url:
+            continue
+        res = _download(pentry, url, "preprint", version="preprint", preprint_doi=pdoi,
+                        note="preprint version (not the published article): check that the "
+                             "numbers you cite match the published version")
+        if res:
+            return res
+    return None
+
+
+ROUTES = (try_cache, try_europepmc, try_unpaywall, try_openalex, try_semantic_scholar, try_core,
+          try_preprint)
 
 
 def fetch_one(entry: dict) -> dict:
     wrong: list[str] = []
+    links: list[dict] = []
+    tried: list[str] = []
     for fn in ROUTES:
         try:
             res = fn(entry)
@@ -410,8 +540,15 @@ def fetch_one(entry: dict) -> dict:
         except Exception as exc:  # noqa: BLE001
             res = None
             print(f"    {fn.__name__} raised {type(exc).__name__}: {exc}")
+        if res and res.get("access") == "link-only":
+            links.append(res)  # 1.23.0: a landing page only - keep trying the later routes
+            continue
         if res:
+            res.setdefault("routes_tried", tried + [fn.__name__.replace("try_", "")])
             return res
+        tried.append(fn.__name__.replace("try_", ""))
+    if links and not wrong:
+        return {**links[0], "routes_tried": tried, "next_step": "browser"}
     if wrong:
         return {
             "route": "none", "access": "wrong-article",
@@ -423,12 +560,127 @@ def fetch_one(entry: dict) -> dict:
         }
     doi = entry.get("doi")
     return {
-        "route": "none", "access": "paywalled",
+        "route": "none", "access": "paywalled", "next_step": "browser",
         "fulltext": f"https://doi.org/{doi}" if doi else "",
         "source_url": f"https://doi.org/{doi}" if doi else "",
-        "note": "no open-access copy found. Use your institutional access, or rely on the "
-                "abstract and say so explicitly in the deep-read notes.",
+        "note": "no open-access copy on any lawful route. Next: the publisher page in the "
+                "visible browser with the user's own institutional login (register --route "
+                "browser-institutional --access authorized), then `fulltext.py remaining` "
+                "(author-request drafts, library document delivery, the drop folder).",
     }
+
+
+def _records() -> dict:
+    try:
+        data = json.loads((out_dir() / MANIFEST).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {r.get("citekey"): r for r in data.get("retrievals", []) if r.get("citekey")}
+
+
+def has_fulltext(rec: dict | None) -> bool:
+    if not rec or rec.get("identity") != "match":
+        return False
+    rel = str(rec.get("fulltext", ""))
+    return bool(rel) and not rel.startswith("http") and (eu.project_root() / rel).is_file()
+
+
+def remaining_entries(entries: dict, keys: list[str]) -> list[dict]:
+    """1.23.0 (S4): the papers still without a proven full text after the lawful cascade."""
+    recs = _records()
+    keys = keys or sorted(recs)
+    return [entries[k] for k in dict.fromkeys(keys) if k in entries and not has_fulltext(recs.get(k))]
+
+
+REQUEST_TEMPLATE = """Subject: Request for a copy of your article "{title}"
+
+Dear Dr {surname},
+
+I am preparing a clinical study on a closely related question and would be grateful for a copy of
+your article, for my own research use only:
+
+{cite}
+
+Thank you very much for your help.
+
+Kind regards,
+[your name, position and institution]
+"""
+
+
+def _first_author(entry: dict) -> str:
+    a = (entry.get("authors") or [{}])[0]
+    return str(a.get("last") or a.get("name") or "Author") if isinstance(a, dict) else str(a)
+
+
+def write_requests(rem: list[dict]) -> list[str]:
+    """Author-request drafts (one per paper) and one document-delivery list for the library."""
+    d = out_dir() / REQUESTS
+    d.mkdir(parents=True, exist_ok=True)
+    made = []
+    for e in rem:
+        doi = e.get("doi") or ""
+        cite = (f"{_first_author(e)} et al. {e.get('title', '')}. {e.get('journal', '')} "
+                f"{e.get('year', '')}." + (f" https://doi.org/{doi}" if doi else ""))
+        p = d / f"{e['citekey']}_author_request.md"
+        p.write_text(REQUEST_TEMPLATE.format(title=str(e.get("title", ""))[:200],
+                                             surname=_first_author(e), cite=cite), encoding="utf-8")
+        made.append(f"06_refs/fulltext/{REQUESTS}/{p.name}")
+    rows = ["# Document delivery request (interlibrary loan)", "",
+            "| # | Citekey | Title | Journal | Year | DOI | PMID |", "|---|---|---|---|---|---|---|"]
+    rows += [f"| {i} | {e['citekey']} | {str(e.get('title', ''))[:120]} | {e.get('journal', '')} | "
+             f"{e.get('year', '')} | {e.get('doi', '')} | {e.get('pmid', '')} |"
+             for i, e in enumerate(rem, 1)]
+    (d / "document_delivery.md").write_text("\n".join(rows) + "\n", encoding="utf-8")
+    made.append(f"06_refs/fulltext/{REQUESTS}/document_delivery.md")
+    (out_dir() / DROP).mkdir(exist_ok=True)
+    return made
+
+
+def remaining_message_zh(rem: list[dict]) -> list[str]:
+    drop = out_dir() / DROP
+    out = [f"以下 {len(rem)} 篇全文无法通过合法开放途径取得（已试：{CASCADE_ZH}）："]
+    out += [f"  - {e.get('doi') or 'PMID ' + str(e.get('pmid', ''))}：{str(e.get('title', ''))[:90]}"
+            for e in rem]
+    out += ["请任选一种方式（只需回复一次）：",
+            "  1 在可见的浏览器窗口里用您自己的机构/图书馆账号登录一次，我只下载上面这几篇；",
+            f"  2 您自己取得 PDF 后放进文件夹：{drop}（我会核对首页确认是同一篇）；",
+            f"  3 我已起草给通讯作者的索取邮件和给图书馆的文献传递清单：{out_dir() / REQUESTS}。",
+            "仍取不到的，我只用摘要并在精读笔记里注明。"]
+    return out
+
+
+def ingest_drop(entries: dict, keys: list[str]) -> tuple[list[str], list[str]]:
+    """Register every file in the drop folder that proves to be one of the library papers."""
+    drop = out_dir() / DROP
+    done, left = [], []
+    pending = remaining_entries(entries, keys)
+    order = pending + [e for k, e in sorted(entries.items()) if e not in pending]
+    for f in sorted(drop.glob("*")) if drop.is_dir() else []:
+        suffix = f.suffix.lower()
+        if not f.is_file() or suffix not in (".pdf", ".xml", ".html", ".htm"):
+            continue
+        blob = f.read_bytes()
+        hit = None
+        for e in order:
+            verdict = check_identity(e, blob, suffix.lstrip("."))
+            if verdict["identity"] == "match":
+                hit = (e, verdict)
+                break
+        if hit is None:
+            left.append(f.name)
+            continue
+        e, verdict = hit
+        dest = out_dir() / f"{e['citekey']}{suffix}"
+        shutil.copy2(f, dest)
+        doi = e.get("doi") or ""
+        record_retrieval(e, {"route": "user-drop", "access": "authorized",
+                             "fulltext": f"06_refs/fulltext/{dest.name}",
+                             "source_url": f"https://doi.org/{doi}" if doi else "",
+                             "authorization_note": "full text placed in the drop folder by the "
+                                                   "user through their own access", **verdict})
+        done.append(f"{f.name} -> {e['citekey']}")
+    return done, left
 
 
 NOTES_TEMPLATE = """# {citekey} - {short_title}
@@ -451,8 +703,8 @@ PMID {pmid} | DOI {doi}
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="fetch open-access full text for deep reading")
-    ap.add_argument("command", nargs="?", choices=("fetch", "register", "verify"),
-                    default="fetch")
+    ap.add_argument("command", nargs="?", choices=("fetch", "register", "verify", "remaining",
+                                                   "ingest-drop"), default="fetch")
     ap.add_argument("--citekey", action="append", default=[])
     ap.add_argument("--all-deepread", action="store_true",
                     help="fetch everything listed in deepread_index.json")
@@ -461,7 +713,8 @@ def main() -> int:
     ap.add_argument("--access", choices=("oa", "authorized"),
                     help="legal access basis for a registered file")
     ap.add_argument("--source-url", help="landing page or authoritative source URL")
-    ap.add_argument("--route", default="external", help="acquisition route, e.g. scansci-pdf")
+    ap.add_argument("--route", default="external",
+                    help="acquisition route, e.g. browser-institutional (the user's own login)")
     ap.add_argument("--authorization-note",
                     help="required for institutionally authorized full text")
     ap.add_argument("--replace-existing", action="store_true",
@@ -484,6 +737,28 @@ def main() -> int:
         if not dr_path.exists():
             eu.die("deepread_index.json missing; pass --citekey instead")
         keys += [i["citekey"] for i in json.loads(dr_path.read_text(encoding="utf-8")).get("selected", [])]
+    if args.command == "remaining":  # 1.23.0 (S4): after the lawful cascade and the browser
+        rem = remaining_entries(entries, keys)
+        if not rem:
+            print("every requested paper has a proven full text; nothing to ask the user")
+            return 0
+        made = write_requests(rem)
+        print(f"{len(rem)} paper(s) without a full text; drafts: {', '.join(made[:3])}"
+              + (" ..." if len(made) > 3 else ""))
+        print("Send the user ONE message with these lines (Chinese, unchanged):")
+        print("\n".join(f"  {x}" for x in remaining_message_zh(rem)))
+        return 0
+    if args.command == "ingest-drop":
+        done, left = ingest_drop(entries, keys)
+        for d in done:
+            print(f"registered {d} (route user-drop, identity match)")
+        for f in left:
+            print(f"NOT registered {f}: it does not prove to be any library paper (front matter); "
+                  "check the file, or `register --citekey KEY --file ... ` then `verify "
+                  "--confirm-identity`")
+        if not done and not left:
+            print(f"the drop folder {out_dir() / DROP} is empty")
+        return 0 if not left else 2
     if not keys:
         eu.die("give at least one --citekey (or --all-deepread)")
 
@@ -677,8 +952,12 @@ def main() -> int:
         print("The S15 gate blocks on these. A hash proves the bytes, not the paper.")
     if absent:
         # Codex 1.11: a failed retrieval stops here; never deep-read the abstract instead.
-        print(f"STOP: no full text for {', '.join(absent)}. Do not write notes from the abstract. "
-              "Ask the user for the PDF (then `register`) or choose another comparable paper.")
+        print(f"STOP: no full text for {', '.join(absent)} on any lawful open route. Do not write "
+              "notes from the abstract. Next (1.23.0): the publisher page in the visible browser "
+              "with the user's own institutional login (only these papers, one at a time; then "
+              "`register --route browser-institutional --access authorized --authorization-note "
+              "...`); still missing -> `fulltext.py remaining` and send its ONE message (drop "
+              "folder, author-request drafts, library list); or choose another comparable paper.")
         return 2
     print("Fill in every notes file, then record them in 06_refs/deepread/deepread_index.json.")
     print("Notes under 400 characters are rejected by the S15 gate.")

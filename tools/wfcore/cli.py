@@ -828,7 +828,9 @@ def handoff_lines(pipe, st, proj: Path) -> list[str]:
             questions += [f"{last['id']} {f['id']} [{f.get('category')}] {f.get('summary', '')[:80]}"
                           for f in pend]
         if last.get("user_decision") is None:
-            questions.append(f"{last['id']}: another review round, or '{rr.CONFIRM_PHRASES[0]}'?")
+            questions.append(f"{last['id']}: another review round, or "
+                             + ("proceed to writing ('继续写作')?" if scope == "science"
+                                else f"'{rr.CONFIRM_PHRASES[0]}'?"))
     mode = str(pipe.targets.get("visual_review_mode", "inline")).strip().lower()
     debts = [n for n, _, _ in parked_visual(pipe, st, mode)]
     if debts:
@@ -857,6 +859,16 @@ def cmd_decisions(args) -> int:
     """1.22.0 (U1): `wf decisions show | set KEY VALUE --words "<the user's words>"`."""
     _pipe, st, proj = _load()
     from . import userdecisions
+    if args.action == "verify":  # 1.23.0 (S6)
+        try:
+            rec = userdecisions.verify(proj, args.key or "", args.text, args.source, args.fact)
+        except ValueError as exc:
+            print(f"记录被拒绝：{exc}")
+            return 2
+        st.event("verified_fact", f"{args.key}: {', '.join(rec['sources'])[:160]}")
+        st.save()
+        print(f"已自行查证：{args.key}（来源 {len(rec['sources'])} 个，{rec['checked'][:10]}）；不需要问用户。")
+        return 0
     if args.action == "set":
         if not args.key or args.value is None:
             print("wf decisions set <key> <value> --words \"<用户原话>\"；可用的 key："
@@ -925,7 +937,9 @@ CARD_FOOTER = (  # 1.22.0 (U1/U3/U4/U5): appended to every card printed in a pap
     "## Every stage (1.22.0)\n"
     "- Before asking the user anything: `wf decisions show` and `wf handoff`; never re-ask a "
     "recorded decision unless the facts changed; record a new answer with `wf decisions set "
-    "<key> <value> --words \"<user's words>\"`.\n"
+    "<key> <value> --words \"<user's words>\"`. 1.23.0: a fact public sources settle "
+    "(dataset access, licence, journal policy) is checked and drafted by you and recorded with "
+    "`wf decisions verify KEY --text ... --source URL --fact ...`, not asked.\n"
     "- At stage start tell the user in ONE Chinese line what you will do and roughly how long "
     "(`wf status` line `time`). Every pause asks ALL open questions in ONE Chinese message, "
     "each with your recommendation.")
@@ -2180,6 +2194,9 @@ def cmd_data(args) -> int:
     pipe = registry.load()
     proj = paths.project_dir(pipe.layout)
     action = args.action
+    if action in ("licence", "availability"):  # 1.23.0 (S6)
+        from . import v1230cli
+        return v1230cli.data_availability(proj, args)
     if action == "add":
         if not args.path:
             print("wf data add <absolute path> [--name NAME]")
@@ -2543,10 +2560,14 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("decisions", help="the user's recorded decisions (1.22.0): show | set KEY "
                                          "VALUE --words \"<the user's words>\"; read before "
                                          "asking the user anything")
-    p.add_argument("action", choices=("show", "set"), nargs="?", default="show")
+    p.add_argument("action", choices=("show", "set", "verify"), nargs="?", default="show")
     p.add_argument("key", nargs="?")
     p.add_argument("value", nargs="?")
     p.add_argument("--words", default="")
+    # 1.23.0 (S6): a public fact established by the agent itself (no question to the user).
+    p.add_argument("--text", default="", help="verify: the drafted statement")
+    p.add_argument("--source", action="append", default=[], help="verify: public source URL(s)")
+    p.add_argument("--fact", default="", help="verify: what the source states")
     p.set_defaults(fn=cmd_decisions)
 
     p = sub.add_parser("migrate", help="adopt this engine's full gate set for completed stages "
@@ -2682,9 +2703,18 @@ def build_parser() -> argparse.ArgumentParser:
                                     "--from F --url U --query Q --name N [--screenshot PNG] "
                                     "[--values-csv CSV] | confirm-capture NAME --note W")
     p.add_argument("action", nargs="?", default="list",
-                   choices=("add", "list", "verify", "remove", "capture", "confirm-capture"))
+                   choices=("add", "list", "verify", "remove", "capture", "confirm-capture",
+                            "licence", "availability"))
     p.add_argument("path", nargs="?")
     p.add_argument("--name")
+    p.add_argument("--licence", default="", help="licence (1.23.0): e.g. 'CC BY 4.0', as the "
+                                                 "source states it")
+    p.add_argument("--access", default="", help="licence: open|registration|credentialed|"
+                                                "application|published")
+    p.add_argument("--doi", default="", help="licence: the dataset DOI, when one exists")
+    p.add_argument("--source", default="", help="licence: the public page the facts come from")
+    p.add_argument("--checked", default="", help="licence: date checked (YYYY-MM-DD)")
+    p.add_argument("--label", default="", help="licence: the source's name in the statement")
     p.add_argument("--note")
     p.add_argument("--hash", action="store_true", help="verify: also (re)hash changed files")
     p.add_argument("--from", dest="from_file", type=Path, default=None,

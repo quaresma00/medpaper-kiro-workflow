@@ -392,9 +392,11 @@ since = "1.23.0"
 id = "S07_artifacts"
 title = "Artifact inventory (benchmarked vs comparable papers) + legends"
 card = "stages/S07_artifacts.md"
-outputs = ["01_protocol/artifact_plan.json", "05_figures/legends.md", "04_tables/table_captions.md", "01_protocol/artifact_benchmark.md"]
+outputs = ["01_protocol/artifact_plan.json", "05_figures/legends.md", "04_tables/table_captions.md", "01_protocol/artifact_benchmark.md", "01_protocol/display_benchmark.json"]
+# 1.23.0 (S2): display_benchmark.json is required by display_plan_benchmarked (1.23.0 pins).
 [[stage.gate]]
 check = "outputs_exist"
+optional = ["01_protocol/display_benchmark.json"]
 [[stage.gate]]
 check = "json_keys"
 path = "01_protocol/artifact_plan.json"
@@ -442,6 +444,15 @@ paths = ["05_figures/legends.md", "04_tables/table_captions.md"]
 check = "display_items_justified"
 path = "01_protocol/artifact_plan.json"
 since = "1.12.0"
+# 1.23.0 (S2): count and display types benchmarked against 3-5 comparable papers.
+[[stage.gate]]
+check = "display_plan_benchmarked"
+since = "1.23.0"
+# 1.23.0 (S5): drafted by the clinical writer, polished at once by the medical editor.
+[[stage.gate]]
+check = "section_polished"
+sections = ["legends", "table_captions"]
+since = "1.23.0"
 [[stage]]
 id = "S08_methods"
 title = "Write Methods"
@@ -489,6 +500,12 @@ check = "section_language_clean"
 path = "07_manuscript/supplementary_methods.md"
 optional = true
 since = "1.13.0"
+# 1.23.0 (S5): drafted by the clinical writer, polished at once by the medical editor.
+[[stage.gate]]
+check = "section_polished"
+sections = ["methods", "supplementary_methods"]
+optional = ["supplementary_methods"]
+since = "1.23.0"
 [[stage.gate]]
 check = "clinical_labels_used"
 paths = ["07_manuscript/methods.md"]
@@ -634,6 +651,11 @@ since = "1.16.0"
 [[stage.gate]]
 check = "display_text_resolved"
 since = "1.20.0"
+# 1.23.0 (S3): independent science review (methods, results, displays vs benchmark) closed and
+# the user's proceed decision recorded, bound to the results/display hashes, before writing.
+[[stage.gate]]
+check = "science_review_before_writing"
+since = "1.23.0"
 # 1.14.0 (B): the writer gets every result - clinical label, comparison, measure, CI level.
 [[stage.gate]]
 check = "writer_results_mapped"
@@ -651,6 +673,11 @@ since = "1.10.0"
 check = "section_language_clean"
 path = "07_manuscript/results.md"
 since = "1.13.0"
+# 1.23.0 (S5): drafted by the clinical writer, polished at once by the medical editor.
+[[stage.gate]]
+check = "section_polished"
+sections = ["results"]
+since = "1.23.0"
 [[stage.gate]]
 check = "clinical_labels_used"
 paths = ["07_manuscript/results.md"]
@@ -774,6 +801,11 @@ since = "1.9.0"
 check = "section_language_clean"
 path = "07_manuscript/introduction.md"
 since = "1.13.0"
+# 1.23.0 (S5): drafted by the clinical writer, polished at once by the medical editor.
+[[stage.gate]]
+check = "section_polished"
+sections = ["introduction"]
+since = "1.23.0"
 
 [[stage]]
 id = "S15_deepread"
@@ -838,6 +870,11 @@ discussion_checks = true
 [[stage.gate]]
 check = "discussion_outline_ready"
 since = "1.19.0"
+# 1.23.0 (S5): drafted by the clinical writer, polished at once by the medical editor.
+[[stage.gate]]
+check = "section_polished"
+sections = ["discussion"]
+since = "1.23.0"
 [[stage.gate]]
 check = "clinical_labels_used"
 paths = ["07_manuscript/discussion.md"]
@@ -855,6 +892,12 @@ optional = ["07_manuscript/statements.md"]
 check = "section_language_clean"
 path = "07_manuscript/abstract.md"
 since = "1.13.0"
+# 1.23.0 (S5) - abstract and title; every earlier section still equals its polished text: drafted by the clinical writer, polished at once by the medical editor.
+[[stage.gate]]
+check = "section_polished"
+sections = ["abstract", "title", "methods", "supplementary_methods", "results", "introduction", "discussion", "legends", "table_captions"]
+optional = ["supplementary_methods"]
+since = "1.23.0"
 [[stage.gate]]
 check = "prose_not_lists"
 path = "07_manuscript/full_manuscript.md"
@@ -1070,6 +1113,11 @@ check = "outputs_exist"
 check = "json_keys"
 path = "00_input/author_info.json"
 keys = ["authors", "affiliations", "corresponding", "funding", "conflicts"]
+# 1.23.0 (S6): licence and access mode of every data source verified from public pages; the
+# Data availability statement is generated from them and cites dataset DOIs.
+[[stage.gate]]
+check = "data_availability_verified"
+since = "1.23.0"
 # 1.10.0: ethics/consent/data availability are judged by the workflow (tools/declarations.py);
 # the author answers only the specific points it cannot determine.
 [[stage.gate]]
@@ -1173,6 +1221,11 @@ card = "stages/S23_package.md"
 outputs = ["08_submission/cover_letter.md", "08_submission/bundle/SUBMISSION_CHECKLIST.md", "08_submission/bundle/manifest.json", "08_submission/package_content_baseline.json", "08_submission/submission_qc.md"]
 [[stage.gate]]
 check = "outputs_exist"
+# 1.23.0 (S5): drafted by the clinical writer, polished at once by the medical editor.
+[[stage.gate]]
+check = "section_polished"
+sections = ["cover_letter"]
+since = "1.23.0"
 [[stage.gate]]
 check = "data_acquisition_complete"
 [[stage.gate]]
@@ -1417,6 +1470,9 @@ globs = [
   "05_figures/qc/*",
   "06_refs/cache/**",
   "06_refs/fulltext/*",
+  # 1.23.0 (S4): author-request drafts / document-delivery list and the user's PDF drop folder.
+  "06_refs/fulltext/requests/*",
+  "06_refs/fulltext/drop/*",
   "06_refs/deepread/*.md",
   "07_manuscript/prepolish/*",
   "07_manuscript/polish_allowlist.tsv",

@@ -41,8 +41,8 @@ KEY_RESULTS_RULE = ("key_results.md lists the executed results (estimates with u
                     "population, comparison, model and covariates, conversions). Check every "
                     "number in the text against it; do not write 'cannot verify' for a number "
                     "listed there.")
-CAPS = {"manuscript": 3, "package": 2, "audit": 2}
-FAST_CAPS = {"manuscript": 2, "package": 0, "audit": 1}
+CAPS = {"manuscript": 3, "package": 2, "audit": 2, "science": 3}
+FAST_CAPS = {"manuscript": 2, "package": 0, "audit": 1, "science": 1}
 COST = {  # U4: expected duration and credit class per stage (rough, for the user)
     "S01": ("short", "5-10 分钟"), "S02": ("medium", "15-30 分钟"), "S03": ("medium", "15-30 分钟"),
     "S04": ("long", "30-90 分钟"), "S05": ("long", "30-120 分钟"), "S06": ("medium", "15-40 分钟"),
@@ -302,7 +302,7 @@ def cap_summary_zh(project: Path, scope: str) -> list[str]:
     rounds = rr.load(project)[scope]
     last = rounds[-1] if rounds else {}
     open_items = [f for f in last.get("finding_list", []) if f.get("status") in ("kept", "author")]
-    name = {"manuscript": "稿件审阅", "package": "投稿包审阅"}[scope]
+    name = {"manuscript": "稿件审阅", "package": "投稿包审阅", "science": "写作前科学审阅"}[scope]
     out = [f"{name}已达到轮次上限（{cap(project, scope)} 轮，模式 {review_mode(project)}）。之后只检查回退。",
            f"剩余条目 {len(open_items)} 项："]
     out += [f"  - {f.get('id')}［{f.get('category')}］{str(f.get('summary', ''))[:80]}" for f in open_items[:12]]
@@ -317,6 +317,15 @@ def confirmation_zh(project: Path, scope: str) -> list[str]:
     from . import reviewrounds as rr
     last = rr.latest(project, scope) or {}
     pend = rr.pending_author(last)
+    if scope == "science":  # 1.23.0 (S3): one question - another round, or proceed to writing
+        out = ["请您二选一：再审一轮（只看改动），或回复“继续写作”（或“按你的建议”）进入写 Results。"
+               "“OK / 可以”不算决定。"]
+        if pend:
+            out.append(f"待您决定的条目 {len(pend)} 项（每项附我的建议；回复“按你的建议”即全部采纳）：")
+            out += [f"  - {f['id']}［{f.get('category')}］{str(f.get('summary', ''))[:90]} -> 建议："
+                    f"{'修改' if (f.get('recommendation') or 'keep') == 'change' else '保留'}"
+                    for f in pend]
+        return out
     out = ["请您确认这一版：回复“我确认这一版”（或含“确认”与“这一版/此版/本版/这个版本”的同义句，"
            "或 “I confirm this version”）。“OK / 可以 / 好的 / 没问题 / 无需审阅”不算确认。",
            "确认前提：本轮已关闭；确认后文件不再改动；下列待您决定的条目已有答复。"]

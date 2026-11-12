@@ -1,6 +1,7 @@
 """1.23.0 command-line entry points (wired into tools/wf.py by cli.build_parser).
 
     wf publishability record|answer|value|show      S1 publishability checkpoints
+    wf data licence NAME ... | wf data availability   S6 verified data availability (via cmd_data)
 """
 from __future__ import annotations
 
@@ -76,6 +77,36 @@ def cmd_publishability(args) -> int:
         return 0
     except (OSError, ValueError) as exc:
         print(f"publishability refused: {exc}")
+        return 2
+
+
+def data_availability(proj: Path, args) -> int:
+    """`wf data licence NAME ...` and `wf data availability` (1.23.0, S6)."""
+    from . import dataavail as da
+    from .state import State
+    try:
+        if args.action == "licence":
+            if not args.path:
+                raise ValueError("wf data licence NAME --licence L --access A --url U [--doi D] "
+                                 "--source <public page> [--checked YYYY-MM-DD]")
+            rec = da.record(proj, args.path, args.licence, args.access, args.url or "",
+                            args.source, args.doi, args.checked, args.label or "")
+            st = State(proj, ".wf").load()
+            st.event("data_licence", f"{args.path}: {rec['access']} ({rec['licence']}); "
+                                     f"{rec['source']}")
+            st.save()
+            print(f"recorded {args.path}: {rec['access']}, {rec['licence']}, checked "
+                  f"{rec['checked']} at {rec['source']}")
+            return 0
+        text = da.statement(proj)
+        print("Data availability statement (from the verified records; paste it under the Data "
+              "availability heading of statements.md):")
+        print(f"  {text or '(no data source recorded yet: wf data licence ...)'}")
+        for prob in da.problems(proj):
+            print(f"  TODO {prob}")
+        return 0
+    except (OSError, ValueError) as exc:
+        print(f"refused: {exc}")
         return 2
 
 

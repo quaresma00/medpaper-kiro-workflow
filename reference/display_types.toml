@@ -1,0 +1,179 @@
+# ==============================================================================
+# Display-type taxonomy per design (1.23.0, S2): what comparable papers display.
+# ==============================================================================
+# Read by tools/pubmed/benchmark.py (classifies the figure/table captions of comparable papers)
+# and the S07 gate display_plan_benchmarked (every type used by at least half of the benchmark
+# papers is covered by an artifact-plan item's "display_type" - or by its archetype - or has a
+# one-line reason in artifact_plan.json "benchmark_omissions"). `patterns` are case-insensitive
+# regexes on the caption (label + title); `kind` = figure | table | any. Additions: a pattern
+# that a typical caption of that display type contains.
+# ==============================================================================
+
+[meta]
+version = "1.23.0"
+
+# Types every design may use.
+[common.flow_diagram]
+label = "Selection / study flow diagram"
+kind = "figure"
+patterns = ['flow\s*(?:chart|diagram)', 'selection\s+(?:process|of)', '\bPRISMA\b', 'study\s+population', 'inclusion\s+and\s+exclusion']
+archetypes = ["flow_diagram"]
+[common.baseline_table]
+label = "Baseline / population characteristics table"
+kind = "table"
+patterns = ['baseline', 'characteristics', 'demographic']
+[common.sensitivity]
+label = "Sensitivity analyses (forest or table)"
+kind = "any"
+patterns = ['sensitivity']
+[common.subgroup_forest]
+label = "Subgroup analysis forest plot or table"
+kind = "any"
+patterns = ['subgroup', 'stratified']
+
+[design.disproportionality.forest_ror]
+label = "Forest plot of reporting odds ratios by drug, class or subgroup"
+kind = "figure"
+patterns = ['forest', 'reporting\s+odds\s+ratio', '\bRORs?\b', '\bPRRs?\b', 'information\s+component', '\bIC025\b', 'disproportionality']
+archetypes = ["forest_plot"]
+[design.disproportionality.time_to_onset]
+label = "Time-to-onset distribution"
+kind = "any"
+patterns = ['time[- ]to[- ]onset', 'onset\s+time', '\blatency\b', 'weibull']
+[design.disproportionality.seriousness_outcome]
+label = "Outcome seriousness / severity distribution"
+kind = "any"
+patterns = ['serious', 'severity', 'fatal', 'death', 'hospitali[sz]ation', 'outcomes?\s+of\s+(?:the\s+)?(?:cases|reports|events)']
+[design.disproportionality.trend_by_year]
+label = "Reports or signal trend by year"
+kind = "any"
+patterns = ['by\s+year', 'per\s+year', 'annual', 'temporal\s+trend', 'trend', 'quarter']
+[design.disproportionality.signal_heatmap]
+label = "Signal heatmap"
+kind = "figure"
+patterns = ['heat\s*map']
+archetypes = ["clustered_heatmap"]
+[design.disproportionality.case_characteristics]
+label = "Characteristics of the reports (sex, age, reporter, country)"
+kind = "table"
+patterns = ['characteristics\s+of\s+(?:the\s+)?(?:reports|cases)', 'reporter', 'country']
+
+[design.mendelian_randomization.mr_forest]
+label = "Forest plot of MR estimates by method or outcome"
+kind = "figure"
+patterns = ['forest', 'mendelian\s+randomi[sz]ation\s+estimates', 'inverse[- ]variance', 'causal\s+estimates']
+archetypes = ["forest_plot"]
+[design.mendelian_randomization.scatter_snp]
+label = "Scatter plot of variant-exposure vs variant-outcome effects"
+kind = "figure"
+patterns = ['scatter', '\bSNP\s+effects?']
+[design.mendelian_randomization.leave_one_out]
+label = "Leave-one-out analysis"
+kind = "any"
+patterns = ['leave[- ]one[- ]out']
+[design.mendelian_randomization.funnel]
+label = "Funnel plot"
+kind = "figure"
+patterns = ['funnel']
+[design.mendelian_randomization.instruments_table]
+label = "Instrument (genetic variant) characteristics"
+kind = "any"
+patterns = ['instruments?', 'genetic\s+variants?', '\bSNPs?\b.*characteristics', 'F[- ]statistic']
+[design.mendelian_randomization.pleiotropy]
+label = "Heterogeneity and pleiotropy tests"
+kind = "any"
+patterns = ['pleiotrop', 'heterogeneity', 'egger\s+intercept']
+
+[design.cohort.km_curve]
+label = "Kaplan-Meier or cumulative incidence curves"
+kind = "figure"
+patterns = ['kaplan', 'survival\s+curves?', 'cumulative\s+incidence', 'cumulative\s+hazard']
+archetypes = ["km_survival", "cumulative_incidence"]
+[design.cohort.hazard_table]
+label = "Hazard ratios from the main models"
+kind = "table"
+patterns = ['hazard\s+ratios?', 'cox', 'association']
+[design.cohort.dose_response]
+label = "Dose-response / restricted cubic spline curve"
+kind = "figure"
+patterns = ['spline', 'dose[- ]response', 'non-?linear']
+[design.cohort.incidence_table]
+label = "Incidence rates by group"
+kind = "table"
+patterns = ['incidence\s+rates?', 'person[- ]years']
+
+[design.case_control.or_table]
+label = "Odds ratios from the main models"
+kind = "any"
+patterns = ['odds\s+ratios?', 'conditional\s+logistic', 'association']
+[design.case_control.dose_response]
+label = "Dose-response analysis"
+kind = "any"
+patterns = ['spline', 'dose[- ]response', 'cumulative\s+(?:dose|exposure)']
+
+[design.cross_sectional_survey.weighted_characteristics]
+label = "Weighted participant characteristics"
+kind = "table"
+patterns = ['weighted', 'characteristics', 'participants']
+[design.cross_sectional_survey.association_table]
+label = "Association models (weighted regression)"
+kind = "table"
+patterns = ['odds\s+ratios?', 'association', 'regression', '\bbeta\b']
+[design.cross_sectional_survey.dose_response]
+label = "Restricted cubic spline / dose-response curve"
+kind = "figure"
+patterns = ['spline', 'dose[- ]response', 'non-?linear']
+[design.cross_sectional_survey.trend_by_cycle]
+label = "Trend across survey cycles"
+kind = "any"
+patterns = ['trend', 'survey\s+cycles?', 'over\s+time']
+
+[design.prediction_model.roc]
+label = "Discrimination (ROC curves, AUC)"
+kind = "figure"
+patterns = ['\bROC\b', 'receiver\s+operating', '\bAUC\b', 'discrimination']
+archetypes = ["roc_curve"]
+[design.prediction_model.calibration]
+label = "Calibration plot"
+kind = "figure"
+patterns = ['calibration']
+archetypes = ["nomogram_calibration"]
+[design.prediction_model.decision_curve]
+label = "Decision curve analysis"
+kind = "figure"
+patterns = ['decision\s+curve', 'net\s+benefit']
+archetypes = ["decision_curve"]
+[design.prediction_model.nomogram]
+label = "Nomogram or score chart"
+kind = "figure"
+patterns = ['nomogram', 'score\s+chart', 'risk\s+score']
+[design.prediction_model.importance]
+label = "Predictor importance (SHAP or coefficients)"
+kind = "any"
+patterns = ['\bSHAP\b', 'importance', 'predictors?\s+(?:included|selected)']
+[design.prediction_model.performance_table]
+label = "Model performance table"
+kind = "table"
+patterns = ['performance', 'sensitivity\s+and\s+specificity', 'C[- ]statistic']
+
+[design.meta_analysis.pooled_forest]
+label = "Forest plot of the pooled estimate"
+kind = "figure"
+patterns = ['forest', 'pooled', 'meta-analysis\s+of']
+archetypes = ["forest_plot"]
+[design.meta_analysis.funnel]
+label = "Funnel plot / small-study effects"
+kind = "figure"
+patterns = ['funnel', 'small[- ]study', "egger"]
+[design.meta_analysis.risk_of_bias]
+label = "Risk-of-bias / study quality assessment"
+kind = "any"
+patterns = ['risk\s+of\s+bias', 'quality\s+assessment', 'newcastle', '\bROB(?:INS)?\b', 'GRADE']
+[design.meta_analysis.study_characteristics]
+label = "Characteristics of the included studies"
+kind = "table"
+patterns = ['characteristics\s+of\s+(?:the\s+)?included', 'included\s+studies']
+[design.meta_analysis.leave_one_out]
+label = "Leave-one-out / influence analysis"
+kind = "any"
+patterns = ['leave[- ]one[- ]out', 'influence']
