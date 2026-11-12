@@ -320,6 +320,12 @@ def run_b(tmp: Path, record, section) -> None:
     # journal difference list at S20).
     new_1140 += sum(1 for v in names.values() for c in v if c in {
         "journal_traces_clean", "journal_difference_listed"})
+    # 1.23.0 adds gate lines for new checks (publishability S02/S04/S06, units and imputation
+    # S05/S06, display benchmark S07, science review S09, section polish, data availability S21).
+    new_1140 += sum(1 for v in names.values() for c in v if c in {
+        "publishability_checkpoint", "derived_units_checked", "imputation_pooled",
+        "display_plan_benchmarked", "science_review_before_writing", "section_polished",
+        "data_availability_verified"})
     record("B4 duplicate gate lines merged (confirmation inside review_round_approved; SI clean "
            "inside docx_bundle_ready; limits/reference count as checklist rows); fewer gate "
            f"entries than 1.11.0 (287 -> {total - new_1140} + {new_1140} new in 1.14.0)",

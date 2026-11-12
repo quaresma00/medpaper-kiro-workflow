@@ -174,6 +174,7 @@ class State:
             self._note_v1200(old_version, pipeline_version)
             self._note_v1210(old_version, pipeline_version)
             self._note_v1220(old_version, pipeline_version)
+            self._note_v1230(old_version, pipeline_version)
             self.save()
         return changed
 
@@ -298,6 +299,29 @@ class State:
                    "after `wf journal switch`): linked guideline pages in "
                    "guideline_requirements_mapped, journal_traces_clean at S20/S23, "
                    "journal_difference_listed at S20. Paper files were not modified.")
+
+    def _note_v1230(self, old_version: str, new_version: str) -> None:
+        """1.23.0: one event; no file or stage is touched."""
+        if (version_tuple(old_version) >= (1, 23, 0) or version_tuple(new_version) < (1, 23, 0)
+                or self.data.get("v1230_migration_noted")):
+            return
+        self.data["v1230_migration_noted"] = True
+        self.event("requirements_changed",
+                   "1.23.0: works now - `wf publishability record|answer|value|show` "
+                   "(verdicts at S02/S04/S06, one line before any extra analysis), "
+                   "tools/pubmed/benchmark.py (display benchmark from comparable papers), the "
+                   "full-text cascade with the drop folder (tools/pubmed/fulltext.py fetch | "
+                   "remaining | ingest-drop), the science review scope (review_round.py --scope "
+                   "science), the medpaper-medical-editor agent and writer receipts "
+                   "(writer_bundle.py receipt | edit | polished), `wf data licence` / `wf data "
+                   "availability`, `wf decisions verify`, analysis.units / medunits.R and "
+                   "analysis.imputation / medimpute.R; card guidance applies when a stage is "
+                   "reached. Stricter checks apply only after `wf migrate --yes` (stages not yet "
+                   "completed then follow them): publishability_checkpoint at S02/S04/S06, "
+                   "derived_units_checked and imputation_pooled at S05/S06, "
+                   "display_plan_benchmarked at S07, science_review_before_writing at S09, "
+                   "section_polished at the writing stages, data_availability_verified at S21. "
+                   "Paper files were not modified.")
 
     def _note_v1160(self, old_version: str, new_version: str) -> None:
         """1.16.0: one event; no file or stage is touched."""

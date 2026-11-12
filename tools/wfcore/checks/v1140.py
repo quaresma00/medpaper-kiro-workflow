@@ -62,6 +62,16 @@ def additional_analyses_justified(ctx: Ctx) -> Result:
             if len(str(e.get("decision", "")).strip()) < 15:
                 problems.append(f"{e.get('path')}: an additional analysis needs 'decision' - the "
                                 "scientific decision it could change (one line)")
+            from .v1230 import since_1230  # 1.23.0 (S1): rough cost and benefit, low = skip
+            if since_1230(ctx):
+                benefit = str(e.get("benefit", "")).strip().casefold()
+                if len(str(e.get("cost", "")).strip()) < 3 or benefit not in ("low", "medium", "high"):
+                    problems.append(f"{e.get('path')}: state its rough 'cost' and 'benefit' "
+                                    "(low|medium|high) - `wf publishability value` prints the line "
+                                    "for the user")
+                elif benefit == "low" and not str(e.get("requested_by", "")).strip():
+                    problems.append(f"{e.get('path')}: low benefit - skip it, unless the user or a "
+                                    "reviewer asked for it ('requested_by')")
     if problems:
         return Result(False, "additional_analyses_justified", "; ".join(problems[:6]),
                       ["Stop when the primary and secondary outcomes and the validity checks of "

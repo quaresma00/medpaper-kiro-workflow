@@ -530,6 +530,7 @@ def run_e(tmp: Path, record, section) -> None:
     _w(p, "03_analysis/analysis_manifest.json", man)
     bad = _gate(p, "additional_analyses_justified", "S05_analysis")
     man["scripts"][1]["decision"] = "whether the primary estimate is robust to the exposure window"
+    man["scripts"][1].update(cost="one script, 10 min", benefit="medium")  # 1.23.0 (S1)
     _w(p, "03_analysis/analysis_manifest.json", man)
     good = _gate(p, "additional_analyses_justified", "S05_analysis")
     record("E an additional analysis must state the scientific decision it could change",
@@ -908,7 +909,7 @@ def run_r(tmp: Path, record, section) -> None:
     sizes = {s.id: len((ROOT / "pipeline" / s.card).read_text(encoding="utf-8")) for s in pipe.stages}
     record("R pipeline 1.14.0; a 1.13 paper gets exactly one 1.14.0 migration event and no paper "
            "file changes; every card <= the card limit",
-           pipe.meta.get("version") in ("1.14.0", "1.14.1", "1.15.0", "1.16.0", "1.17.0", "1.18.0", "1.19.0", "1.20.0", "1.21.0", "1.22.0") and len(notes) == 1
+           pipe.meta.get("version") in ("1.14.0", "1.14.1", "1.15.0", "1.16.0", "1.17.0", "1.18.0", "1.19.0", "1.20.0", "1.21.0", "1.22.0", "1.23.0") and len(notes) == 1
            and before == after
            and max(sizes.values()) <= registry.CARD_MAX_CHARS, f"{len(notes)} {max(sizes.values())}")
 

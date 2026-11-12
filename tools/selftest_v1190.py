@@ -432,7 +432,7 @@ def run_summary(tmp: Path, record, section) -> None:
     gates = {(s.id, g.get("check")): g for s in pipe.stages for g in s.gate}
     record("R pipeline 1.19.0; a 1.18.0 paper gets exactly one 1.19.0 event, stays pinned, no "
            "paper file changes; cards <= limit; new gates carry since = 1.19.0",
-           pipe.meta.get("version") in ("1.19.0", "1.20.0", "1.21.0", "1.22.0") and len(notes) == 1 and st.engine_pin == "1.18.0"
+           pipe.meta.get("version") in ("1.19.0", "1.20.0", "1.21.0", "1.22.0", "1.23.0") and len(notes) == 1 and st.engine_pin == "1.18.0"
            and before == sorted(x.name for x in q.rglob("*") if x.is_file() and ".wf" not in x.parts)
            and max(sizes.values()) <= registry.CARD_MAX_CHARS
            and gates[("S16_discussion", "discussion_outline_ready")].get("since") == "1.19.0"

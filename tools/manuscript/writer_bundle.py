@@ -81,7 +81,9 @@ CONTAINERS = {"estimates", "results", "models", "rows", "items", "data", "values
               "table", "list", "groups", "by_group", "subgroups", "strata", "terms", "contrasts",
               "comparisons", "outcomes", "analyses", "effects", "coefficients"}
 SKIP_KEYS = {"environment", "meta", "metadata", "provenance", "script", "inputs", "outputs",
-             "schema", "seed", "written_at"}
+             "schema", "seed", "written_at",
+             # 1.23.0 (S7/S8): method records, given to the S08 writer as required statements
+             "imputation", "derived_variables"}
 _IDENT = re.compile(r"(?<![@\w-])[a-z][a-z0-9]*(?:_[a-z0-9]+)+(?![\w-])")
 _PATH = re.compile(r"(?:[A-Za-z]:[\\/]|\b(?:0\d_\w+|tools|temp|\.wf)[\\/])[^\s)]*"
                    r"|\b[\w-]+\.(?:py|R|r|json|csv|xlsx|log|toml|txt)\b")
@@ -491,6 +493,35 @@ def _notes_md(project: Path, names: dict[str, str]) -> str:
     return "\n".join(rows) + "\n"
 
 
+def _required_methods_sentences(project: Path) -> list[str]:
+    """1.23.0 (S8): the Methods sentence of every single-imputed-dataset analysis."""
+    out: list[str] = []
+
+    def walk(obj):
+        if isinstance(obj, dict):
+            imp = obj.get("imputation")
+            if isinstance(imp, dict) and imp.get("methods_sentence"):
+                out.append(str(imp["methods_sentence"]))
+            elif isinstance(imp, dict) and isinstance(imp.get("m"), int) and imp["m"] >= 2:
+                out.append(f"Estimates were pooled across {imp['m']} imputed datasets using "
+                           f"{imp.get('pooling', 'Rubin rules')}.")
+            dv = obj.get("derived_variables")
+            if isinstance(dv, dict):
+                for rec in dv.values():
+                    if isinstance(rec, dict) and rec.get("derivation") and rec.get("unit"):
+                        out.append(f"{str(rec['derivation'])[:1].upper()}"
+                                   f"{str(rec['derivation'])[1:]} (expressed in {rec['unit']}).")
+            for k, v in obj.items():
+                if k != "environment":
+                    walk(v)
+        elif isinstance(obj, list):
+            for v in obj:
+                walk(v)
+    for p in sorted((Path(project) / "03_analysis/results").glob("*.json")):
+        walk(_json(p))
+    return list(dict.fromkeys(out))
+
+
 def gaps_path(project: Path, stage: str) -> Path:
     return Path(project) / BUNDLE_DIR / f"{stage}_GAPS.md"
 
@@ -542,6 +573,12 @@ def build(project: Path, stage: str, target: str | None = None) -> Path:
         # section on deviations (older papers) is dropped; the paper describes what was done.
         text = re.sub(r"(?ms)^#{1,6}\s+Deviations\b.*?(?=^#{1,6}\s|\Z)", "", _read(proto))
         files["protocol_summary.md"] = clean(text, names, terms, "protocol")
+    if stage == "S08_methods":  # 1.23.0 (S8): sentences the Methods must carry
+        required = _required_methods_sentences(project)
+        if required:
+            files["required_statements.md"] = "\n".join(
+                ["# Sentences the Methods must state (keep their meaning; wording may be "
+                 "polished)", ""] + [f"- {s}" for s in required]) + "\n"
     if stage == "S19_human_review":
         notes = sorted((project / "06_refs/deepread").glob("*.md"))
         if notes:

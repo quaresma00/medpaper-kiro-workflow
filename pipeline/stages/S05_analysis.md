@@ -20,12 +20,18 @@ Details (code templates, R/Python split, sandbox rules): `reference/stage_detail
 3. Every number the paper will ever show goes through `write_results()` into
    `03_analysis/results/<name>.json` (environment receipt added). Baseline tables: count every
    level of each categorical variable overall and per group (`baseline_counts()`).
+   1.23.0: derived doses / dose per kg or m2 / standardised equivalents through
+   `analysis.units` (R `tools/R/medunits.R`) with unit, derivation and plausible range
+   (`derived_units_checked`; factors only from `reference/conversion_factors.json`). Multiple
+   imputation is pooled (`analysis.imputation.rubin`, R `medimpute.R` `medpaper_pool`); one
+   imputed dataset only with `single_imputation(reason)` (`imputation_pooled`).
 4. Plan all analysis edits of a round together, then run the chain once (not per edit).
 5. Keep `03_analysis/analysis_log.md` (what ran, what came out, next decision, dead ends) and
    update `03_analysis/notes.md`. Stop when the primary and secondary outcomes and the
    validity checks of the protocol's statistical reporting plan are done; an extra analysis
    gets `"role": "additional"` and one line `"decision"` (which scientific decision it could
-   change) in `03_analysis/analysis_manifest.json`. Valid negative or contradictory results
+   change) in `03_analysis/analysis_manifest.json`, plus (1.23.0) `"cost"` and `"benefit"`
+   (low|medium|high; low = skip unless `"requested_by"`). Valid negative or contradictory results
    stay. Superseded or erroneous files are retired, not deleted:
    `.\.venv\Scripts\python.exe tools/retire_result.py --file <path> --why "<reason>"`.
    Internal diagnostic plots may go to `03_analysis/diagnostics/` (never submission figures).

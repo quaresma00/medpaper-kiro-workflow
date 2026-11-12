@@ -1,0 +1,39 @@
+{
+  "_meta": {
+    "version": "1.23.0",
+    "purpose": "Well-established conversion factors for derived variables (tools/analysis/units.py, tools/R/medunits.R). value_to = value_from * factor + offset. Never invent a factor: an addition needs a citable source. Drug-specific values that change over time (WHO ATC/DDD) are NOT listed - pass the DDD with its index year to ddd() instead.",
+    "sources": {
+      "young1987": "Young DS. Implementation of SI units for clinical laboratory data. Ann Intern Med. 1987;106:114-129.",
+      "hoelzel2004": "Hoelzel W, et al. IFCC reference system for measurement of hemoglobin A1c in human blood and the national standardization schemes in the United States, Japan, and Sweden: a method-comparison study. Clin Chem. 2004;50:166-174 (master equation NGSP = 0.09148 x IFCC + 2.152).",
+      "cdc2022": "Dowell D, et al. CDC Clinical Practice Guideline for Prescribing Opioids for Pain - United States, 2022. MMWR Recomm Rep. 2022;71(3):1-95 (Table: morphine milligram equivalent conversion factors).",
+      "liu2013": "Liu D, et al. A practical guide to the monitoring and management of the complications of systemic corticosteroid therapy. Allergy Asthma Clin Immunol. 2013;9:30 (Table 1, equivalent glucocorticoid doses)."
+    }
+  },
+  "creatinine_mgdl_to_umoll": {"from": "mg/dL", "to": "umol/L", "factor": 88.42, "offset": 0, "source": "young1987"},
+  "creatinine_umoll_to_mgdl": {"from": "umol/L", "to": "mg/dL", "factor": 0.01131, "offset": 0, "source": "young1987"},
+  "glucose_mgdl_to_mmoll": {"from": "mg/dL", "to": "mmol/L", "factor": 0.05551, "offset": 0, "source": "young1987"},
+  "glucose_mmoll_to_mgdl": {"from": "mmol/L", "to": "mg/dL", "factor": 18.016, "offset": 0, "source": "young1987"},
+  "cholesterol_mgdl_to_mmoll": {"from": "mg/dL", "to": "mmol/L", "factor": 0.02586, "offset": 0, "source": "young1987", "note": "total, LDL and HDL cholesterol"},
+  "cholesterol_mmoll_to_mgdl": {"from": "mmol/L", "to": "mg/dL", "factor": 38.67, "offset": 0, "source": "young1987"},
+  "triglycerides_mgdl_to_mmoll": {"from": "mg/dL", "to": "mmol/L", "factor": 0.01129, "offset": 0, "source": "young1987"},
+  "triglycerides_mmoll_to_mgdl": {"from": "mmol/L", "to": "mg/dL", "factor": 88.57, "offset": 0, "source": "young1987"},
+  "hba1c_percent_to_mmolmol": {"from": "% (NGSP)", "to": "mmol/mol (IFCC)", "factor": 10.929, "offset": -23.4975, "source": "hoelzel2004", "note": "IFCC = 10.929 x (NGSP - 2.15)"},
+  "hba1c_mmolmol_to_percent": {"from": "mmol/mol (IFCC)", "to": "% (NGSP)", "factor": 0.09148, "offset": 2.152, "source": "hoelzel2004"},
+  "mme_morphine_oral": {"from": "mg/day", "to": "MME/day", "factor": 1.0, "offset": 0, "source": "cdc2022"},
+  "mme_oxycodone_oral": {"from": "mg/day", "to": "MME/day", "factor": 1.5, "offset": 0, "source": "cdc2022"},
+  "mme_hydrocodone_oral": {"from": "mg/day", "to": "MME/day", "factor": 1.0, "offset": 0, "source": "cdc2022"},
+  "mme_hydromorphone_oral": {"from": "mg/day", "to": "MME/day", "factor": 5.0, "offset": 0, "source": "cdc2022"},
+  "mme_oxymorphone_oral": {"from": "mg/day", "to": "MME/day", "factor": 3.0, "offset": 0, "source": "cdc2022"},
+  "mme_codeine_oral": {"from": "mg/day", "to": "MME/day", "factor": 0.15, "offset": 0, "source": "cdc2022"},
+  "mme_tramadol_oral": {"from": "mg/day", "to": "MME/day", "factor": 0.2, "offset": 0, "source": "cdc2022"},
+  "mme_tapentadol_oral": {"from": "mg/day", "to": "MME/day", "factor": 0.4, "offset": 0, "source": "cdc2022"},
+  "mme_methadone_oral": {"from": "mg/day", "to": "MME/day", "factor": 4.7, "offset": 0, "source": "cdc2022"},
+  "mme_fentanyl_transdermal": {"from": "mcg/h", "to": "MME/day", "factor": 2.4, "offset": 0, "source": "cdc2022"},
+  "pred_eq_hydrocortisone": {"from": "mg", "to": "mg prednisone equivalent", "factor": 0.25, "offset": 0, "source": "liu2013", "note": "hydrocortisone 20 mg = prednisone 5 mg"},
+  "pred_eq_cortisone": {"from": "mg", "to": "mg prednisone equivalent", "factor": 0.2, "offset": 0, "source": "liu2013", "note": "cortisone 25 mg = prednisone 5 mg"},
+  "pred_eq_prednisolone": {"from": "mg", "to": "mg prednisone equivalent", "factor": 1.0, "offset": 0, "source": "liu2013"},
+  "pred_eq_methylprednisolone": {"from": "mg", "to": "mg prednisone equivalent", "factor": 1.25, "offset": 0, "source": "liu2013", "note": "methylprednisolone 4 mg = prednisone 5 mg"},
+  "pred_eq_triamcinolone": {"from": "mg", "to": "mg prednisone equivalent", "factor": 1.25, "offset": 0, "source": "liu2013"},
+  "pred_eq_dexamethasone": {"from": "mg", "to": "mg prednisone equivalent", "factor": 6.6667, "offset": 0, "source": "liu2013", "note": "dexamethasone 0.75 mg = prednisone 5 mg"},
+  "pred_eq_betamethasone": {"from": "mg", "to": "mg prednisone equivalent", "factor": 6.6667, "offset": 0, "source": "liu2013", "note": "betamethasone 0.75 mg = prednisone 5 mg"}
+}

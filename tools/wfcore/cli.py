@@ -2719,6 +2719,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("checks", help="list registered gate checks")
     p.set_defaults(fn=cmd_checks)
 
+    from . import v1230cli  # 1.23.0: publishability, display benchmark, data availability
+    v1230cli.add_parsers(sub)
     return ap
 
 

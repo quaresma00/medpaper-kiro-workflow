@@ -42,6 +42,9 @@ Details (pilot/sampling markers, manifest fields, source-limited path): `referen
 ```powershell
 .\.venv\Scripts\python.exe tools\data_manifest.py verify
 ```
+7. 1.23.0 publishability: actual counts vs the design floors (`reference/publishability.toml`):
+   `wf publishability record --stage S04 --design <key> --count <metric>=<n> ... --verdict ...
+   --article-type ...`; tell the user at once; CONDITIONAL/NO-GO = ONE question, then `answer`.
 
 ## Outputs
 - `02_data/acquisition_manifest.json`

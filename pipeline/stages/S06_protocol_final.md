@@ -34,6 +34,10 @@ Details (sandbox, manifest, tolerances, spot-check script): `reference/stage_det
 ```
 .\.venv\Scripts\python.exe tools/wf.py decide go_nogo_2 GO --why "<the finding, its precision, why a journal takes it, which journal tier is realistic>"
 ```
+   1.23.0: `wf publishability record --stage S06 --verdict ... --article-type ... --evidence
+   temp/pub_s06.json` (precision, duplication of existing findings, robustness); report at
+   once, CONDITIONAL/NO-GO = ONE question. Any later extra analysis (reviewer or user): first
+   `wf publishability value` - one line: the conclusion it could change, rough cost; skip low.
 
 ## Ask the user
 A `STOP` is a real outcome: report it with the reasoning; never soften a dead result.

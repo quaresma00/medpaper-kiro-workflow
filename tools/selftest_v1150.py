@@ -619,7 +619,7 @@ def run_r(tmp: Path, record, section) -> None:
     from wfcore import journalspec
     record("R pipeline 1.15.0; a 1.14.1 paper gets exactly one 1.15.0 event and stays pinned "
            "(package changes and stricter checks only after wf migrate --yes); cards <= limit",
-           pipe.meta.get("version") in ("1.15.0", "1.16.0", "1.17.0", "1.18.0", "1.19.0", "1.20.0", "1.21.0", "1.22.0") and len(notes) == 1 and st.engine_pin == "1.14.1"
+           pipe.meta.get("version") in ("1.15.0", "1.16.0", "1.17.0", "1.18.0", "1.19.0", "1.20.0", "1.21.0", "1.22.0", "1.23.0") and len(notes) == 1 and st.engine_pin == "1.14.1"
            and not journalspec.since_1150(q) and max(sizes.values()) <= registry.CARD_MAX_CHARS,
            f"{len(notes)} {max(sizes.values())} {sorted(sizes.items(), key=lambda kv: -kv[1])[:2]}")
 

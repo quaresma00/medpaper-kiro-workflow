@@ -232,7 +232,8 @@ def _python_script_scope(text: str) -> tuple[bool, list[str]]:
 
 _R_HELPER_SOURCE = re.compile(
     r"source\s*\(\s*file\.path\s*\(\s*Sys\.getenv\s*\(\s*['\"]MEDPAPER_ROOT['\"]\s*\)\s*,\s*"
-    r"['\"]tools/(?:figures/R/(?:medfig|recipes)|R/medresults|R/medsources)\.R['\"]")
+    r"['\"]tools/(?:figures/R/(?:medfig|recipes)|R/(?:medresults|medsources|medunits|medimpute))"
+    r"\.R['\"]")
 _R_JSON_WRITE = re.compile(
     r"(?<![\w.])(?:jsonlite::|RJSONIO::|rjson::)?(?:toJSON|write_json)\s*\(")
 _ABS_PATH = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\[^\\\s]|~[\\/]|/(?:[^/\s\"']+/)+)")

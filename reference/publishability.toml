@@ -1,0 +1,76 @@
+# ==============================================================================
+# Publishability checkpoints (1.23.0, S1): design-specific minimum counts for S04.
+# ==============================================================================
+# Read by tools/wfcore/publishability.py. At S04 the agent records the actual counts of the
+# acquired data (`wf publishability record --stage S04 --design <key> --count METRIC=VALUE ...`);
+# a GO needs every listed metric at or above its minimum. A metric below its minimum makes the
+# verdict CONDITIONAL or NO-GO, which stops and asks the user ONE question.
+# These are conventional floors from the methods literature, not a guarantee of publication.
+# Additions need a citable basis (`basis`). `required = false` = advisory (reported, never
+# blocks a GO). Never edit this file from a paper.
+# ==============================================================================
+
+[meta]
+version = "1.23.0"
+
+[design.disproportionality]
+label = "Pharmacovigilance disproportionality analysis (FAERS, VigiBase, EudraVigilance, JADER)"
+[[design.disproportionality.threshold]]
+metric = "cases_per_drug_event_pair_min"
+min = 3
+basis = "signal criterion of at least 3 cases (Evans SJ et al. Pharmacoepidemiol Drug Saf 2001;10:483-6)"
+[[design.disproportionality.threshold]]
+metric = "cases_per_subgroup_min"
+min = 3
+basis = "the same case floor for every reported subgroup estimate (sex, age band, indication)"
+
+[design.mendelian_randomization]
+label = "Two-sample or one-sample Mendelian randomisation"
+[[design.mendelian_randomization.threshold]]
+metric = "instrument_f_statistic_min"
+min = 10
+basis = "weak-instrument rule F > 10 (Staiger D, Stock JH. Econometrica 1997;65:557-86; Burgess S, Thompson SG. Int J Epidemiol 2011;40:755-64)"
+[[design.mendelian_randomization.threshold]]
+metric = "instruments_n"
+min = 3
+basis = "MR-Egger and weighted-median sensitivity analyses need at least 3 instruments (Bowden J et al. Genet Epidemiol 2016;40:304-14)"
+
+[design.cohort]
+label = "Cohort study (incl. survival analysis)"
+[[design.cohort.threshold]]
+metric = "events_per_variable_min"
+min = 10
+basis = "about 10 outcome events per model variable (Peduzzi P et al. J Clin Epidemiol 1996;49:1373-9)"
+
+[design.case_control]
+label = "Case-control study"
+[[design.case_control.threshold]]
+metric = "events_per_variable_min"
+min = 10
+basis = "about 10 cases per model variable in logistic regression (Peduzzi P et al. J Clin Epidemiol 1996;49:1373-9)"
+
+[design.cross_sectional_survey]
+label = "Complex survey (NHANES, KNHANES, CHNS and similar)"
+[[design.cross_sectional_survey.threshold]]
+metric = "unweighted_n_per_stratum_min"
+min = 30
+basis = "NCHS data presentation standards for proportions: unweighted sample size of at least 30 (Parker JD et al. Vital Health Stat 2 2017;(175):1-22)"
+
+[design.prediction_model]
+label = "Clinical prediction model development or validation"
+[[design.prediction_model.threshold]]
+metric = "events_per_candidate_predictor_min"
+min = 10
+basis = "minimum floor only; the full sample-size calculation follows Riley RD et al. BMJ 2020;368:m441"
+
+[design.meta_analysis]
+label = "Systematic review with meta-analysis"
+[[design.meta_analysis.threshold]]
+metric = "studies_per_pooled_outcome_min"
+min = 2
+basis = "a pooled estimate needs at least 2 studies (Cochrane Handbook, chapter 10)"
+[[design.meta_analysis.threshold]]
+metric = "studies_for_funnel_tests_min"
+min = 10
+required = false
+basis = "tests for funnel-plot asymmetry need at least 10 studies (Sterne JAC et al. BMJ 2011;343:d4002); below it, report without the test"

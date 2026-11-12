@@ -14,7 +14,7 @@
 
 [meta]
 name = "medpaper"
-version = "1.22.0"
+version = "1.23.0"
 schema = 1
 description = "Medical/clinical research pipeline: idea -> feasibility -> data -> analysis -> artifacts -> manuscript -> submission package."
 
@@ -217,6 +217,10 @@ allow_unverified = true
 check = "decision_recorded"
 name = "go_nogo_1"
 allowed = ["GO", "PIVOT", "STOP"]
+# 1.23.0 (S1): verdict + best achievable article type + evidence, reported to the user at once.
+[[stage.gate]]
+check = "publishability_checkpoint"
+since = "1.23.0"
 
 [[stage]]
 id = "S03_protocol"
@@ -271,6 +275,10 @@ since = "1.21.0"
 [[stage.gate]]
 check = "variable_crosswalk_confirmed"
 since = "1.10.0"
+# 1.23.0 (S1): actual counts against the design floors (reference/publishability.toml).
+[[stage.gate]]
+check = "publishability_checkpoint"
+since = "1.23.0"
 [[stage.gate]]
 check = "results_have_environment"
 [[stage.gate]]
@@ -309,6 +317,13 @@ glob = "03_analysis/code/*.*"
 [[stage.gate]]
 check = "additional_analyses_justified"
 since = "1.14.0"
+# 1.23.0 (S7/S8): derived doses carry units and range checks; imputed data are pooled.
+[[stage.gate]]
+check = "derived_units_checked"
+since = "1.23.0"
+[[stage.gate]]
+check = "imputation_pooled"
+since = "1.23.0"
 [[stage.gate]]
 check = "notes_populated"
 path = "03_analysis/notes.md"
@@ -362,6 +377,16 @@ allowed = ["YES"]
 check = "decision_recorded"
 name = "go_nogo_2"
 allowed = ["GO", "PIVOT", "STOP"]
+# 1.23.0 (S1/S7/S8): informativeness of the main results; units; pooled imputations.
+[[stage.gate]]
+check = "publishability_checkpoint"
+since = "1.23.0"
+[[stage.gate]]
+check = "derived_units_checked"
+since = "1.23.0"
+[[stage.gate]]
+check = "imputation_pooled"
+since = "1.23.0"
 
 [[stage]]
 id = "S07_artifacts"

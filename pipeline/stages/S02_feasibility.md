@@ -38,6 +38,16 @@ than impressions. A wrong GO here wastes the entire pipeline.
 .\.venv\Scripts\python.exe tools/wf.py decide go_nogo_1 GO --why "<what the gap is, how many papers cover it, why a journal would still want this>"
 ```
    `PIVOT` = the question must change. `STOP` = tell the user it is not publishable and why.
+7. 1.23.0 publishability checkpoint (titles/abstracts only): PubMed count of the last 10 years
+   for the same exposure + outcome + data-source family or design, the closest papers, expected
+   data sufficiency and contribution; verdict and best achievable article type:
+```
+.\.venv\Scripts\python.exe tools/wf.py publishability record --stage S02 --verdict GO --article-type original_article --evidence temp/pub_s02.json
+```
+   (verdict GO|CONDITIONAL|NO-GO; type original_article|brief_report|research_letter|
+   not_publishable; evidence fields: `reference/stage_details/S02_feasibility.md`.)
+   Send the printed Chinese lines at once. GO: continue. CONDITIONAL/NO-GO: stop, ONE question
+   with your recommendation, then `wf publishability answer --stage S02 --choice ... --words`.
 
 ## Outputs
 - `01_protocol/feasibility.md`
