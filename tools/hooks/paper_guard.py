@@ -218,6 +218,14 @@ class Guard:
         self.archive = self.paper / paths.ARCHIVE_DIR
         # 1.17.0 (J3): archived journal layers are hidden from discovery (the engine reads them).
         self.journal_archive = self.paper / "08_submission" / "journal_archives"
+        # 1.22.0 (J4): earlier journals' dated package folders stay for the user's records and
+        # are hidden from discovery like the archives.
+        try:
+            from wfcore import packagefolders
+            self.old_packages = [Path(os.path.abspath(str(x)))
+                                 for x in packagefolders.old_folders(self.paper)]
+        except Exception:  # noqa: BLE001 - the guard never fails on bookkeeping
+            self.old_packages = []
         env_temp = os.environ.get("MEDPAPER_GUARD_TEMP")
         self.temp = Path(env_temp) if env_temp else (temp or Path(tempfile.gettempdir()))
         self._memo: dict[str, str] = {}
@@ -277,7 +285,7 @@ class Guard:
         if _within(p, self.paper):
             if any(_within(p, n) for n in self.nested):
                 return "other_paper"
-            if _within(p, self.journal_archive):
+            if _within(p, self.journal_archive) or any(_within(p, o) for o in self.old_packages):
                 return "journal_archive"
             if _within(p, self.archive):
                 return "paper_state"

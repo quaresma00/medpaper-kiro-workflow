@@ -59,6 +59,9 @@ def guideline_requirements_mapped(ctx: Ctx) -> Result:
         return _pinned(name)
     from .. import requirements
     probs, warns = requirements.problems(ctx.project)
+    from .v1220 import since_1220
+    if since_1220(ctx):  # 1.22.0 (J2): rules on linked pages are ingested or marked n.a.
+        probs = probs + requirements.linked_problems(ctx.project)
     hint = ["Build the list from 08_submission/guidelines_source.txt for the chosen article type "
             "(schema reference/guideline_requirements.schema.json; details "
             "reference/stage_details/S20_journal.md 'Requirement list')."]

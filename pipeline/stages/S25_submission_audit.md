@@ -30,6 +30,9 @@ Details (what the reviewer must inspect, finding format, verdict rules): `refere
 ```
 .\.venv\Scripts\python.exe tools/wf.py decide submission_package_independent_audit "PASS|REVISE|BLOCKED" --why "<concise evidence-based basis>"
 ```
+   PASS refreshes the dated package folder (`submission_packages/<journal>_<date>/`); give
+   the user its path. Fast mode / `--repackage`: one compliance-focused audit (journal
+   requirements, old-journal traces, guideline items; no science re-audit).
 5. `REVISE`: `wf decide` prints the open items; offer the user BOTH routes at once: the
    author final copy (step 6) or one S24 round with these findings, then a new freeze:
 ```

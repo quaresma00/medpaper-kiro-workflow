@@ -173,6 +173,7 @@ class State:
             self._note_v1190(old_version, pipeline_version)
             self._note_v1200(old_version, pipeline_version)
             self._note_v1210(old_version, pipeline_version)
+            self._note_v1220(old_version, pipeline_version)
             self.save()
         return changed
 
@@ -277,6 +278,26 @@ class State:
                    "apply only after `wf migrate --yes` (or for S20-S25 after `wf journal switch`): "
                    "web_captures_traced at S04, indexing_evidence_cited at S20, "
                    "portal_requirements_applied at S23. Paper files were not modified.")
+
+    def _note_v1220(self, old_version: str, new_version: str) -> None:
+        """1.22.0: one event; no file or stage is touched."""
+        if (version_tuple(old_version) >= (1, 22, 0) or version_tuple(new_version) < (1, 22, 0)
+                or self.data.get("v1220_migration_noted")):
+            return
+        self.data["v1220_migration_noted"] = True
+        self.event("requirements_changed",
+                   "1.22.0: applies now - journal-layer certificates per journal epoch, "
+                   "`rework.py bookkeep`, derived files certified by their build receipt, figure "
+                   "QC at once after a re-render, no stale renders in review bundles, engine "
+                   "counts and key results in every brief, review convergence (fixed must-fix "
+                   "rule, round caps, regression-only rounds), fewer author pauses ('按你的建议'), "
+                   "equivalent confirmation sentences, Chinese messages, page_breaks / "
+                   "abbreviation_list after_conclusions; `wf decisions` is seeded on the next "
+                   "command; the portal check and the dated package folder apply at the next "
+                   "S24. Stricter checks apply only after `wf migrate --yes` (or for S20-S25 "
+                   "after `wf journal switch`): linked guideline pages in "
+                   "guideline_requirements_mapped, journal_traces_clean at S20/S23, "
+                   "journal_difference_listed at S20. Paper files were not modified.")
 
     def _note_v1160(self, old_version: str, new_version: str) -> None:
         """1.16.0: one event; no file or stage is touched."""

@@ -1,5 +1,34 @@
 # S20 - Select the most realistic current SCIE journal - details
 
+> 1.22.0. (U1) A journal the user named (`wf decisions show`, key target_journal) is
+> verified only: `journal_shortlist.md` with `Eligibility screen` alone, no shortlist or
+> ranking, never asked again. (J1) Typed fields, all from the guide: `limits` (+ `source`,
+> `limits.estimated`), `separate_display_files`, `display_file_names`, `supplementary_label`,
+> `abbreviation_list` (`none|after_keywords|after_conclusions` - after the Conclusions,
+> before the declarations), `page_breaks` (`allowed|none`: none = no hard page break or
+> next-page section anywhere; title page, tables and legends flow; a table that would need a
+> landscape page is built portrait and reported), `figure_dpi`, `word_count_scope`,
+> `declarations_order`, `declarations_heading`, `main_text_headings`, `keywords`,
+> `legend_style`, `supplementary_aliases`, `reference_separator`, `si_format`,
+> `abbreviation_placement`, `line_numbers`, `journal_requires_checklist` (only if
+> required), `csl`, `presentation`, `abstract`, `title_page`, `highlights`/`key_points`,
+> `cover_letter`, `required_uploads`, `figure`, `orcid_required`, the 1.19 placement fields
+> and `supplementary_file_pattern`. A builder-type rule the engine cannot express is a
+> `manual` requirement with `manual_handling`; `wf journal diff` lists it at S20 in Chinese.
+> (J2) Linked pages: every guide line that sends the reader elsewhere for rules ("see our
+> artwork guidelines", "refer to the editorial policies", article-type pages, URLs) is
+> ingested (`wf guidelines ingest --append`, browser by default when a GET fails) or listed in
+> `guideline_requirements.json` `"linked_pages": [{"lines": "L0012", "ingested": "<appended
+> URL>"}, {"lines": "L0040", "reason": "applies to Review articles only"}]`. New
+> auto checks: `caption_style` (legend_style prefix/end_punctuation), `display_file_names`
+> (bundle figure/table names), `declarations_heading`. (J7) `wf journal diff` writes
+> `.wf/journal_diff.json`: required statements, section structure, file naming, figure
+> sizes, limits, APC and waivers, portal items, each auto / self-verify / user decision;
+> show it once with the other S20 questions (`journal_difference_listed`). (J6)
+> `journal_traces_clean` (S20, S23): after a switch no old journal name, abbreviation,
+> ISSN, guideline quote, cover-letter or abstract sentence in the journal layer.
+> (J5) `wf journal switch ... --repackage`: science frozen; fast review mode for the epoch.
+
 > 1.19.0 layout fields (`tools/wfcore/layout.py`), absent = engine default, never set by
 > judgment. `title_page.placement` in_manuscript (default when not blinded: the title page
 > is the manuscript's first page, then a page break, then the abstract) | separate (blinded

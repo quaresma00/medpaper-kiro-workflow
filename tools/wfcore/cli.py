@@ -1216,6 +1216,12 @@ def cmd_decide(args) -> int:
         from . import audit  # 1.15.0 (E4): the author-final-copy route is offered at once
         for line in audit.revise_offer(st.project):
             print(line)
+    if args.name == "submission_package_independent_audit" and str(args.value).startswith("PASS"):
+        from . import packagefolders  # 1.22.0 (J4): refresh the dated package folder
+        if packagefolders.current(st.project):
+            folder, changed = packagefolders.create_or_refresh(st.project, "S25")
+            print("\n".join(packagefolders.summary_zh(st.project))
+                  + (f"\n（S25 通过后已更新：{', '.join(changed)}）" if changed else ""))
     return 0
 
 
@@ -1403,7 +1409,13 @@ def cmd_journal(args) -> int:
     try:
         if args.action == "switch":
             lines = journalepoch.switch(proj, pipe, st, args.to, args.confirm_old, args.why,
-                                        args.outcome)
+                                        args.outcome, repackage=args.repackage)
+        elif args.action == "diff":  # 1.22.0 (J7)
+            from . import journaldiff
+            lines, rec = journaldiff.write(proj)
+            st.event("journal_diff", f"epoch {rec['epoch']}: {len(rec['rows'])} difference(s), "
+                                     f"{len(rec['unexpressible'])} manual item(s)")
+            st.save()
         elif args.action == "restore":
             if not args.answer:
                 print("restore needs --answer restore|keep --why \"<用户原话>\"")
@@ -1435,6 +1447,19 @@ def cmd_portal(args) -> int:
     in the browser after the user logged in."""
     _pipe, st, proj = _load()
     from . import guideingest, portal
+    if args.action == "reconcile":  # 1.22.0 (J3): portal vs guideline, in Chinese
+        print("\n".join(portal.reconcile_zh(proj)))
+        return 0
+    if args.action == "use-cache":
+        try:
+            rec = portal.use_cache(proj)
+        except ValueError as exc:
+            print(f"无法使用缓存：{exc}")
+            return 2
+        st.event("portal_from_cache", f"cached {rec.get('from_cache')}")
+        st.save()
+        print("\n".join(portal.summary_zh(rec) + portal.reconcile_zh(proj)))
+        return 0
     if args.action == "status":
         lines = portal.summary_zh(portal.current(proj))
         print("\n".join(lines) if lines else "还没有读取投稿系统要求（只在用户要求时：wf portal ingest "
@@ -1461,6 +1486,7 @@ def cmd_portal(args) -> int:
           "wf compliance write（或 wf rebuild）。不提交、不批准、不生成 PDF——这些步骤留给用户。")
     for p in portal.problems(proj):
         print(f"  !! {p}")
+    print("\n".join(portal.reconcile_zh(proj)))  # 1.22.0 (J3): every difference, in Chinese
     return 0
 
 
@@ -2597,7 +2623,9 @@ def build_parser() -> argparse.ArgumentParser:
                                        "--why W [--outcome rejected|withdrawn|other] | lookup "
                                        "--issn ISSN [--title T] | shortlist | restore --answer "
                                        "restore|keep --why W")
-    p.add_argument("action", choices=("switch", "lookup", "shortlist", "restore"))
+    p.add_argument("action", choices=("switch", "lookup", "shortlist", "restore", "diff"))
+    p.add_argument("--repackage", action="store_true",
+                   help="switch (1.22.0): science frozen - repackage fast path (fast review mode)")
     p.add_argument("--to", default="")
     p.add_argument("--confirm-old", dest="confirm_old", default="")
     p.add_argument("--why", default="")
@@ -2612,7 +2640,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("portal", help="submission-system requirements (1.21.0, only when the user "
                                       "asks): ingest --from CAPTURE --url URL [--append] | status")
-    p.add_argument("action", choices=("ingest", "status"))
+    p.add_argument("action", choices=("ingest", "status", "reconcile", "use-cache"))
     p.add_argument("--from", dest="from_file", type=Path, default=None)
     p.add_argument("--url", default="")
     p.add_argument("--append", action="store_true",

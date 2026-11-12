@@ -50,6 +50,9 @@ CHECK_MEASURE = {
     "required_uploads": "required_uploads", "figure_files": "figure", "orcid": "orcid",
     "csl": "csl", "declarations_order": "declarations", "page_numbers": "page_numbers",
     "ai_statement": "ai_statement", "reference_format": "reference_format",
+    # 1.22.0 (J2): guideline rules the engine now measures on the journal copy / bundle
+    "caption_style": "captions", "display_file_names": "file_names",
+    "declarations_heading": "declarations_heading",
 }
 QC_ROWS = {"declarations": "Declarations order", "page_numbers": "Automatic page numbers",
            "ai_statement": "AI/LLM-use statement", "reference_format": "References: number"}
@@ -178,6 +181,8 @@ class _Measure:
             if not ok and len(str(csl.get("reason", "")).strip()) >= 20:
                 return PASS, f"{why}; recorded reason: {str(csl['reason'])[:100]}"
             return (PASS if ok else FAIL), why
+        if name in ("captions", "file_names", "declarations_heading"):
+            return _measure_1220(self.ctx, p, t, name)
         if name in QC_ROWS:
             row = next((r for r in self.qc() if str(r.get("item", "")).startswith(QC_ROWS[name])), None)
             if row is None:
@@ -185,6 +190,55 @@ class _Measure:
             st = {"N/A": NA}.get(row["status"], row["status"])
             return st, str(row.get("evidence", ""))[:300]
         return CANNOT, f"no measurement named {name}"
+
+
+def _measure_1220(ctx, p: Path, t: dict, name: str) -> tuple[str, str]:
+    """1.22.0 (J2): caption style, display file names and the declarations heading."""
+    from . import journalspec
+    src = p / ctx.src("07_manuscript/full_manuscript.md")
+    body = src.read_text(encoding="utf-8", errors="replace") if src.is_file() else ""
+    if name == "captions":
+        style = journalspec.legend_style(t)
+        sec = journalspec.markdown_sections(body).get("figure legends", "")
+        heads = re.findall(r"(?m)^#{2,6}\s+(.+?)\s*$", sec)
+        if not heads:
+            return CANNOT, "no figure legend headings in the journal copy"
+        bad = []
+        for h in heads:
+            if not re.match(rf"{re.escape(style['prefix'])}\s*S?\d", h):
+                bad.append(f"'{h[:50]}' does not start with '{style['prefix']}'")
+            end = str(style.get("end_punctuation") or "any").casefold()
+            if end in ("period", ".") and not h.rstrip().endswith("."):
+                bad.append(f"'{h[:50]}' title does not end with a period")
+            if end in ("none", "no") and h.rstrip().endswith("."):
+                bad.append(f"'{h[:50]}' title ends with a period")
+        return (FAIL, "; ".join(bad[:6])) if bad else (PASS, f"{len(heads)} legend title(s) follow "
+                                                             "the journal's caption style")
+    if name == "file_names":
+        pat = journalspec.display_file_names(t)
+        man = _json(p / MANIFEST) or {}
+        bad, n = [], 0
+        for i in man.get("items", []) if isinstance(man, dict) else []:
+            role = str(i.get("role", "")).casefold()
+            if role not in ("figure", "table"):
+                continue
+            n += 1
+            rx = "^" + re.escape(pat[role]).replace(re.escape("{n}"), r"\d+") + "$"
+            fname = Path(str(i.get("file", ""))).name
+            if not re.match(rx, fname, re.I):
+                bad.append(f"{fname} (expected {pat[role]})")
+        if not n:
+            return CANNOT, "no figure/table files in the bundle manifest"
+        return (FAIL, "file name(s) not as the guide requires: " + "; ".join(bad[:6])) if bad \
+            else (PASS, f"{n} display file name(s) follow {pat['figure']} / {pat['table']}")
+    want = str(t.get("declarations_heading") or "").strip()
+    if not want:
+        return CANNOT, "declarations_heading not set in target_journal.json"
+    heads = [h.strip() for h in re.findall(r"(?m)^#\s+(.+?)\s*$", body)]
+    if want in heads:
+        return PASS, f"heading '{want}' present"
+    near = [h for h in heads if journalspec.section_role(h, {}) == "declarations"]
+    return FAIL, f"heading '{want}' missing" + (f" (found '{near[0]}')" if near else "")
 
 
 def _builder(project: Path, req: dict) -> tuple[str, str]:

@@ -302,8 +302,9 @@ def foreign_prefixes(project: Path | str) -> tuple[str, ...]:
 
 
 def skipped_prefixes(project: Path | str) -> tuple[str, ...]:
-    """Prefixes every whole-paper scan skips: foreign_prefixes plus the browser scratch."""
-    return foreign_prefixes(project) + SCRATCH_PREFIXES
+    """Prefixes every whole-paper scan skips: foreign_prefixes, the engine-written dated
+    package folders (1.22.0, J4: read-only copies kept for the user) and the browser scratch."""
+    return foreign_prefixes(project) + ("submission_packages/",) + SCRATCH_PREFIXES
 
 
 ASK_ONCE = ("The paper is the folder the user opened as the Kiro workspace: run `wf init` there, "

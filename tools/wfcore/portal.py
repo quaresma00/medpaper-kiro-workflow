@@ -166,6 +166,85 @@ def ingest(project: Path, src: Path, url: str, append: bool = False) -> dict:
     p.write_text(json.dumps(out, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     from .revision import record_derived
     record_derived(project, [p, cache / name])
+    try:  # 1.22.0 (J3): the next paper to this journal starts with these requirements
+        cache_store(project, out)
+    except (OSError, SystemExit):
+        pass
+    return out
+
+
+# ------------------------------------------------------------------ 1.22.0 (J3) reconciliation
+RULE_ZH = ("核对规则：上传项、必填项、文件类型与大小以投稿系统为准；稿件格式以投稿指南为准（除非投稿"
+           "系统另有规定）。")
+
+
+def _cache_file(project: Path) -> Path:
+    from . import journalspec, packagefolders, paths
+    label = packagefolders.journal_label(journalspec.load(project))
+    return paths.user_home() / "portal_cache" / f"{label}.json"
+
+
+def cache_store(project: Path, rec: dict) -> Path:
+    """User-level cache per journal (dated); never holds credentials (captures are page text)."""
+    f = _cache_file(project)
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps({"journal": rec.get("journal"), "cached_at": _now(), "record": rec},
+                            indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    return f
+
+
+def cached(project: Path) -> dict | None:
+    try:
+        data = json.loads(_cache_file(project).read_text(encoding="utf-8"))
+    except (OSError, ValueError, SystemExit):
+        return None
+    return data if isinstance(data, dict) and isinstance(data.get("record"), dict) else None
+
+
+def use_cache(project: Path) -> dict:
+    """Start this paper's portal record from the user-level cache of the same journal."""
+    from . import journalepoch
+    c = cached(project)
+    if not c:
+        raise ValueError("没有这本期刊的投稿系统缓存（只有读取过一次投稿系统后才有）")
+    rec = dict(c["record"], journal_epoch=journalepoch.number(project),
+               journal=journalepoch.target_name(project), from_cache=c.get("cached_at"),
+               note="From the user-level cache of an earlier paper to this journal (dated): "
+                    "check it against the current submission system before relying on it.")
+    p = Path(project) / REL
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(rec, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    return rec
+
+
+def reconcile_zh(project: Path) -> list[str]:
+    """Every difference between the portal record and the journal fields, in Chinese."""
+    from . import journalspec, layout
+    rec = current(project)
+    if not rec:
+        c = cached(project)
+        return (["尚未读取投稿系统。" + (f"已有 {str(c.get('cached_at'))[:10]} 读取的同一期刊缓存："
+                                     "wf portal use-cache（仍须与当前系统核对）。" if c else "")
+                 + "用户不让读取时，投稿包文件夹的 UPLOAD_LIST.md 列出上传时要核对的事项。"])
+    target = journalspec.load(project)
+    out = [RULE_ZH]
+    place = layout.title_page_placement(target, project)
+    if rec.get("title_page_slot") is False and place in ("separate", "both") \
+            and not journalspec.blinded(target):
+        out.append(f"  - 差异：投稿系统没有题名页上传项，但 title_page.placement = {place} -> 改为 "
+                   "in_manuscript（题名页放在正文首页），并从 required_uploads 删去单独题名页")
+    for p in problems(project):
+        m = re.search(r"requires '([^']+)' \(([^)]*)\)", p)
+        if m:
+            out.append(f"  - 差异：投稿系统要求上传“{m.group(1)}”（{m.group(2)}），target_journal.json "
+                       "required_uploads 未列出 -> 补上（用户在系统中填写的项标 portal: true）")
+    for x in rec.get("file_limits") or []:
+        out.append(f"  - 核对：投稿系统文件限制“{x['text'][:80]}”（{x['line']}）-> 与 figure.formats/"
+                   "max_mb 及上传文件格式一致")
+    if len(out) == 1:
+        out.append("  - 投稿系统与当前期刊设置没有发现差异。")
+    out.append("有差异时：在展示层修订轮中改 target_journal.json/期刊副本，然后 wf rebuild；用户投稿后"
+               "反馈的差异同样用 wf portal ingest + 展示层修订轮处理。")
     return out
 
 

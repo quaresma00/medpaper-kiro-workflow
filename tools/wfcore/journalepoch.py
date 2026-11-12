@@ -305,7 +305,7 @@ def _wf_layer(project: Path, archive: Path, since: float | None, epoch: int,
 
 
 def switch(project: Path, pipe, st, to: str, confirm_old: str, why: str,
-           outcome: str = "rejected") -> list[str]:
+           outcome: str = "rejected", repackage: bool = False) -> list[str]:
     """Archive the whole journal layer, loop to S20 and start a new journal epoch."""
     from . import revision, scifreeze
     project = Path(project)
@@ -383,7 +383,8 @@ def switch(project: Path, pipe, st, to: str, confirm_old: str, why: str,
     prev.update(ended_at=now, outcome=outcome, why=why, archive=rel_archive)
     data["epochs"].append({"epoch": new_no, "journal": to, "started_at": now, "previous": old,
                            "gate_set": engine, "carried": carried,
-                           "restore": {"items": items, "answer": None}})
+                           "restore": {"items": items, "answer": None},
+                           **({"repackage": True} if repackage else {})})
     _save(project, data)
     # 1.22.0 (U1): journal-independent user decisions carry over; journal-dependent ones are
     # archived with the old epoch; the new journal is the user's decision (the switch words).
@@ -416,6 +417,11 @@ def switch(project: Path, pipe, st, to: str, confirm_old: str, why: str,
                      "restore --answer restore|keep --why \"用户原话\"`）：")
         lines += [f"  - {it['id']} -> {it['to'] or 'supplementary'}" if it["kind"] == "display_move"
                   else f"  - {it['file']} 的期刊阶段改动" for it in items]
+    if repackage:  # 1.22.0 (J5): science frozen - repackage fast path
+        lines += ["快速重打包（--repackage，科学内容已冻结）：S21 沿用已记录的事实（不再询问）；S22 只改与"
+                  "期刊有关的内容；S23 构建 + 合规矩阵；S24 一条确认消息（含投稿系统核对）；S25 一轮以合规为主"
+                  "的审计（期刊要求、旧刊痕迹、指南条目；不重审科学内容）。额外的投稿包审阅可选，不是门禁。",
+                  "新期刊仍须：重新检索并导入投稿指南（浏览器）、`wf journal diff` 差异清单、投稿系统核对。"]
     lines += ["旧刊短名单/后备梯队：`wf journal shortlist`（只作起点，须用新证据重新核实）。",
               "新对话中：wf status -> wf journal lookup --issn <ISSN> -> 被拦截时 wf guidelines "
               "ingest --from <文件> --url <官方URL> -> 写 S20 文件（含要求清单）-> open-variant "

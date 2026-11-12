@@ -14,7 +14,7 @@
 
 [meta]
 name = "medpaper"
-version = "1.21.0"
+version = "1.22.0"
 schema = 1
 description = "Medical/clinical research pipeline: idea -> feasibility -> data -> analysis -> artifacts -> manuscript -> submission package."
 
@@ -1010,6 +1010,14 @@ since = "1.17.0"
 [[stage.gate]]
 check = "guideline_requirements_mapped"
 since = "1.18.0"
+# 1.22.0 (J6/J7): nothing of the previous journal left in the journal layer; the difference
+# list against the previous journal (or engine defaults) is written and shown to the user once.
+[[stage.gate]]
+check = "journal_traces_clean"
+since = "1.22.0"
+[[stage.gate]]
+check = "journal_difference_listed"
+since = "1.22.0"
 [[stage.gate]]
 check = "docx_style_config"
 # 1.10.0: re-check the display count against this journal before any further writing.
@@ -1185,6 +1193,9 @@ since = "1.19.0"
 [[stage.gate]]
 check = "portal_requirements_applied"
 since = "1.21.0"
+[[stage.gate]]
+check = "journal_traces_clean"
+since = "1.22.0"
 # 1.20.0 (V3/V8): visible display text after the journal re-render (inventory recomputed).
 [[stage.gate]]
 check = "display_text_resolved"

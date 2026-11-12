@@ -1253,7 +1253,7 @@ def place_abbreviations(text: str, mode: str) -> str:
     """1.15.0 (E6): the abbreviation list is a section of its own directly after the Keywords
     line ('after_keywords'), or absent ('none'); never inside Declarations. Tables and figures
     keep defining their own abbreviations."""
-    if mode not in ("none", "after_keywords"):
+    if mode not in ("none", "after_keywords", "after_conclusions"):
         return text
     m = ABBREV_HEAD_RE.search(text)
     if not m:
@@ -1266,6 +1266,15 @@ def place_abbreviations(text: str, mode: str) -> str:
     if mode == "none" or not block:
         return text
     section = f"# Abbreviations\n\n{block}\n"
+    if mode == "after_conclusions":
+        # 1.22.0 (J1): after the Conclusion(s) section, before the declarations/back matter.
+        con = re.search(r"(?mi)^#\s+conclusions?\s*$", text)
+        nxt = re.compile(r"(?m)^#\s").search(text, con.end()) if con else None
+        if con is None:  # no Conclusions heading: before the first back-matter heading
+            nxt = re.search(r"(?mi)^#\s+(?:declarations|statements and declarations|"
+                            r"acknowledge?ments|funding|references)\b.*$", text)
+        pos = nxt.start() if nxt else len(text)
+        return text[:pos].rstrip() + "\n\n" + section + "\n" + text[pos:].lstrip("\n")
     kw = re.search(r"(?mi)^Keywords\s*:.*$", text)
     if kw:
         return text[:kw.end()] + "\n\n" + section + "\n" + text[kw.end():].lstrip("\n")
@@ -1341,6 +1350,18 @@ def _insert_at_citation(head: str, label_re: str, block: str) -> str:
 def _display_re(word: str, num: str) -> str:
     words = r"(?:Figures?|Figs?\.?)" if word == "figure" else r"Tables?"
     return rf"\b{words}\s+(?:\d+\s*(?:,|and|&|-|\u2013)\s*)*{re.escape(num)}(?!\d)(?!\.\d)"
+
+
+_SECT_RE = re.compile(r"```\{=openxml\}\n<w:p><w:pPr><w:sectPr>.*?</w:sectPr></w:pPr></w:p>\n```",
+                      re.S)
+
+
+def flow_without_breaks(text: str) -> str:
+    """1.22.0 (J1): page_breaks none - no hard page break and no next-page section break
+    anywhere; title page, tables and legends flow."""
+    text = text.replace(PAGE_BREAK_MD, "")
+    text = _SECT_RE.sub("", text)
+    return re.sub(r"\n{3,}", "\n\n", text)
 
 
 def prepare_source(kind: str, inputs: list[Path], project: Path, workdir: Path,
@@ -1443,6 +1464,14 @@ def prepare_source(kind: str, inputs: list[Path], project: Path, workdir: Path,
                 for e in plan.get("main_tables", []):
                     md, orientation = _table_block(project, e, caps.get(
                         docxaudit.canon_figure_id(str(e.get("id", ""))), ""), style, overrides)
+                    if orientation == "landscape" and journalspec.page_breaks(target) == "none":
+                        # 1.22.0 (J1): no page breaks -> no landscape section; reported.
+                        print(f"page_breaks none: {e.get('id')} would need a landscape page; built "
+                              "portrait in the flowing text (shorten its columns or move it to "
+                              "the supplement)", file=sys.stderr)
+                        md, orientation = _table_block(project, e, caps.get(
+                            docxaudit.canon_figure_id(str(e.get("id", ""))), ""), style,
+                            {**overrides, docxaudit.canon_figure_id(str(e.get("id", ""))): "portrait"})
                     if tab_place == "in_text":
                         num = re.sub(r"(?i)^\s*table\s*", "", str(e.get("id", ""))).strip()
                         head = _insert_at_citation(head, _display_re("table", num), "\n\n".join(
@@ -1452,6 +1481,8 @@ def prepare_source(kind: str, inputs: list[Path], project: Path, workdir: Path,
                 if tab_place != "in_text":
                     head = head.rstrip() + "\n\n" + "\n\n".join(parts) + "\n\n"
             text = head + legends
+        if journalspec.page_breaks(target) == "none":
+            text = flow_without_breaks(text)
     else:
         text = _clean_pipeline_code(text)
         if target:

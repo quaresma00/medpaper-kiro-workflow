@@ -70,7 +70,9 @@ BUILDER_FIELDS = ("main_text_headings", "keywords.separator", "legend_style", "r
                   "number_format",
                   # 1.19.0 (M1/M2/M4): layout placement and supplementary file naming
                   "title_page.placement", "figures.placement", "figures.also_separate",
-                  "tables.placement", "supplementary_file_pattern")
+                  "tables.placement", "supplementary_file_pattern",
+                  # 1.22.0 (J1): no hard page breaks
+                  "page_breaks")
 
 
 def _json(path: Path):
@@ -282,3 +284,66 @@ def problems(project: Path) -> tuple[list[str], list[str]]:
             warns.append(f)
     return out, (["typed field(s) without a requirement source (fallback, check the guide): "
                   + ", ".join(warns)] if warns else [])
+
+
+# 1.22.0 (J2): a guide sentence that sends the reader to another page for required rules
+# ("see our artwork guidelines", "refer to the editorial policies", an article-type page, with
+# or without a URL) must be ingested (`wf guidelines ingest --append`) or marked n.a. with a
+# reason in guideline_requirements.json "linked_pages": [{"lines": "L0012", "ingested":
+# "<appended page URL>"} | {"lines": "L0040", "reason": "applies to Review articles only"}].
+LINK_RE = re.compile(
+    r"(?i)(?:\b(?:see|refer(?:ring)? to|consult|follow|in accordance with|according to|"
+    r"as (?:described|detailed|outlined|set out) (?:in|on)|available (?:at|on|from|in)|"
+    r"found (?:at|on|in)|details? (?:at|on|in)|more information)\b[^.;]{0,90}?\b(?:guidelines?|"
+    r"guide|instructions|polic(?:y|ies)|page|section|website|requirements|checklist|"
+    r"information|criteria|standards?)\b|https?://\S+)")
+_URL_RE = re.compile(r"https?://[^\s)>\]\"']+")
+
+
+def linked_lines(lines: dict[int, str]) -> list[int]:
+    """Guide lines that point to another page for rules (J2)."""
+    return [n for n, text in sorted(lines.items()) if LINK_RE.search(text)]
+
+
+def linked_problems(project: Path) -> list[str]:
+    """Referral lines neither ingested as an appended page nor marked n.a. with a reason."""
+    from . import guideingest, journalepoch
+    project = Path(project)
+    lines = guideingest.source_lines(project)
+    if not lines:
+        return []
+    data = load(project)
+    appended = {str(e.get("url", "")).rstrip("/").casefold()
+                for e in guideingest.entries(project, "guidelines", journalepoch.number(project))
+                if e.get("append")}
+    covered: set[int] = set()
+    out = []
+    for e in data.get("linked_pages") or []:
+        if not isinstance(e, dict):
+            out.append(f"linked_pages entry {e!r} is not an object")
+            continue
+        nums = line_numbers(e.get("lines"))
+        url = str(e.get("ingested") or "").rstrip("/").casefold()
+        if not nums:
+            out.append(f"linked_pages entry {e!r}: needs lines")
+            continue
+        if url:
+            if url not in appended:
+                out.append(f"linked_pages {_ranges(nums)}: {e.get('ingested')} is not an appended "
+                           "page of this epoch (wf guidelines ingest --from <capture> --url <URL> "
+                           "--append)")
+                continue
+        elif len(str(e.get("reason", "")).strip()) < 8:
+            out.append(f"linked_pages {_ranges(nums)}: give the ingested page URL or an n.a. reason")
+            continue
+        covered |= set(nums)
+    for n in linked_lines(lines):
+        if n in covered:
+            continue
+        m = _URL_RE.search(lines[n])
+        if m and m.group(0).rstrip("/.").casefold() in {u.rstrip(".") for u in appended}:
+            continue  # the linked URL itself was ingested with --append
+        out.append(f"L{n:04d} refers to another page for rules (\"{norm(lines[n])[:90]}\"): "
+                   "ingest it (browser, `wf guidelines ingest --append`) or mark it in "
+                   "linked_pages with an n.a. reason")
+    return out

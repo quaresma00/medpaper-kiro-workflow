@@ -396,9 +396,16 @@ def abbreviation_list(target: dict, project: Path | None = None) -> str:
     """'none' | 'after_keywords' (default when the journal is silent) | 'keep' (a paper
     pinned before 1.15.0). Never inside Declarations."""
     raw = str(target.get("abbreviation_list") or "").strip().casefold()
-    if raw in ("none", "after_keywords"):
+    if raw in ("none", "after_keywords", "after_conclusions"):  # 1.22.0 (J1): after_conclusions
         return raw
     return "after_keywords" if since_1150(project) else "keep"
+
+
+def page_breaks(target: dict) -> str:
+    """1.22.0 (J1): 'none' when the guide forbids hard page breaks (title page, tables and
+    legends then flow; no landscape table sections), else 'allowed' (default)."""
+    raw = str((target or {}).get("page_breaks") or "").strip().casefold()
+    return "none" if raw == "none" else "allowed"
 
 
 def reference_rules(target: dict, project: Path | None = None) -> dict:

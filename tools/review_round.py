@@ -191,6 +191,12 @@ def _main() -> int:
                                       f"review round {rnd['id']}: user confirmed version "
                                       f"{rnd['confirmed_version'][:12]}: \"{rnd['user_words']}\"")
                 print(f"{rnd['id']}: confirmed; {cfg['decision']}={cfg['value']} recorded")
+                if scope == "package":  # 1.22.0 (J4): read-only copy named by journal and date
+                    from wfcore import packagefolders
+                    folder, _changed = packagefolders.create_or_refresh(project, "S24")
+                    state.event("package_folder", folder.relative_to(project).as_posix())
+                    state.save()
+                    print("\n".join(packagefolders.summary_zh(project)))
             else:
                 print(f"{rnd['id']}: user wants another round; run start again (--delta is fine)")
             return 0

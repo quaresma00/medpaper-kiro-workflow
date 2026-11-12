@@ -332,7 +332,9 @@ def run_portal(tmp: Path, record, section) -> None:
     s24 = (ROOT / "pipeline/stages/S24_package_human_review.md").read_text(encoding="utf-8")
     record("B5 the cards say: only when the user asks, read-only, stop before the final "
            "submit/approve/build-PDF step, never store credentials",
-           "wf portal ingest" in s24 and "Only if the user asks" in s24 and "submit/approve/build-PDF" in det
+           # 1.22.0 (J3): reading the portal is a standard S24 question, asked once
+           "wf portal ingest" in s24 and "ask ONCE whether to read it" in s24
+           and "submit/approve/build-PDF" in det
            and "never store credentials" in det and len(s24) <= registry.CARD_MAX_CHARS)
 
 
@@ -458,7 +460,7 @@ def run_release(tmp: Path, record, section) -> None:
     cards = {c.stem: len(c.read_text(encoding="utf-8")) for c in (ROOT / "pipeline/stages").glob("S*.md")}
     record("R pipeline 1.21.0; a 1.20.0 paper gets one 1.21.0 event and stays pinned (no paper "
            "file touched); the three new gates carry since 1.21.0; every card <= limit",
-           registry.load().meta.get("version") == "1.21.0" and len(notes) == 1
+           registry.load().meta.get("version") in ("1.21.0", "1.22.0") and len(notes) == 1
            and st.engine_pin == "1.20.0" and before == after
            and all(gates[k].get("since") == "1.21.0" for k in (
                ("S04_data", "web_captures_traced"), ("S20_journal", "indexing_evidence_cited"),

@@ -73,6 +73,17 @@ manuscript instead of the subagent. If context runs out, say so.
 | S15 | `medpaper-deepreader` | One invocation per full text; save its notes yourself. |
 | S18, S19/S24 rounds, S25 | `medpaper-reviewer` | Give it only the bundle path `review_round.py start` prints and the neutral brief. It writes only `.wf/review_bundle/<round>/report.md`; `close` reads that file - never paraphrase findings. Confirmation is the exact sentence `我确认这一版`. |
 
+## Review loops and Kiro workflows (1.22.0)
+
+- `review_round.py start` / `package_review.py audit-start` print the exact subagent call;
+  run review rounds in the paper's main chat (a workflow step cannot start a subagent);
+  `close` reads the report.md the reviewer wrote. Nothing is relayed by hand.
+- Orchestrating with Kiro workflows: a user scope change -> `update_workflow`
+  replace_remaining (or end the skipped steps), never leave them pending; on abort write one
+  line: what was delivered, what was skipped. Before relaying a paused step's question,
+  check `wf decisions show` and the conversation; answer it when derivable and state the basis.
+- Before asking the user anything: `wf decisions show`; record answers with `wf decisions set`.
+
 ## Python and R
 
 `reference/language_policy.toml`: Python for acquisition, cleaning, xlsx tables, Word and

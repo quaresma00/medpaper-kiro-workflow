@@ -1,47 +1,45 @@
 # S24 - Review rounds on the submission package, then the user's confirmation
 
-Goal: improve the journal package in subagent review rounds, report each round once, and
-freeze the exact files when the user confirms with the exact sentence 我确认这一版.
-Details (presentation vs science, rework kinds, Word layout edits): `reference/stage_details/S24_package_human_review.md`.
+Goal: review rounds, a submission-system check, one report per round, and a freeze when
+the user confirms (我确认这一版). Details: `reference/stage_details/S24_package_human_review.md`.
 
 ## One round
 1. Review (after an S25 `REVISE`, the audit is this round's review: start with `--delta`).
-   If the user edited files, run `.\.venv\Scripts\python.exe tools/package_content.py verify` first.
+   User edited files? `.\.venv\Scripts\python.exe tools/package_content.py verify` first.
 ```
 .\.venv\Scripts\python.exe tools/review_round.py start --scope package
 ```
-   Give the `medpaper-reviewer` agent the printed bundle path and brief only; it writes its
-   report to `.wf/review_bundle/<round>/report.md` (could not write: save its reply,
-   `review_round.py ingest --from <file>`). Never paraphrase findings.
+   It prints the exact `medpaper-reviewer` call (bundle path + report path); fast mode or
+   `--repackage`: compliance only, no subagent. Never paraphrase findings.
 2. Fix on your own judgement. Journal copy, title page, cover letter and statements live in
    `08_submission/manuscript/` and `08_submission/`; then ONE command rebuilds what the edit
-   affects (DOCX/PDF, audit, QC, capture, polish lint, rework check):
-   `.\.venv\Scripts\python.exe tools/wf.py rebuild --wait`.
+   affects: `.\.venv\Scripts\python.exe tools/wf.py rebuild --wait`.
    Science (07_manuscript, results, tables, figures, references) goes through
-   `tools/rework.py` (`preview`, then `batch --sealed --plan ...`, `status`, `check --quiet`,
-   `mark`, `close`). Science = changed analysis/data/results, a changed reported value or
-   an untraceable new number; everything else is presentation (checks only, no S19 return;
-   show the user each new number with its source). An S19 return needs 我确认回退. 1.14.0: wording that may change meaning (negation, causal, hedging,
-   direction, limitation, group/time terms) is MEANING_CHECK: ONE meaning bundle per round,
-   only new sentence pairs; run `medpaper-reviewer` on it. 'meaning changed' is science
-   unless the author overrides it (`rework.py meaning-decide --pair <id|hash> --verdict
-   unchanged --words "<author's words>"`).
+   `tools/rework.py` (`preview`, `batch --sealed --plan ...`, `check --quiet`, `mark`,
+   `close`): changed analysis/data/results, a changed reported value or an untraceable new
+   number; everything else is presentation (no S19 return). An S19 return needs 我确认回退.
+   Meaning-sensitive wording: ONE meaning bundle per round for `medpaper-reviewer`
+   (`rework.py meaning-decide --pair <id> --verdict unchanged --words "<author's words>"`).
 3. Close against the saved report; every F-numbered finding once; protected categories
-   changed or `author`; PREFERENCE items may close as one group (`--preference-group "<why>"`):
+   fixed (`changed`) or `author` + `--recommend <id> keep`; OPTIONAL items as one group
+   (`--preference-group "<why>"`):
 ```
 .\.venv\Scripts\python.exe tools/review_round.py close --scope package --findings critical=<n>,major=<n>,minor=<n> --finding <id> <category> <status> "<one line>" --change <file> "<one line>" --kept "<id>" "<why>"
 ```
-4. ONE message: findings by severity, changes, kept items, bundle paths
-   (`08_submission/bundle/`, previews), pending author decisions, and the Chinese compliance
-   summary `close` prints (`wf compliance summary`; every FAIL/无法评估/portal item and,
-   since 1.19.0, one line per layout decision with its basis). Only if the user asks: read
-   the submission system (read-only, user logged in): `wf portal ingest` (S23 details), then:
+4. Submission system (standard; decision key portal_check): ask ONCE whether to read it
+   now (user logs in in the browser). Yes: read only, `wf portal ingest` (or `wf portal
+   use-cache`), `wf portal reconcile`, apply every difference (presentation round +
+   `wf rebuild`). No: the package folder's portal to-do lists what to check.
+5. ONE message: findings, changes, kept items, bundle paths, the block `close` prints, the
+   compliance summary (`wf compliance summary`), portal differences. End with:
    > 本轮审阅与修改已完成。需要再审一轮请直接说明；确认当前版本请回复：我确认这一版
-5. Record the answer:
+6. Record the answer (equivalent sentences with 确认 + 这一版/此版/本版 also count):
 ```
 .\.venv\Scripts\python.exe tools/review_round.py decide another_round --scope package --words "<user's words>"
 .\.venv\Scripts\python.exe tools/review_round.py decide no_further_review --scope package --words "我确认这一版"
 ```
+   Confirmation copies the upload set read-only to
+   `submission_packages/<Journal_ISO_abbreviation>_<YYYY-MM-DD>/`; print that path.
 
 ## Freeze the package
 ```
@@ -54,10 +52,10 @@ Details (presentation vs science, rework kinds, Word layout edits): `reference/s
 
 ## Gate
 review round approved, findings closed, explicit confirmation, revision rounds closed,
-package content matches baseline, bundle/DOCX/checklist (WARN never blocks), freeze intact.
-Never invent user-owned facts. Classify first (`rework.py check`), then rebuild; recapture
-(`package_content.py capture --replace`) only inside a round that reopened S23 for content,
-never to bless drift.
+package content matches baseline, bundle/DOCX/checklist, freeze intact. Never invent
+user-owned facts. Classify first (`rework.py check`), then rebuild; recapture
+(`package_content.py capture --replace`) only inside a round that reopened S23 for content.
+After submission, differences the user reports: `wf portal ingest` + a presentation round.
 
 ## Close
 ```

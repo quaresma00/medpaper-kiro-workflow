@@ -1,5 +1,25 @@
 # S24 - Review rounds on the submission package, then the user's confirmation - details
 
+> 1.22.0. (J3) Portal reconciliation is a standard step before the confirmation: ask once
+> (recorded as decision `portal_check`) whether to read the submission system now; the user
+> logs in in the browser window; read only (never fill, upload, submit, approve or build the
+> PDF; never store credentials); `wf portal ingest --from <capture> --url <URL>` (`--append`
+> for further steps) or `wf portal use-cache` (dated user-level cache of an earlier paper to
+> the same journal, `~/.medpaper/portal_cache/`); `wf portal reconcile` lists every
+> difference in Chinese - the portal wins for upload items, required fields, file types and
+> sizes; the guideline wins for manuscript formatting unless the portal states otherwise.
+> Apply them in a presentation round + `wf rebuild`. Declined: the package folder's
+> UPLOAD_LIST.md carries the portal to-do. Differences the user reports after submitting:
+> `wf portal ingest` + a presentation round. (J4) `review_round.py decide
+> no_further_review --scope package` copies the confirmed upload set read-only to
+> `submission_packages/<ISO abbreviation or title>_<YYYY-MM-DD>/` (ASCII; `_v2`, `_v3` on
+> collision; one folder per journal epoch, refreshed at S25 PASS; earlier journals' folders
+> are kept, never reused, hidden from agent discovery). (U2/U3) Protected findings are fixed
+> by default; to keep one, close it `author` with `--recommend <id> keep`; all are asked in
+> ONE message; "按你的建议" -> `review_round.py author all --scope package --words
+> "按你的建议"`. Confirmation: 我确认这一版, or a sentence with 确认 + 这一版/此版/本版/
+> 这个版本, or "I confirm this version"; OK/可以/好的/没问题/无需审阅 never count.
+
 > 1.15.0 supersedes older wording below where they differ: after any edit run `wf rebuild
 > --wait`. Meaning checks compare the last confirmed copy with the current one, per sentence
 > pair, in ONE bundle per round; the author may override any pair (also a reviewer's

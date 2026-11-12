@@ -91,7 +91,7 @@ def explicit(target: dict, which: str) -> str | None:
         return raw or None
     if which == "abbreviations":
         raw = str(target.get("abbreviation_list") or "").strip().casefold()
-        return raw if raw in ("none", "after_keywords") else None
+        return raw if raw in ("none", "after_keywords", "after_conclusions") else None
     key, allowed = {"title_page": ("title_page", TITLE_PAGE), "figures": ("figures", FIGURES),
                     "tables": ("tables", TABLES)}[which]
     raw = str(_block(target, key).get("placement") or "").strip().casefold()
@@ -320,6 +320,7 @@ ZH = {
                "in_text": "表格放在正文首次引用处附近",
                "none": "表格只作为单独文件上传（word_tables=false）"},
     "abbreviations": {"after_keywords": "缩略语表放在关键词之后", "none": "不设缩略语表",
+                      "after_conclusions": "缩略语表放在结论之后、声明之前",
                       "keep": "缩略语表保持原位置（旧版设置）"},
 }
 LABEL_ZH = {"title_page": "题名页位置", "figures": "图片位置", "tables": "表格位置",
