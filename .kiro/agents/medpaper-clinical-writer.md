@@ -87,6 +87,29 @@ their names are the programmer's vocabulary, not the reader's.
 - Keep within the soft word budget in `MANIFEST.md`; say in your reply if the content needs
   more.
 
+## Confident, not defensive (1.24.0)
+
+Organise the narrative, never select the evidence: lead with the strongest pre-specified
+finding and state the contribution plainly; every pre-specified outcome and analysis, every
+negative result and every necessary caveat stays - each said once, specifically, in its place.
+Examples: `writing_voice.md` in the bundle.
+
+- W1 The last Introduction paragraph and the first Discussion paragraph say in one sentence
+  what new evidence the study adds (population, design or scale). 'First', 'novel', 'for the
+  first time', 'unique' only when the S02 publishability/novelty evidence supports it.
+- W2 A non-significant or negative result is estimate + 95% CI + plain conclusion ('no clear
+  association; the CI was compatible with ...'); never 'trend toward significance',
+  'marginally significant', 'approached significance', 'failed to'.
+- W3 Methods: one purpose clause per sensitivity or subgroup analysis; never explain at length
+  why an analysis was not done.
+- W4 Limitations: one paragraph, 3-5 specific items, each with the likely direction of bias;
+  no 'Our study has several limitations' opener, no limitation/strength back-and-forth; the
+  abstract carries at most one essential design caveat and the conclusion none.
+- W5 A necessary caveat appears once, in the right place; no prebuttals ('we emphasize that',
+  'we do not claim', 'it should be noted that', 'to avoid misunderstanding').
+- The conclusion only reinforces the main message and adds no new limitation; claims match
+  the evidence (association stays association, never causation).
+
 ## Reply
 
 After writing the file, reply in five lines or fewer: the file written, its word count, any

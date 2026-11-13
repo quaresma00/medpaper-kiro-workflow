@@ -52,6 +52,18 @@ RUBRIC = """Rubric: a clinician who never saw the code understands every sentenc
   plays a crucial role, not only ... but also); plain verbs; varied, mostly short sentences
   (about 15-25 words); continuous paragraphs, no bullet lists.
 - Abbreviations defined at first use; the clinical labels of the display dictionary.
+- Defensive writing (1.24.0): organise the narrative, never select the evidence.
+  E1 remove prebuttals ('we emphasize that', 'we do not claim', 'it should be noted that'),
+  'for a fair comparison', empty 'Taken together, these findings demonstrate' summaries and
+  self-weakening adverbs (unfortunately, merely, disappointingly).
+  E2 one caveat per claim; a repeated caveat stays only in the limitations paragraph.
+  E3 remove sentence-final ', highlighting/underscoring/emphasising/showcasing ...' tails;
+  'serves as'/'stands as' -> 'is'; one name for the same population; reports, cases and
+  patients are different analysis units, never merged.
+  E4 before deleting ask 'would removing it mislead a reader?'; never delete the only causal,
+  signal or design caveat, a pre-specified outcome or a negative result; keep normal
+  transitions with a citation ('Prior studies have shown [@key]', 'Moreover', 'In contrast');
+  'trend toward significance' / 'marginally significant' -> estimate + CI + plain conclusion.
 - NEVER change a number, a citation [@key] or a table/figure reference; never add a claim."""
 
 
@@ -161,8 +173,24 @@ def build_edit(project: Path, section: str) -> Path:
     if section in LINT_EXEMPT:
         manifest.append("- Supplementary Methods may keep necessary implementation detail, "
                         "written as plain sentences.")
+    voice_ref = writing_voice_file()
+    if voice_ref is not None:  # 1.24.0 (C): the adapted rules with examples
+        shutil.copyfile(voice_ref, out / "writing_voice.md")
+        manifest += ["", "Also read writing_voice.md (confident, not defensive: examples)."]
+    hits = warning_hits(project, section, text)
+    if hits:  # 1.24.0 (B4)
+        manifest += ["", "## Warning-level findings in the draft (fix each, unless the keep-list "
+                     "test says keep: would removing it mislead a reader?)", ""]
+        manifest += [f"- {h}" for h in hits[:30]]
     (out / "MANIFEST.md").write_text("\n".join(manifest) + "\n", encoding="utf-8")
     return out
+
+
+def writing_voice_file() -> Path | None:
+    """reference/writing_voice.md (1.24.0), or None when the engine copy lacks it."""
+    from . import paths
+    p = paths.repo_root() / "reference" / "writing_voice.md"
+    return p if p.is_file() else None
 
 
 def _polish_module():
@@ -184,12 +212,26 @@ def language_problems(project: Path, section: str, text: str) -> list[str]:
             out.append(f"engineering '{hit}' ({term}) -> {sug}")
     try:
         pol = _polish_module()
-        for pat, label in pol.AI_TIER_A:
+        from . import voice
+        table = list(pol.AI_TIER_A)
+        if voice.since_1240_project(project, SECTIONS.get(section, ("",))[0]):
+            table += pol.SPIN_TIER_A  # 1.24.0 (B1): spin blocks for papers on 1.24.0+
+        for pat, label in table:
             if re.search(pat, text, re.I):
                 out.append(f"AI phrasing '{label}'")
     except Exception:  # noqa: BLE001 - the engineering lint above still runs
         pass
     return out
+
+
+def warning_hits(project: Path, section: str, text: str) -> list[str]:
+    """1.24.0 (B4): warning-level hits (tier B, defensive writing) - listed, never blocking."""
+    try:
+        pol = _polish_module()
+        return pol.voice_warnings(SECTIONS[section][1], text, Path(project),
+                                  SECTIONS[section][0])
+    except Exception:  # noqa: BLE001
+        return []
 
 
 def fact_problems(before: str, after: str, rel: str = "") -> list[str]:

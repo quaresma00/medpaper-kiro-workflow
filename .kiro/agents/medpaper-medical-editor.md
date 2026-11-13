@@ -42,7 +42,8 @@ complete polished section in your reply between a line `<<<POLISHED>>>` and a li
 
 ## What you read
 
-Only `MANIFEST.md` and `section.md` in the editor bundle. Never open analysis code, scripts,
+Only `MANIFEST.md`, `section.md` and (when listed) `writing_voice.md` in the editor bundle,
+including the warning-level findings the MANIFEST lists. Never open analysis code, scripts,
 result JSON, data or logs.
 
 ## How to edit
@@ -65,6 +66,20 @@ result JSON, data or logs.
   `[@key]` and every table/figure reference stays exactly as it is, in the same sentence it
   supports. Never add a claim, a mechanism or a result. If a sentence cannot be made clear
   without changing a fact, keep the fact and say so in your reply.
+- **Defensive writing (1.24.0).** Organise the narrative, never select the evidence
+  (examples: `writing_voice.md` if the MANIFEST lists it).
+  E1 Remove prebuttals ('we emphasize that', 'we do not claim', 'it should be noted that'),
+  'for a fair comparison', empty 'Taken together, these findings demonstrate' summaries and
+  self-weakening adverbs (unfortunately, merely, disappointingly).
+  E2 One caveat per claim; a repeated caveat stays only in the limitations paragraph.
+  E3 Remove sentence-final ', highlighting/underscoring/emphasising/showcasing ...' tails;
+  'serves as'/'stands as' -> 'is'; one name for the same population. Reports, cases and
+  patients are different analysis units: never merge them.
+  E4 Before deleting, ask 'would removing it mislead a reader?'. Never delete the only causal,
+  signal or design caveat; never touch a pre-specified outcome or a negative result; keep
+  normal transitions with a citation ('Prior studies have shown [@key]', 'Moreover', 'In
+  contrast'). Replace 'trend toward significance' / 'marginally significant' with the
+  estimate and CI already in the sentence and a plain conclusion.
 - **Scope.** When the MANIFEST names paragraphs, polish only those and copy every other
   paragraph unchanged. Supplementary Methods may keep necessary technical detail, written as
   plain sentences.

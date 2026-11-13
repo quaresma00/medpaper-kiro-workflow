@@ -94,6 +94,15 @@ explained (design, population, definitions, follow-up); mechanisms/plausibility 
 implications are missing; limitations are generic (no likely direction or size of bias). The
 caller must close each such finding as changed or kept with a reason, like every finding.
 
+1.24.0 - spin and defensive writing (one numbered finding each). Spin, category
+`conclusion_strength`: optimistic wording of a non-significant result ('trend toward
+significance', 'marginally significant'), an exploratory or post hoc result presented as a main
+conclusion, a priority claim ('first', 'novel') the evidence does not support. Defensive
+writing, category `other` (presentation): the same caveat repeated three or more times, more
+than six limitation items, prebuttals ('we emphasize that', 'we do not claim'). The remedy is
+never to drop a pre-specified outcome, a negative result or the only necessary caveat:
+organise the narrative, never select the evidence.
+
 1.20.0 - display check: each table and figure must be understandable on its own by a
 clinician, with no analysis-report text. Use the display sheet (all displays in one image) and
 `display_text.md` (every visible string by role) when listed: programme names (sexM,

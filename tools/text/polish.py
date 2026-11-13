@@ -129,7 +129,83 @@ AI_TIER_B = [
      "has attracted increasing attention"),
     (r"\bin\s+recent\s+years\b", "in recent years"),
     (r"\bplays?\s+an\s+important\s+role\b", "plays an important role"),
+    # 1.24.0 (B2): warning-level de-AI and defensive-writing tells.
+    (r",\s+(?:highlighting|underscoring|emphasi[sz]ing|showcasing)\b",
+     "ing_tail (', highlighting ...': end the sentence or say it directly)"),
+    (r"\b(?:serves?|stands?)\s+as\b", "copula_avoidance ('serves as' -> 'is')"),
+    (r"\b(?:unfortunately|disappointingly|merely)\b|\bonly\s+marginally\b",
+     "self_weakening (state the fact without the adverb)"),
 ]
+
+# 1.24.0 (B1): optimistic wording of a non-significant result (spin). Tier A for papers on
+# 1.24.0+ (since SPIN_SINCE); a paper pinned earlier sees it as tier B until `wf migrate
+# --yes`. Write the estimate, its CI and a plain conclusion instead. 'P for trend', 'temporal
+# trend' and 'trend test' do not match: significance must follow.
+SPIN_SINCE = "1.24.0"
+SPIN_TIER_A = [
+    (r"\btrend(?:s|ed|ing)?\s+towards?\s+(?:statistical\s+)?significan\w*",
+     "spin_nonsignificant: trend toward significance"),
+    (r"\bmarginal(?:ly)?\s+(?:statistically\s+)?significan\w*",
+     "spin_nonsignificant: marginally significant"),
+    (r"\bapproach(?:es|ed|ing)?\s+(?:statistical\s+)?significance\b",
+     "spin_nonsignificant: approached significance"),
+    (r"\bborderline\s+(?:statistical(?:ly)?\s+)?significan\w*",
+     "spin_nonsignificant: borderline significance"),
+    (r"\bnearly\s+(?:statistically\s+)?significant\b",
+     "spin_nonsignificant: nearly significant"),
+]
+
+# 1.24.0 (B2): prebuttals - reported when the same phrase occurs twice or more, or once
+# outside the limitations paragraph.
+PREBUTTALS = [
+    (r"\bwe\s+(?:would\s+like\s+to\s+)?emphasi[sz]e\s+that\b", "we emphasize that"),
+    (r"\bwe\s+do\s+not\s+claim\b", "we do not claim"),
+    (r"\bto\s+avoid\s+(?:any\s+)?misunderstanding\b", "to avoid misunderstanding"),
+    (r"\bone\s+(?:might|may|could)\s+argue\b", "one might argue"),
+    (r"\bfor\s+a\s+fair\s+comparison\b", "for a fair comparison"),
+    (r"\bshould\s+be\s+interpreted\s+with\s+caution\b", "should be interpreted with caution"),
+]
+# 1.24.0 (B2): an attribution without a citation in the same sentence.
+VAGUE_ATTRIBUTION = re.compile(
+    r"\b(?:studies|research)\s+(?:have|has)\s+(?:shown|demonstrated|reported|suggested|found)\b|"
+    r"\bit\s+has\s+been\s+(?:reported|shown|suggested|demonstrated)\b|"
+    r"\bprevious\s+research\s+(?:suggests|has\s+shown|shows|indicates)\b|"
+    r"\bexperts\b|\bis\s+widely\s+(?:believed|accepted|thought)\b", re.I)
+SENT_CITE = re.compile(r"\[[^\]]*@[^\]]*\]|\[\d[\d,\s\u2013-]*\]|\(\s*[A-Z][^()]{0,60}\d{4}[a-z]?\s*\)|"
+                       r"\^\d|<sup>")
+# 1.24.0 (B3): repeated caveat motifs. Regexes ported from medsci-skills
+# (Aperivue/medsci-skills, skills/self-review/scripts/check_editorial_impression.py, MOTIFS;
+# MIT licence) with thanks, plus a residual-confounding family; counted per scope.
+CAVEAT_MOTIFS = {
+    "no_deployable_claim": re.compile(
+        r"no (?:deployable|deployment|clinical|practice|diagnostic) (?:claim|use|recommendation)|"
+        r"not (?:ready|intended|validated) for (?:clinical|deployment|practice)", re.I),
+    "not_generalizable": re.compile(r"not (?:be )?generaliz\w+|limited generaliz\w+", re.I),
+    "none_evaluated_here": re.compile(
+        r"(?:none|not|no \w+) (?:were |was |are |is )?evaluated (?:here|in this (?:study|work|analysis))|"
+        r"not (?:assessed|examined|tested) (?:here|in this (?:study|work))", re.I),
+    "no_causal": re.compile(r"no causal (?:claim|inference|relationship|conclusion|interpretation)|"
+                            r"cannot (?:establish|prove|infer) causa\w+", re.I),
+    "hypothesis_generating": re.compile(r"hypothesis[-\s]generating", re.I),
+    "interpret_with_caution": re.compile(
+        r"interpret\w* with caution|should be interpreted with caution|with caution", re.I),
+    "residual_confounding": re.compile(r"residual (?:or unmeasured )?confounding", re.I),
+    "single_center": re.compile(r"single[-\s](?:cent(?:er|re)|institution|site)", re.I),
+    "retrospective_design": re.compile(r"retrospective (?:design|nature|study|cohort)", re.I),
+    "preliminary": re.compile(r"\bpreliminary\b", re.I),
+}
+FACTUAL_MOTIFS = {"single_center", "retrospective_design"}  # design facts in Methods
+POPULATION_TERMS = {"patients": r"\bpatients?\b", "participants": r"\bparticipants?\b",
+                    "subjects": r"\bsubjects?\b(?!\s+to\b)", "individuals": r"\bindividuals?\b"}
+PRIORITY = re.compile(
+    r"\bfor\s+the\s+first\s+time\b|"
+    r"\b(?:the|a)\s+first\s+(?:study|report|analysis|investigation|description|evidence)\b|"
+    r"\bfirst\s+to\s+(?:report|show|describe|examine|investigate|evaluate|assess|demonstrate)\b|"
+    r"\bnovel\b(?!\s+(?:oral\s+)?anticoagulants?|\s+coronavirus)|\bunprecedented\b|"
+    r"\bunique\s+(?:study|contribution|insight|approach|opportunity|design|perspective|dataset|"
+    r"cohort|evidence|finding)s?\b|\b(?:is|are|was|were)\s+unique\b", re.I)
+ORDINALS = ("first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth",
+            "ninth", "tenth")
 
 # US -> UK spelling pairs. The linter reports drift, not a preference.
 SPELLING_PAIRS = [
@@ -281,11 +357,24 @@ def facts(text: str, rel: str = "") -> dict:
 # ===========================================================================
 # linters
 # ===========================================================================
-def lint_ai(rel: str, text: str, allow: dict) -> list[dict]:
-    """Line numbers refer to the file as written, so keep the original line breaks here."""
+def spin_blocking(project: Path | None = None, stage: str | None = None) -> bool:
+    """1.24.0 (B1): the spin rule blocks for a paper on 1.24.0+ (or outside a paper)."""
+    try:
+        from wfcore import voice
+        if project is None:
+            project = project_root()
+        return voice.since_1240_project(project, stage)
+    except (Exception, SystemExit):  # noqa: BLE001 - linting a file outside a paper
+        return True
+
+
+def lint_ai(rel: str, text: str, allow: dict, spin_block: bool = True) -> list[dict]:
+    """Line numbers refer to the file as written, so keep the original line breaks here.
+    1.24.0: spin_block=False reports SPIN_TIER_A as tier B (paper pinned before 1.24.0)."""
     out = []
     lines = body(text).splitlines()
-    for tier, table in (("A", AI_TIER_A), ("B", AI_TIER_B)):
+    for tier, table in (("A", AI_TIER_A), ("B", AI_TIER_B),
+                        ("A" if spin_block else "B", SPIN_TIER_A)):
         for pattern, label in table:
             if label.lower() in allow:
                 continue
@@ -399,6 +488,141 @@ def lint_structure(rel: str, text: str) -> list[dict]:
              f"{len(long_sents)} sentence(s) over 45 words, longest {max(len(s.split()) for s in long_sents)}",
              "advisory")
     return out
+
+
+SCOPE_NAMES = ("abstract", "introduction", "methods", "results", "discussion", "conclusion",
+               "conclusions")
+
+
+def voice_scopes(rel: str, text: str) -> list[tuple[str, str]]:
+    """(scope, raw text) pairs: the level-1 sections of full_manuscript.md, else the file."""
+    if Path(rel).name == "full_manuscript.md":
+        heads = list(re.finditer(r"(?m)^#\s+([^#\n].*)$", text))
+        out = []
+        for i, m in enumerate(heads):
+            end = heads[i + 1].start() if i + 1 < len(heads) else len(text)
+            name = m.group(1).strip().casefold()
+            name = next((s for s in SCOPE_NAMES if name.startswith(s)), "")
+            if name:
+                out.append(("discussion" if name.startswith("conclusion") else name,
+                            text[m.end():end]))
+        return out
+    stem = Path(rel).stem.casefold()
+    name = next((s for s in SCOPE_NAMES if stem.startswith(s)), stem)
+    return [(name, text)]
+
+
+def _paras(raw: str) -> list[str]:
+    return [re.sub(r"\s+", " ", p).strip()
+            for p in re.split(r"\n\s*\n", body(raw)) if p.strip()]
+
+
+def _sents(para: str) -> list[str]:
+    return [s for s in re.split(r"(?<=[.!?])\s+(?=[A-Z(\[])", para) if s.strip()]
+
+
+def _is_limitations(para: str) -> bool:
+    return bool(re.search(r"\blimitations?\b", para, re.I))
+
+
+def lint_voice(rel: str, text: str, novelty_clear: bool = False) -> list[dict]:
+    """1.24.0 (B2/B3): warning-level defensive-writing checks - prebuttals, attributions
+    without a citation, repeated caveats, population synonym cycling, the volume of the
+    limitations paragraph and unsupported priority claims. Never blocking: the fix is to say
+    each caveat once, in its place - never to drop a pre-specified outcome, a negative result
+    or the only necessary caveat."""
+    out = []
+
+    def flag(kind: str, detail: str) -> None:
+        out.append({"file": rel, "kind": kind, "detail": detail, "severity": "advisory"})
+
+    for scope, raw in voice_scopes(rel, text):
+        paras = _paras(raw)
+        lim = [p for p in paras if _is_limitations(p)] if scope == "discussion" else []
+        other = [p for p in paras if p not in lim]
+        joined, lim_text, other_text = " ".join(paras), " ".join(lim), " ".join(other)
+        for pat, label in PREBUTTALS:
+            n_all = len(re.findall(pat, joined, re.I))
+            n_out = len(re.findall(pat, other_text, re.I))
+            if n_all >= 2 or n_out:
+                where = (f"{n_out} outside the limitations paragraph" if n_out else
+                         "all in the limitations paragraph")
+                flag("defensive_prebuttal",
+                     f"{scope}: '{label}' x{n_all} ({where}) - state the caveat once, in the "
+                     "limitations paragraph, or delete the prebuttal")
+        for p in paras:
+            for s in _sents(p):
+                m = VAGUE_ATTRIBUTION.search(s)
+                if m and not SENT_CITE.search(s):
+                    flag("vague_attribution",
+                         f"{scope}: '{m.group(0)}' without a citation in the same sentence: "
+                         f"{s[:90]!r} - cite the studies or name the source")
+        for key, rx in CAVEAT_MOTIFS.items():
+            if key in FACTUAL_MOTIFS and scope == "methods":
+                continue
+            n = len(rx.findall(joined))
+            if lim and rx.search(lim_text):
+                n -= 1  # the first statement in the limitations paragraph is the right place
+            if n >= 3:
+                flag("caveat_repeat",
+                     f"{scope}: the caveat '{key.replace('_', ' ')}' is repeated {n} times "
+                     "(not counting its place in the limitations paragraph) - say it once, "
+                     "specifically")
+        syn_text = paras[-1] if scope == "introduction" and paras else joined
+        used = {t: len(re.findall(rx, syn_text, re.I)) for t, rx in POPULATION_TERMS.items()}
+        many = {t: n for t, n in used.items() if n >= 2}
+        if len(many) >= 3:
+            flag("synonym_cycling",
+                 f"{scope}: one population, several names ("
+                 + ", ".join(f"{t} x{n}" for t, n in many.items())
+                 + ") - use one term throughout (reports and cases are different units)")
+        if scope == "discussion" and lim:
+            low = lim_text.lower()
+            n_ord = sum(1 for o in ORDINALS if re.search(rf"(?:^|[\s(,;]){o}(?:ly)?\s*,", low))
+            n_ord += len(re.findall(r"\banother\s+limitation\b", low))
+            n_enum = len(set(re.findall(r"\((\d{1,2})\)", lim_text)))
+            n_items = max(n_ord, n_enum)
+            hedges = sum(1 for s in _sents(lim_text)
+                         if re.search(r"\b(?:however|nevertheless|nonetheless|although)\b", s, re.I)
+                         and re.search(r"\bstrengths?\b", s, re.I))
+            if n_items > 6:
+                flag("limitations_volume",
+                     f"discussion: {n_items} enumerated limitation items (> 6) - keep the 3-5 "
+                     "that matter, each with the likely direction of bias, in one paragraph")
+            if hedges >= 2:
+                flag("limitations_volume",
+                     f"discussion: {hedges} 'however ... strength' hedges in the limitations "
+                     "paragraph - state the limitations, then the strengths, without "
+                     "back-and-forth")
+        if scope not in ("methods", "results") and not novelty_clear:
+            hits = sorted({m.group(0).lower() for m in PRIORITY.finditer(joined)})
+            if hits:
+                flag("priority_claim",
+                     f"{scope}: priority claim ({', '.join(hits[:4])}) but the S02 "
+                     "publishability record does not show that no comparable prior study was "
+                     "found - say what the study adds (population, design, scale) instead")
+    return out
+
+
+def voice_warnings(rel: str, text: str, project: Path | None = None,
+                   stage: str | None = None) -> list[str]:
+    """1.24.0 (B4): one line per warning-level hit (tier B phrases incl. spin on a pinned
+    paper, and lint_voice) for the editor MANIFEST and `writer_bundle.py polished`."""
+    try:
+        allow = allowlist()
+    except (Exception, SystemExit):  # noqa: BLE001
+        allow = {}
+    novelty = False
+    try:
+        from wfcore import voice
+        novelty = voice.novelty_clear(project)
+    except Exception:  # noqa: BLE001
+        pass
+    lines = [f"tier B '{x['label']}' (line {x['line']}): {x['match']!r}"
+             for x in lint_ai(rel, text, allow, spin_blocking(project, stage))
+             if x["tier"] == "B"]
+    lines += [f"{x['kind']}: {x['detail']}" for x in lint_voice(rel, text, novelty)]
+    return lines
 
 
 def lint_style(rel: str, text: str) -> list[dict]:
@@ -701,9 +925,16 @@ def cmd_lint(args) -> int:
         return 1
     allow = allowlist()
 
-    ai, struct, style, read = [], [], [], []
+    ai, struct, style, read, voice = [], [], [], [], []
+    spin_block = spin_blocking(proj)
+    try:
+        from wfcore import voice as _voice
+        novelty = _voice.novelty_clear(proj)
+    except Exception:  # noqa: BLE001
+        novelty = False
     for rel, text in docs:
-        ai += lint_ai(rel, text, allow)
+        ai += lint_ai(rel, text, allow, spin_block)
+        voice += lint_voice(rel, text, novelty)  # 1.24.0: advisory
         struct += lint_structure(rel, text)
         style += lint_style(rel, text)
         read.append(readability(rel, text))
@@ -729,6 +960,7 @@ def cmd_lint(args) -> int:
         },
         "blocking_total": len(tier_a) + len(blocking_struct) + len(blocking_style),
         "ai_tells": ai, "structure": struct, "style": style, "readability": read,
+        "voice": voice,
         "allowlisted": sorted(allow),
     }
     if not args.file:
@@ -761,6 +993,8 @@ def cmd_lint(args) -> int:
           lambda x: f"[{x['severity']:<9}] {Path(x['file']).name}  {x['kind']}: {x['detail']}")
     block("STYLE / HOUSE CONSISTENCY", style,
           lambda x: f"[{x['severity']:<9}] {Path(x['file']).name}  {x['kind']}: {x['detail']}")
+    block("VOICE - defensive writing (advisory, 1.24.0; reference/writing_voice.md)", voice,
+          lambda x: f"{Path(x['file']).name}  {x['kind']}: {x['detail']}")
 
     print("\nREADABILITY (advisory)")
     print("-" * 21)

@@ -47,6 +47,8 @@ TARGETS = {"S08_methods": "07_manuscript/methods.md", "S09_results": "07_manuscr
            "S14_introduction": "07_manuscript/introduction.md",
            "S16_discussion": "07_manuscript/discussion.md",
            "S19_human_review": "07_manuscript/full_manuscript.md"}
+VOICE_STAGES = ("S08_methods", "S09_results", "S14_introduction", "S16_discussion",
+                "S17_assemble")  # 1.24.0: reference/writing_voice.md in the bundle
 BUDGET_KEYS = {"S14_introduction": "intro_words_max", "S16_discussion": "discussion_words_max"}
 STAT_WORDS = {
     "n": "number", "count": "number", "total": "total number", "events": "number of events",
@@ -590,6 +592,11 @@ def build(project: Path, stage: str, target: str | None = None) -> Path:
     ex_text = "\n\n".join(_read(p) for p in ex if p.is_file())
     if ex_text.strip():
         files["exemplars.md"] = clean(ex_text, names)
+    if stage in VOICE_STAGES:  # 1.24.0 (C): confident, not defensive - rules with examples
+        from wfcore import sectionpolish
+        ref = sectionpolish.writing_voice_file()
+        if ref is not None:
+            files["writing_voice.md"] = ref.read_text(encoding="utf-8")
     if (project / target).is_file():
         draft = clean(_read(project / target), names, terms, "draft")
         files["current_draft.md"] = strip_display_ids(draft) if discussion_stage else draft
@@ -687,6 +694,11 @@ def _polish_cli(project: Path, args) -> int:
         rec = sp.accept_polished(project, args.section, args.from_file)
         print(f"polished {args.section}: {rec['file']} = polished text {rec['polished_sha256'][:12]} "
               f"(numbers, citations and display references unchanged; language clean)")
+        rest = sp.warning_hits(project, args.section,
+                               (Path(project) / rec["file"]).read_text(encoding="utf-8"))
+        if rest:  # 1.24.0 (B4): one line, never blocking
+            print(f"warnings (not blocking, {len(rest)}): " + "; ".join(rest[:5])
+                  + ("; ..." if len(rest) > 5 else ""))
         return 0
     except (OSError, ValueError) as exc:
         print(f"writer bundle error: {exc}", file=sys.stderr)

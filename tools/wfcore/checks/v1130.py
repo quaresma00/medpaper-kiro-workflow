@@ -48,7 +48,9 @@ def section_language_clean(ctx: Ctx) -> Result:
         allow = pol.allowlist()
     except (Exception, SystemExit):  # noqa: BLE001 - no allowlist outside a paper
         allow = {}
-    ai = pol.lint_ai(rel, text, allow)
+    from .. import voice
+    # 1.24.0 (B1): spin blocks only for a paper on 1.24.0+; earlier pins see it as tier B.
+    ai = pol.lint_ai(rel, text, allow, voice.since_1240(ctx))
     struct = pol.lint_structure(rel, text)
     style = pol.lint_style(rel, text)
     eng_block, eng_warn = _file_hits(ctx, rel, text, clinical.allowlist(ctx.project))
@@ -59,6 +61,9 @@ def section_language_clean(ctx: Ctx) -> Result:
     warn += [f"{x['kind']}: {x['detail'][:100]}" for x in struct + style
              if x["kind"] not in SECTION_BLOCKING and x["severity"] == "blocking"]
     tier_b = sum(1 for x in ai if x["tier"] == "B")
+    # 1.24.0 (B2/B3): defensive-writing checks, warning level for every paper.
+    warn += [f"{x['kind']}: {x['detail'][:120]}"
+             for x in pol.lint_voice(rel, text, voice.novelty_clear(ctx.project))]
     from .. import layout
     if ctx.spec.get("discussion_checks") and layout.since_1190(ctx):
         # 1.19.0 (M3): the Discussion interprets; it does not restate the Results.
