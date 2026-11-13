@@ -2154,8 +2154,8 @@ def run_codex_integration() -> None:
                f"card must name `{agent}` so the work is not done in the main context")
 
     record("pipeline and skill versions agree",
-           pipe["meta"]["version"] == "1.23.0" and 'version: "2.7.0"' in skill,
-           f'pipeline={pipe["meta"]["version"]}, skill=2.7.0 (Kiro adapter revision)')
+           pipe["meta"]["version"] == "1.24.0" and 'version: "2.8.0"' in skill,
+           f'pipeline={pipe["meta"]["version"]}, skill=2.8.0 (Kiro adapter revision)')
     record("all 25 stage cards exist",
            len(pipe["stage"]) == 25 and
            all((ROOT / "pipeline" / s["card"]).is_file() for s in pipe["stage"]),
@@ -5194,7 +5194,7 @@ def run_v160(tmp: Path) -> None:
            any(g["check"] == "reader_review_coverage" for g in s18["gate"])
            and "review_round.py start --scope manuscript" in (ROOT / "pipeline/stages/S18_independent_review.md")
            .read_text(encoding="utf-8"))
-    record("pipeline version is 1.23.0", pipe.meta.get("version") == "1.23.0")
+    record("pipeline version is 1.24.0", pipe.meta.get("version") == "1.24.0")
 
 
 def run_v170(tmp: Path) -> None:
@@ -5899,6 +5899,8 @@ def main() -> int:
         selftest_v1220.run(tmp / "v1220_root", record, section)
         import selftest_v1230
         selftest_v1230.run(tmp / "v1230_root", record, section)
+        import selftest_v1240
+        selftest_v1240.run(tmp / "v1240_root", record, section)
         run_new_wiring()
         section("isolation")
         record("selftest did not touch the real papers root or user home",

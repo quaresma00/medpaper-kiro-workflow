@@ -19,6 +19,7 @@ and `reference/methods-structure.md`.
    statistics); implementation detail - parsing, matching rules, character handling, file
    formats, re-execution - goes to `07_manuscript/supplementary_methods.md` (prose only, no
    tables or rules) or nowhere. Clinical labels from the display dictionary only.
+   1.24.0: one purpose clause per sensitivity/subgroup analysis, no prebuttals (`reference/writing_voice.md`).
 5. 1.23.0: polish this section right after the draft, by an independent medical editor
    (medical register, de-AI, no engineering or data-processing narration - "duplicate reports
    were removed following the FDA-recommended approach" - prose not lists, abbreviations;

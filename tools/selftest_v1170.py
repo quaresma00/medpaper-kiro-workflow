@@ -207,7 +207,7 @@ def run_switch(tmp: Path, record, section) -> None:
     record("J3 the switch loops to S20, keeps the science pin and adopts the current gate set "
            "for S20-S25 (recorded as an event)",
            st.current == "S20_journal" and st.engine_pin == "1.16.0"
-           and st.gate_pin("S22_polish") in ("1.17.0", "1.18.0", "1.19.0", "1.20.0", "1.21.0", "1.22.0", "1.23.0")
+           and st.gate_pin("S22_polish") in ("1.17.0", "1.18.0", "1.19.0", "1.20.0", "1.21.0", "1.22.0", "1.23.0", "1.24.0")
            and st.gate_pin("S09_results") == "1.16.0"
            and any(e["kind"] == "journal_gate_set_adopted" for e in st.data["events"]),
            f"{st.current} {st.engine_pin} {st.data.get('journal_gate_pin')}")
@@ -767,7 +767,7 @@ def run_release(tmp: Path, record, section) -> None:
     sizes = {s.id: len((ROOT / "pipeline" / s.card).read_text(encoding="utf-8")) for s in pipe.stages}
     record("R pipeline 1.17.0; a 1.16.0 paper gets exactly one 1.17.0 event, stays pinned (gate pin "
            "unchanged without a journal switch) and no paper file changes; cards <= limit",
-           pipe.meta.get("version") in ("1.17.0", "1.18.0", "1.19.0", "1.20.0", "1.21.0", "1.22.0", "1.23.0") and len(notes) == 1 and st.engine_pin == "1.16.0"
+           pipe.meta.get("version") in ("1.17.0", "1.18.0", "1.19.0", "1.20.0", "1.21.0", "1.22.0", "1.23.0", "1.24.0") and len(notes) == 1 and st.engine_pin == "1.16.0"
            and st.gate_pin("S23_package") == "1.16.0" and before == after
            and max(sizes.values()) <= registry.CARD_MAX_CHARS, f"{len(notes)} {max(sizes.values())}")
 

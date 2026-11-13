@@ -2,7 +2,13 @@
 
 一套面向医学与临床研究的 Kiro 工作流。它把“研究想法”推进为经过数据、文献、统计结果、图表、人工复核和期刊规则共同校验的投稿包，而不是只让 AI 一次性写出一篇看似完整的论文。
 
-当前版本：`1.23.0`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE + R 4.3+
+当前版本：`1.24.0`　｜　流程：25 个阶段　｜　运行环境：Windows + Kiro IDE + R 4.3+
+
+## 1.24.0 变化（自信、不设防的临床写作）
+- **原则：组织叙事，不筛选证据**。以最强的预设主要发现开头，直说本研究新增了什么；预设结局和分析、阴性结果（估计值 + 95% CI + 直白结论）和必要的局限一项不少，每项只说一次。规则和例句见 `reference/writing_voice.md`（借鉴 Adkid-Zephyr/anti-defensive-writing-Skill 与 Worigin0314/academic-defensive-writing-auditor 的思路，均为 MIT；"只讲优势、换指标、重选主结果、删不利实验、不主动说明不足"属于 spin，不采用）。
+- **代理**：临床写作代理新增 W1–W5（贡献一句话、阴性结果写法、每项敏感性分析一句目的、局限一段 3–5 条并标偏倚方向、caveat 只说一次）；医学编辑新增 E1–E4（删除预先反驳和自我削弱词、删句尾 ", highlighting…"、同一人群一个称呼、删除前先问"去掉是否会误导读者"）；审稿代理新增 spin 与防御性写作检查。
+- **检查**：`polish.py` 拦截 "trend toward significance""marginally significant" 等 spin 措辞（since 1.24.0）；提示级检查预先反驳、无引用的"studies have shown"、同一 caveat 重复 ≥3 次、人群称呼轮换、局限超过 6 条或"局限—优点"对冲、无依据的"first/novel"。编辑包 MANIFEST 列出这些提示项。
+- **在途论文**：提示词、编辑规则、参考文件和提示级检查立即生效；spin 拦截在 `wf migrate --yes` 后生效；只记一条迁移事件，论文文件不改。1.24.0 之前写好的章节，需要时可用医学编辑重新润色（`writer_bundle.py edit --section <节>`）。
 
 ## 1.23.0 变化（写作前把关、医学语言）
 - **可发表性检查点**：S02/S04/S06 各记录一次结论（GO / CONDITIONAL / NO-GO）和可争取的文章类型，并立即用中文告诉用户；CONDITIONAL 或 NO-GO 时只问一个问题并附建议；S04 按 `reference/publishability.toml` 的设计下限核对实际数量；追加分析前先说明可能改变的结论和大致成本，收益低的建议跳过（`wf publishability`）。

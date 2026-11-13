@@ -175,6 +175,7 @@ class State:
             self._note_v1210(old_version, pipeline_version)
             self._note_v1220(old_version, pipeline_version)
             self._note_v1230(old_version, pipeline_version)
+            self._note_v1240(old_version, pipeline_version)
             self.save()
         return changed
 
@@ -322,6 +323,26 @@ class State:
                    "display_plan_benchmarked at S07, science_review_before_writing at S09, "
                    "section_polished at the writing stages, data_availability_verified at S21. "
                    "Paper files were not modified.")
+
+    def _note_v1240(self, old_version: str, new_version: str) -> None:
+        """1.24.0: one event; no file or stage is touched."""
+        if (version_tuple(old_version) >= (1, 24, 0) or version_tuple(new_version) < (1, 24, 0)
+                or self.data.get("v1240_migration_noted")):
+            return
+        self.data["v1240_migration_noted"] = True
+        self.event("requirements_changed",
+                   "1.24.0: applies now whenever a section is written, polished or rewritten - "
+                   "confident, non-defensive writing (organise the narrative, never select the "
+                   "evidence; reference/writing_voice.md in the writer and editor bundles), the "
+                   "clinical writer's W1-W5, the medical editor's E1-E4 and the reviewer's spin "
+                   "and defensive-writing findings; warning-level checks (prebuttals, ', "
+                   "highlighting' tails, 'serves as', self-weakening words, attributions without "
+                   "a citation, repeated caveats, population synonyms, limitations volume, "
+                   "unsupported priority claims). The blocking spin rule ('trend toward "
+                   "significance', 'marginally significant') applies only after `wf migrate "
+                   "--yes`; until then it warns. Sections written earlier can be re-polished "
+                   "with the medical editor (writer_bundle.py edit --section S). Paper files "
+                   "were not modified.")
 
     def _note_v1160(self, old_version: str, new_version: str) -> None:
         """1.16.0: one event; no file or stage is touched."""

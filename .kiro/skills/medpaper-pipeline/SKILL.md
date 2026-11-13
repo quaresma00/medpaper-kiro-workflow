@@ -3,7 +3,7 @@ name: medpaper-pipeline
 description: Drives a gated, resumable medical/clinical research paper pipeline from a research idea through feasibility, data acquisition, exploratory analysis, figure and table production, IMRAD writing, independent review, journal selection, de-AI polish and a Word submission package. Use whenever the task involves a medical research idea, a clinical manuscript, a research protocol, literature retrieval via PubMed, publication-grade figures or three-line tables, journal selection, a submission package, or a revision round on any of these. Do not follow the workflow from memory - run `python tools/wf.py status` and obey the stage card it prints.
 compatibility: Requires Python 3.11+ for the driver. Tables and Word output additionally need numpy, pandas, openpyxl and python-docx (matplotlib for the Python figure path). R 4.3+ with the packages in reference/language_policy.toml (figures default to R). Network access is required for PubMed, Crossref and Unpaywall. Set NCBI_API_KEY to raise the E-utilities rate limit.
 metadata:
-  version: "2.7.0"
+  version: "2.8.0"
   stages: "25"
   entrypoint: "python tools/wf.py status"
 ---
@@ -70,9 +70,9 @@ manuscript instead of the subagent. If context runs out, say so.
 
 | Stage | Agent | Notes |
 |---|---|---|
-| S08, S09, S14, S16, S19 rewrites | `medpaper-clinical-writer` | Pass the MANIFEST of `tools/manuscript/writer_bundle.py build --stage <S>`; it sees clinical labels, results in words, tables, legends, notes - never code, JSON keys or logs. Run `wf check` (engineering-language lint) afterwards. |
+| S08, S09, S14, S16, S19 rewrites | `medpaper-clinical-writer` | Pass the MANIFEST of `tools/manuscript/writer_bundle.py build --stage <S>`; it sees clinical labels, results in words, tables, legends, notes - never code, JSON keys or logs. Then `wf check`. |
 | after S11 (with the D2 look) | `medpaper-clinical-writer` | 1.20.0: table/figure wording - `wf displays text` writes `.wf/writer_bundle/displays/MANIFEST.md` (only strings that read like an analysis report); then `wf displays apply` and re-render. |
-| each prose section, right after its draft (1.23.0) | `medpaper-medical-editor` | `writer_bundle.py receipt` -> `edit --section S` (pass its MANIFEST) -> `polished --section S`; numbers and citations unchanged (`section_polished`). |
+| each prose section, right after its draft (1.23.0) | `medpaper-medical-editor` | `writer_bundle.py receipt` -> `edit --section S` (pass its MANIFEST) -> `polished --section S`; numbers and citations unchanged (`section_polished`). 1.24.0 voice: `reference/writing_voice.md`. |
 | S09, before the Results (1.23.0) | `medpaper-reviewer` (science) | `review_round.py start --scope science`; revise analyses/displays/Methods, ONE summary, ONE question (another round or proceed). |
 | S15 | `medpaper-deepreader` | One invocation per full text; save its notes yourself. |
 | S18, S19/S24 rounds, S25 | `medpaper-reviewer` | Give it only the bundle path `review_round.py start` prints and the neutral brief. It writes only `.wf/review_bundle/<round>/report.md`; `close` reads that file - never paraphrase findings. Confirmation is the exact sentence `我确认这一版`. |

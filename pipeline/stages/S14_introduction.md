@@ -45,6 +45,7 @@ this stage only.
 - ONE section file this stage. No Discussion, no Abstract.
 - Every citation verified. Every claim attributable to an abstract you read.
 - No results in the Introduction. No hypothesis stated as if already confirmed.
+- 1.24.0: the last paragraph says in one sentence what the study adds; 'first'/'novel' only if S02 supports it (`reference/writing_voice.md`).
 - No stock openers: not "In recent years", not "has attracted increasing attention",
   not "plays a crucial role". The gate flags these.
 - Do not restate the whole field. Three to five paragraphs, tightest possible path to the
