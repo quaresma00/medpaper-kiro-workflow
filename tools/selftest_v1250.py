@@ -17,6 +17,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
+from wfcore.state import version_tuple as _vt  # noqa: E402  (1.26.1: "at least")
 from selftest_v1140 import _envset, _gate, _out, _paper, _run, _w  # noqa: E402
 from selftest_v1230 import _Http  # noqa: E402
 
@@ -415,13 +416,14 @@ def run_release(tmp: Path, record, section) -> None:
     record("C pipeline 1.25.0; a 1.24.0 paper gets exactly one 1.25.0 event (search, crosscheck and "
            "the S22 card now; recency, receipts and blocking items after wf migrate --yes) and "
            "stays pinned; no paper file touched",
-           pipe.meta.get("version") in ("1.25.0", "1.25.1", "1.26.0") and len(notes) == 1
+           _vt(pipe.meta.get("version")) >= (1, 25, 0) and len(notes) == 1
            and "wf migrate --yes" in notes[0]["detail"] and "benchmark.py search" in notes[0]["detail"]
            and "crosscheck" in notes[0]["detail"] and st.engine_pin == "1.24.0" and before == after,
            str(notes)[:300])
     cards = {s.id: (ROOT / "pipeline" / s.card).read_text(encoding="utf-8") for s in pipe.stages}
     skill = (ROOT / ".kiro/skills/medpaper-pipeline/SKILL.md").read_text(encoding="utf-8")
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    readme = "\n".join((ROOT / f).read_text(encoding="utf-8")  # 1.26.1: history moved
+                       for f in ("README.md", "docs/CHANGELOG.md"))
     record("C S07 card: the most recent 5-10 papers via benchmark.py search/skip; S17 crosscheck; "
            "SKILL one line each; README 1.25.0; every card within the limit",
            "MOST RECENT" in cards["S07_artifacts"] and "benchmark.py search" in cards["S07_artifacts"]
@@ -429,7 +431,7 @@ def run_release(tmp: Path, record, section) -> None:
            and "--section manuscript" in cards["S19_human_review"]
            and "benchmark.py search" in skill and "--section manuscript" in skill
            and len(skill) <= 9000 and "## 1.25.0" in readme
-           and ("`1.25.0`" in readme or "`1.25.1`" in readme or "`1.26.0`" in readme)
+           and f"`{pipe.meta.get('version')}`" in readme
            and max(len(c) for c in cards.values()) <= registry.CARD_MAX_CHARS,
            str({k: len(v) for k, v in cards.items() if len(v) > 3900}) + f" skill={len(skill)}")
 

@@ -1,0 +1,244 @@
+# 更新记录
+
+MedPaper Pipeline（Kiro）各版本的变化，最新在前。使用说明见 [README](../README.md)。
+
+## 1.26.1 变化（README 重写）
+- **README 按使用顺序重写**：先给 25 步流程一览表（实际执行顺序、每一步做什么、关键注意点、需要用户回答的地方），再写当前版本的使用要点、核心处理逻辑、各阶段说明、安装与日常使用；内容按 1.26 的实际行为更新（S24 先审计再确认、S25 只核对、S19 一次收集作者信息、论文不用 Kiro 工作流、`wf report`、`wf journal switch`、全文只走合法途径等）。
+- **版本历史移到本文件**（`docs/CHANGELOG.md`），README 只保留当前用法。
+- **测试**：旧版本测试不再逐个列出版本号，改为“不低于该功能引入的版本”，以后发布不必再改这些文件；README 检查读取 README 与本文件。
+- **在途论文**：只有文档与测试变化，没有新门禁，论文文件不改。
+
+## 1.26.0 变化（先审计再确认；问题一次问完；论文不用 Kiro 工作流；运行记录）
+- **投稿包先审计、再确认，只确认一次**：原来 S25 的独立审计（首次读者、编辑、期刊合规三个角度；合规矩阵逐行 agree/disagree；要求清单遗漏的义务 `MISSING L00nn`）改在 S24 第一轮进行，读的是确认前的投稿包。代理修改后，凡改动过上传文件的轮次立即复核（只看上轮问题是否解决 + 新的阻断问题），中间不打扰用户；末轮审计读到的就是要确认的这一版，用户只确认一次（`package_audit_ready`）。冻结文件记录被确认的审计轮次；S25 不再启动审稿代理，只核对冻结、把该轮审计报告原样记为 S25 审计文件（`package_review.py record-audit`）并运行确定性终检；记 PASS 仍要求末轮审计结论为 PASS，REVISE 时仍是两条路：回 S24 复核一轮，或作者终稿。每个期刊的审稿代理调用从最多 4 次降到 1–2 次，审阅内容和标准不变。
+- **问题一次问完**：S01 问目标期刊是否已定（已定则 S20 只核实）；S19 确认消息里一并询问作者与单位、通讯作者、基金、利益冲突、AI 使用和 S24 是否读取投稿系统（`review_round.py close` 列出 `wf decisions show` 里还缺的项，现在答或之后答都可以，只记录一次）；S21 只问仍缺的或期刊特有的项，S24 不再单独问投稿系统。
+- **论文不用 Kiro 工作流**：SKILL 与论文 steering 写明论文各阶段都在论文主对话里完成，只调用卡片指定的子代理（审稿、写作、编辑、精读）；不再为论文启动工作流。
+- **运行记录**：每条引擎命令在 `.wf/run_ledger.jsonl` 记一行；`wf report` 按阶段列出用时、无命令空档（多为等待用户或额度）、检查次数与常见失败、子代理调用、复现和重建次数、审阅轮次与等待答复时间（写入 `.wf/run_report.md`）。只记录，不改论文，不影响任何门禁。
+- **维护方式**：小修直接在对话里改，只跑相关测试（`tools\selftest.py --only v1251,v1260`）；多项修改合并为一次发布，发布前跑一次完整自测；论文处于 S19–S25 时只修阻断运行的问题。另修正 1.25.1 把自己的 13 项测试运行两次的问题。
+- **在途论文**：S19 合并提问、S21/S24 只问缺项、不用工作流、运行记录立即生效；S24/S25 的新顺序在 `wf migrate --yes`（或换刊）后对未完成阶段生效；已经冻结的投稿包仍按原方式在 S25 审计。只记一条迁移事件，论文文件不改。
+
+## 1.25.1 变化（主要结局优先；不利结果、零结果、局限与不确定性必须报告）
+- **写作原则修正**：不再"以最强的发现开头"，改为"先回答研究问题"：摘要结果、正文结果和讨论第一段都先写主要结局，无论阳性还是阴性；次要或事后分析的阳性结果不能盖过阴性的主要结局，事后分析标为探索性。吸收写作库的"不写工作汇报、论点明确、直说贡献、结论与证据一致"；保留阴性/不利结果（同样的位置和格式：估计值 + CI + 直白结论）、局限（直说、不重复，但必须有）和不确定性（用区间和假设表达，不用含糊词）。
+- **确定性检查**：`prespecified_outcomes_reported`（S09/S17：idea.json 中每个主要和次要结局在结果中带估计值和 CI 或引用表/图，补充表也算；主要结局必须出现在摘要结果中）、`primary_first`（S16/S17 警告；S22 主要结局为阴性却由次要结果领头时阻断）、`effects_with_intervals` 扩展（结果和摘要中 HR/OR/RR/IRR/ROR/PRR/IC/MD/SMD/β/AUC 必须同句带 CI）、`limitations_present`（S16：局限段至少两条具体局限 + 研究设计的核心提醒，见 `reference/design_caveats.toml`）。医学编辑润色后若让这些检查由通过变为不通过，`polished` 拒收；审稿代理（S18 与写作前科学审阅）新增选择性报告检查。
+- **在途论文**：写作、润色、审稿规则立即生效；新的阻断项（since 1.25.1）在 `wf migrate --yes` 前只警告，迁移后对未完成阶段阻断；只记一条迁移事件，论文文件不改。
+
+## 1.25.0 变化（图表参照最新同类论文；组装后不再整篇二次润色）
+- **S07 图表基准**：`benchmark.py search` 按研究设计、数据来源和暴露/结局词检索 PubMed，按发表时间从新到旧，只取英文原创研究，默认近 3 年（不足 5 篇才放宽到 5 年并记录）；取最新的 5–10 篇（目标 8 篇），跳过更新的一篇必须写理由（`benchmark.py skip`），更早的论文只能作记录在案的例外且不计入中位数；只有摘要、图表数未知的论文也不计入中位数。S07 给用户的消息列出纳入论文（年份、期刊、正文图/表数）和本文计划。
+- **组装后的润色**：各章节写完已由医学编辑逐节润色，组装后不再整篇重做；只做 (a) 跨章节一致性报告 `polish.py crosscheck`（术语、缩写只定义一次、引言/讨论与方法/结果的近似重复句、摘要数字必须能在结果或表格中找到、摘要与讨论结论强度交审稿人），(b) 期刊适配，(c) 组装后改动过的段落交医学编辑重新润色，只发这些段落（`writer_bundle.py edit --section manuscript`）。S22 卡片去掉"通读全文"和旧日志标题。
+- **在途论文**：`benchmark.py search`、跨章节报告和简化后的 S22 卡片立即生效；最新 5–10 篇规则、改动段落的编辑回执和跨章节阻断项（since 1.25.0）在 `wf migrate --yes` 后对未完成阶段生效；只记一条迁移事件，论文文件不改。
+
+## 1.24.0 变化（自信、不设防的临床写作）
+- **原则：组织叙事，不筛选证据**。以最强的预设主要发现开头，直说本研究新增了什么；预设结局和分析、阴性结果（估计值 + 95% CI + 直白结论）和必要的局限一项不少，每项只说一次。规则和例句见 `reference/writing_voice.md`（借鉴 Adkid-Zephyr/anti-defensive-writing-Skill 与 Worigin0314/academic-defensive-writing-auditor 的思路，均为 MIT；"只讲优势、换指标、重选主结果、删不利实验、不主动说明不足"属于 spin，不采用）。
+- **代理**：临床写作代理新增 W1–W5（贡献一句话、阴性结果写法、每项敏感性分析一句目的、局限一段 3–5 条并标偏倚方向、caveat 只说一次）；医学编辑新增 E1–E4（删除预先反驳和自我削弱词、删句尾 ", highlighting…"、同一人群一个称呼、删除前先问"去掉是否会误导读者"）；审稿代理新增 spin 与防御性写作检查。
+- **检查**：`polish.py` 拦截 "trend toward significance""marginally significant" 等 spin 措辞（since 1.24.0）；提示级检查预先反驳、无引用的"studies have shown"、同一 caveat 重复 ≥3 次、人群称呼轮换、局限超过 6 条或"局限—优点"对冲、无依据的"first/novel"。编辑包 MANIFEST 列出这些提示项。
+- **在途论文**：提示词、编辑规则、参考文件和提示级检查立即生效；spin 拦截在 `wf migrate --yes` 后生效；只记一条迁移事件，论文文件不改。1.24.0 之前写好的章节，需要时可用医学编辑重新润色（`writer_bundle.py edit --section <节>`）。
+
+## 1.23.0 变化（写作前把关、医学语言）
+- **可发表性检查点**：S02/S04/S06 各记录一次结论（GO / CONDITIONAL / NO-GO）和可争取的文章类型，并立即用中文告诉用户；CONDITIONAL 或 NO-GO 时只问一个问题并附建议；S04 按 `reference/publishability.toml` 的设计下限核对实际数量；追加分析前先说明可能改变的结论和大致成本，收益低的建议跳过（`wf publishability`）。
+- **参照同类论文规划图表**：S07 用 `tools/pubmed/benchmark.py` 从 3-5 篇同类论文（开放获取时只读图表题注）建立 `01_protocol/display_benchmark.json`；正文图表数不低于中位数，多数同类论文都有的图表类型要么做、要么写一句理由（`display_plan_benchmarked`）。
+- **写作前独立科学审阅**：S11 之后、写 Results 之前，`review_round.py start --scope science`；审稿代理看方法、结果、图表和同类基准，主代理先改再写；用户回复“继续写作”才进入写作（`science_review_before_writing`），结果或图表变动后需增量轮。
+- **全文获取级联（只用合法途径）**：本地缓存 → PMC/Europe PMC → Unpaywall → OpenAlex（含机构库作者稿）→ Semantic Scholar → CORE（需用户自己的 key）→ 预印本 → 可见浏览器中用用户自己的机构账号 → 作者索取邮件草稿与馆际互借清单 → 一条消息列出剩余论文和投放文件夹（`fulltext.py remaining | ingest-drop`）。
+- **逐节医学润色**：每节由临床写作代理起草、新的 `medpaper-medical-editor` 代理立即润色（回执：写作包 → 草稿 → 润色稿；数字和引用不变）；之后改动只重润色改过的段落（`section_polished`）；工程/数据处理叙述词表扩充。
+- **公开事实自行查证**：能从公开来源查到的声明、数据集访问方式和许可先查证再起草（`wf decisions verify`，记录来源网址）；数据可获得性声明由 `wf data licence` 记录生成并按 DOI 引用（`data_availability_verified`）。
+- **派生变量与多重插补**：`analysis.units` / `medunits.R` 声明单位和合理范围（拒绝重复除以体重），换算系数只来自有出处的 `reference/conversion_factors.json`；`analysis.imputation` / `medimpute.R` 默认按 Rubin 规则合并，只用单个插补数据集需说明理由并自动写入 Methods。
+- **在途论文**：命令和工具立即可用，卡片指导到达该阶段时适用；新门禁（since 1.23.0）在 `wf migrate --yes` 后对尚未完成的阶段生效；只记一条迁移事件，论文文件不改。
+
+## 1.22.0 变化（少暂停、快收敛、换刊与投稿包）
+- **证书与即时质控**：换刊后旧期刊的投稿层证书按期刊分期失效，`wf rebuild` 不再因旧证书失败；`rework.py bookkeep` 在任意阶段登记删除/替换/续期（有事实变化则拒绝）；派生文件按构建回执认证；换刊或重渲染后图表质控立即按新尺寸运行；审阅包不再含过期渲染；字数、参考文献数等由引擎统一计数写入审阅说明。
+- **审阅收敛**：增量轮附上一轮报告与已关闭条目；必改项固定定义（改变数字、结论或读者正确理解）；稿件 3 轮、投稿包 2 轮、每期刊 S25 审计 2 轮封顶，封顶后只查回退；审阅包附关键结果摘录；`wf config set review_mode fast` 快速模式。
+- **用户既定决定**：`.wf/user_decisions.json`（`wf decisions show|set`），自动从现有状态初始化；已记录的不再询问；用户指定期刊时 S20 只核实不列候选；保护类问题默认直接改，只有建议保留时才一次性问作者，回复“按你的建议”即全部采纳；含“确认”+“这一版/此版/本版/这个版本”的明确句子也算确认；`wf status` 显示本阶段预计耗时与已用时间。
+- **期刊与投稿包**：`page_breaks`（none = 全文不分页）与缩略语表 `after_conclusions`；指南中“见其他页面”的句子必须追加导入或注明不适用；新增题注格式、图表文件名、声明标题自动核对；S24 标准步骤：询问一次后只读读取投稿系统、`wf portal reconcile` 列出差异（上传项以系统为准，稿件格式以指南为准），并按期刊在用户级缓存；确认后投稿包复制到 `submission_packages/<期刊ISO缩写>_<日期>/`（只读，换刊另建，旧的保留）；`wf journal switch --repackage` 快速重打包；`journal_traces_clean` 查旧刊痕迹；`wf journal diff` 期刊差异清单。
+- **在途论文**：修复与放宽立即生效；用户决定在下一条 wf 命令时自动初始化；投稿系统核对与投稿包文件夹在下一次 S24 生效；新门禁（链接页面、journal_traces_clean、journal_difference_listed，since 1.22.0）在 `wf migrate --yes` 或换刊后生效；只记一条迁移事件，论文文件不改。
+
+## 1.21.0 变化（浏览器联网）
+- **浏览器临时文件不干扰门禁**：浏览器 MCP（playwright）写入论文目录的 `.playwright-mcp/`（页面快照、控制台日志、抓取文件）被 no_orphans、修订漂移、审阅守卫和复现快照忽略，从不上传；`wf clean --apply` 删除它。
+- **浏览器读取投稿指南**：`wf journal lookup` 仍先用 API 和一次礼貌请求；被拦截或需要 JavaScript 时打印给代理的浏览器步骤（打开、等待自动检查、把 `main` 文字存到 `.playwright-mcp/`、导入、子页面 `--append`、用完 `browser_close`）和一句给用户的中文提示。`wf guidelines ingest` 接受快照 YAML、browser_evaluate 的 JSON 字符串和文本，去掉 Cookie 横幅/“Back to top”/页脚，记录抓取方式、最终网址、标题、时间和 sha256；验证页/拦截页被拒绝并提示等待或请用户在浏览器窗口中完成；非官方域名只存为线索。
+- **收录与政策证据**：用户在浏览器窗口登录 MJL/JCR 后，文字抓取 + 截图用 `--kind indexing --screenshot` 保存；只从截图读出的数值标记 read from image，用户核对一次（`wf guidelines confirm-image`）。
+- **投稿系统要求**（仅在用户要求时）：用户登录后只读不改，`wf portal ingest` 生成 `08_submission/portal_requirements.json`（上传项、有无题名页上传项、文件限制、声明问题），用于 required_uploads、题名页位置、合规矩阵和投稿系统待办；最终提交/批准/生成 PDF 永远由用户完成。
+- **网页数据留痕**：VigiAccess、FAERS 公开仪表盘、药品说明书、注册库页面用 `wf data capture` 存为带日期、可追溯、按版本保存的原始数据（`02_data/raw/web/`）；文字被混淆时从截图读数写成 CSV，核对一次。
+- **省额度规则**：API 优先；长页面不用不带 filename 的快照；抓取文件不读进对话，导入后只读需要的行；一次任务一个浏览器会话；浏览由论文主代理完成。
+- **在途论文**：临时文件忽略立即生效，新命令立即可用；新门禁（web_captures_traced S04、indexing_evidence_cited S20、portal_requirements_applied S23，since 1.21.0）在 `wf migrate --yes` 或换刊后生效；只记一条迁移事件，论文文件不改。
+## 1.20.0 变化（图表文字面向医学读者）
+- **可见文字清单**：`wf displays text [--md]` 按角色列出每个主表/补充表和图的全部可见文字（标题、列标题、行标签、分类水平、单元格文字、脚注、坐标轴标题、刻度标签、图例标题与条目、分面标签、注释、流程图方框、表题/图注），存于 `.wf/display_text/inventory.json`（按来源哈希增量更新）；`wf rebuild` 与 S09-S12/S23 检查自动运行。
+- **临床可读性检查**（`reference/display_text.toml`）：代码样名称（snake_case、p.value、factor()、sexM、a:b、TRUE/FALSE、结果 JSON 键名）、占位标题（value、variable、estimate、group）、主表中的软件输出列（Std. Error、z value、AIC）、科学计数法与过多小数、参考组写成 1.00 (1.00-1.00)、连续变量缺单位、计数行未注明 n (%)、对数轴/时间轴未说明、未定义的“Model 2”、未解释的专业术语（IPTW、ROR、E-value 等，提示）、主表超过 8 个数据列（提示）。S10/S11 警告，S09 写结果前、S12、S23 阻断（`display_text_resolved`，绑定清单哈希）；例外写入 `.wf/language_allowlist.json` 并给理由。
+- **按展示词典自动改标签**：表格构建器、R `save_medpaper()`、Python `style.save()` 在生成时把内部名称换成词典中的临床标签（标题与行标签带单位），数字不变；无法映射的代码样文字直接报出该字符串和应加的词典条目。
+- **临床写作代理改写图表文字**：`.wf/writer_bundle/displays/` 只含被标出的字符串及其上下文；写作代理把措辞写到 `.wf/writer/display_wording.md`，`wf displays apply` 写入词典，其余措辞列出供脚本、图注、表题修改；S11 之后与 D2 总览图一起做一次。
+- **审阅**：S18 审阅包附全部图表总览图和可见文字清单，审阅者逐项判断每个图表能否被临床读者单独看懂。
+- **在途论文**：`wf displays text`、写作包和 `wf displays apply` 立即可用；新门禁和自动改标签（since 1.20.0）在 `wf migrate --yes`、换刊后或 `wf config set display_relabel true` 后生效；S19 之后的措辞修改属于展示层（只改标签、不改数字），走展示修订轮 + `wf rebuild` + 用户重新回复“我确认这一版”；只记一条迁移事件，论文文件不改。
+## 1.19.0 变化（题名页放入正文、图表位置按指南、讨论不复述结果并加深、补充文件按序号加类型命名）
+- **题名页放入正文**：`title_page.placement` = in_manuscript | separate | both。非盲审期刊默认 in_manuscript：正文首页就是 S21 题名页（题名、短标题、作者、单位、通讯作者地址/邮箱/电话、ORCID、期刊要求的计数），分页后接摘要；`required_uploads` 要求题名页时为 both（另交单独文件）；盲审期刊只用单独题名页、正文保持匿名。两处同一来源，参考文献计数、`journal_fields_met` 和盲审审计对两处都适用。
+- **图表位置由类型字段决定，不由代理判断**：`figures.placement` = separate_files（默认：正文不嵌图，图注在末尾另起一页，图片单独上传）| in_text | end_of_manuscript；`tables.placement` = end_of_manuscript（默认：参考文献后每表一页）| in_text。非默认值必须有指南要求（`guideline_requirements.json` 中 rule.field + 原文 + 行号），S23 新门禁 `layout_from_guideline` 检查；图片不会既嵌入又单独上传，除非指南要求。1.18 及以前“图放在正文末尾”来自 S20 写入的 `embed_figures: true`（构建器照做、未要求指南依据），现在被标出。
+- **讨论解释而不复述**：S16 写作包只给关键发现的文字描述（方向、大致幅度、确定性、主要/次要）、主要估计值一次、精读对比要点和已知局限，不再给结果表和图表编号；写作者先写 ≤200 词提纲（`.wf/writer/discussion_outline.md`，不导出），新门禁 `discussion_outline_ready`；S16 语言门禁增加讨论检查：不得引用补充材料（Table S2 等）、正文图表引用 ≤2 次、含本研究结果数字的句子 ≤3 句、复述结果的句子 ≤2 句、已核实的既往研究 <5 篇时警告；阈值只能在论文 `.wf/config.toml` 中连同理由修改。审阅者评分表增加讨论检查。
+- **补充文件命名**：默认 `Supplemental_File_{n}_{Title}`（如 Supplemental_File_1_Supplementary_Methods.docx），文件内抬头为“Online Resource 1: Supplementary Methods”；只有指南强制命名规则时才写 `supplementary_file_pattern`（“e.g.”示例不算）。`wf rebuild` 自动改名并同步清单、上传列表和终稿副本。
+- **透明**：S24 中文合规摘要（`wf compliance summary`）和 `wf compliance layout` 逐条列出题名页、图片、表格、补充文件命名、缩略语表的位置及依据（指南行号 + 原文，或引擎默认）。
+- **在途论文**：显式设置上述字段后下一次 `wf rebuild` 立即生效（投稿包变化仍需用户重新回复“我确认这一版”）；新默认值和新门禁（since 1.19.0）在 `wf migrate --yes` 或换刊后适用；S16 写作包和讨论指导在重写讨论时即适用；只记一条迁移事件，论文文件不改。
+## 1.18.0 变化（投稿指南逐条要求清单、合规矩阵、缺失期刊字段接入、终审逐条对照原文、投稿前预检）
+
+- **要求清单（S20）**：根据带行号的 `guidelines_source.txt`，为所选文章类型写 `08_submission/guideline_requirements.json`：每条要求有原文引文、行号、类别（26 类固定）、规则（类型字段或检查名）和执行方式（auto/builder/manual/portal/n.a.）。新门禁 `guideline_requirements_mapped`：每个类别都有要求或“未提及”条目（列出搜索词）；引文须逐字出现在所引行；引文中的数字须等于 target_journal.json 的类型字段；原文中每个含 must/required/should/maximum/no more than 等义务词的句子都要被某条要求或 n.a. 范围覆盖，未覆盖的行号会列出。
+- **补齐期刊字段**：`abstract`（结构化小标题、分段/总字数）、`title_page`（要素、题名长度、短标题长度）、`running_title_position`（manuscript 时构建器把短标题放到正文首页）、`highlights`/`key_points`、`cover_letter.must_state`、`required_uploads`（与投稿包清单角色比对）、`figure`（格式、dpi、大小、色彩；可从 TIFF 母版转换为 PNG/PDF/EPS/JPEG）、`orcid_required`（校验位与题名页）。S23 新门禁 `journal_fields_met`。
+- **合规矩阵（S23）**：`wf rebuild` / `wf compliance write` 生成 `compliance_matrix.md/.json`，每条要求一行：auto 取测量值，builder 取构建回执，manual 须在 `compliance_evidence.json` 写明证据位置（S23 警告、S25 失败），portal 进门户待办，n.a. 写理由；状态 PASS/FAIL/WARN/CANNOT_ASSESS/N.A.。S24 审阅轮结束时打印中文合规摘要（`wf compliance summary`）。
+- **S25 逐条终审**：审计包含原文、要求清单和矩阵；审计员对每一行写 agree/disagree，并在原文中查找清单遗漏的义务句（`MISSING L00nn`，BLOCKING）；新门禁 `audit_rows_judged` 不允许在有异议或遗漏时记 PASS；复审只查未解决的行；无法评估/门户项交给用户，不单独导致 REVISE。
+- **投稿前预检**：`docx_bundle_ready` 发现修订痕迹、批注、占位符（XXX、TBD、TODO、[citation needed]、lorem ipsum、??）或高亮文字即失败。
+- **在途论文**：`wf compliance` 命令和审计包新增文件立即可用；新门禁（since 1.18.0）在 `wf migrate --yes` 后适用，`wf journal switch` 后 S20-S25 直接采用；换刊时要求清单与矩阵随旧刊归档，新刊必须按自己的指南重建；只记一条迁移事件，论文文件不改。
+
+## 1.17.0 变化（换刊无残留、指南检索与导入、参考文献格式按 ISSN、按新刊参数重渲染）
+
+- **换刊一条命令**：`wf journal switch --to "<新刊>" --confirm-old "<旧刊>" --why "..." [--outcome rejected]`，S20 之后任何时候都能用（含 S25 完成或被拒稿后）。旧刊的投稿包、指南快照、S25 审计、包审阅轮次（按 epoch 分组保留）、辅助脚本和 06_refs 等处的 CSL 一起归档；旧 S20+ 交接记录不再算数；研究设计、数据来源、伦理/知情同意/数据可用性评估、作者的 AI 使用答复、作者名单直接沿用不再询问；旧刊做过的图表降级和展示层改动只问一次是否恢复（`wf journal restore`）；`wf journal shortlist` 给出旧的后备梯队（须用新证据重新核实）；S20-S25 采用当前引擎门禁。结束时提示关闭对话、新开对话输入“继续 medpaper”；`wf status`/`wf handoff` 首行显示期刊 epoch；代理不能浏览或搜索归档。
+- **新刊必须用新规则**：新门禁 `journal_layer_clean`（08_submission 下不能有早于本 epoch 的文件，指南快照和 SCIE/JCR/诚信证据须在本 epoch 内）；`journal_variant_ready` 核对期刊名与 epoch；新刊的第一次 S25 审计一定是完整审计，审计包附官方指南原文和带行号文本。
+- **指南检索**：`wf journal lookup --issn <ISSN>` 依次查本地缓存、DOAJ（作者须知链接）、OpenAlex 与 NLM Catalog（主页、MEDLINE 收录）和出版商网址模板表，只发一次礼貌请求；遇到 403/验证码就停下，告诉用户确切网址：浏览器另存为网页（仅 HTML）或打印为 PDF，然后 `wf guidelines ingest --from <文件> --url <网址>`。原文存 cache（sha256、日期），转成带行号的 `guidelines_source.txt`，`guidelines_extract.md` 须注明行号。MJL 页面导出 PDF 后用 `--kind indexing` 作为 SCIE/JCR 证据。不登录、不绕过验证、不用第三方代理。
+- **参考文献格式**：随引擎提供由 CSL 样式库（citationstyles.org，CC BY-SA 3.0）生成的 ISSN→样式索引（15008 个 ISSN）；`tools/refs/csl_index.py fetch --issn` 下载父样式并写入 target_journal.json；`csl_check` 成为 S23 门禁（样式须对应期刊 ISSN 或写明理由，渲染检查无缺陷）。
+- **按新刊参数重渲染**：R/Python 图和表格记录渲染时的展示参数；换刊后 presentation 块必须写全（不继承暂定值），参数与渲染时不同就阻断，`wf rebuild` 重新出图（展示层，不回退科学阶段）。
+- **在途论文**：新命令和修复立即可用；更严格的检查（期刊名/epoch 核对、journal_layer_clean、指南行号、csl_check、渲染参数）在 `wf migrate --yes` 后适用，`wf journal switch` 则对 S20-S25 直接采用当前门禁；只记一条迁移事件，论文文件不改。
+
+## 1.16.0 变化（五位审阅专家的反例逐条落实，不增加阶段）
+
+- **结果语境**：Results/Abstract 中的数字若能对上结构化结果，同一句里明写的效应量类型（HR/OR/RR/AUC…）、时间窗（1-year、30-day、at 5 years）和显示字典标签（人群、暴露、对照、结局）必须与该结果一致；只有明确矛盾才失败，缺少语境词不失败，合并多个结果或有歧义的句子列入下一次审阅包的 `reviewer_items.md` 交审阅者判断。
+- **小整数**：0–10 只在非结果语境下豁免；跟在 n=、%、效应量、CI/区间端点、均数/中位数、患者/事件计数旁的小整数必须来自结果 JSON（Methods 中的方案常数不受影响）。
+- **表格分母**：普通 n (%)/n/N (%) 单元格须等于分子/列分母（列标题 N = …，或 proportion 记录），列人群须一致；无分母来源 S10 警告、S12 失败；CI 和加权列不按此规则判断。
+- **图中统计数字**：图内打印的 HR/CI/AUC/P/n/% 必须来自该图自己的 source_results；R 和 Python 图都有渲染回执，脚本或结果改了必须重新出图。Python KM 图默认画分析导出的曲线表，log-rank P 来自分析，无删失不画删失标记。
+- **其他**：PROSPERO 按资格（合格的系统综述尽早、在数据提取前注册；范围综述等只写理由，绝不编造或倒填编号）；复杂连接写 `02_data/join_log.json` 并核对计数；baseline_counts 把 None/NaN/NA/NaT 计为缺失；S24/S25 终审门禁 `--force` 不能跳过；S09 前的一次总览绑定到所看图表的哈希；科学依赖要求 Python 3.12+。
+- **在途论文**：修复立即生效（旧锁定论文的 Python KM 旧调用保留旧行为并提示）；更严格的检查在 `wf migrate --yes` 之后才适用于该论文（含当前阶段）；只记一条迁移事件，论文文件不改；分析辅助代码哈希不变，不需要重跑复现。
+
+## 1.15.0 变化（投稿包阶段提速，稿件质量不降）
+
+- **意思核对只看增量**：按句子比对；比较"上次确认的版本 → 当前版本"，已接受的精简不再被翻出来；同一句对只判一次；每个修订轮只出一个核对包；作者可按编号或哈希覆盖审阅者的"意思改变"，原话记入轮次总结。
+- **审阅报告落盘**：medpaper-reviewer 直接写自己的 report.md；审阅期间论文文件被改（且不是你声明的修改）即拒收；宿主不让写时，保存回复后用 `review_round.py ingest --from` / `rework.py meaning-ingest --from` / `package_review.py audit-save --from` 原样导入。
+- **一键重建**：`wf rebuild --wait` 按依赖重建受影响的上传文件并重新测量（审计、submission_qc、捕获、润色检查、rework check）。
+- **S25 收敛**：首次全审，之后只复核上次问题和新的阻断问题；引擎负责的格式单列 "Engine issues"，不单独导致 REVISE；首次 REVISE 即提供作者终稿通道；偏好项可一次关闭。
+- **补充材料与期刊开关**：补充图 PDF、工作簿信息页、统一 "Online Resource n" 页眉；主图 TIFF/主表 xlsx 另附（期刊不禁止时默认开启）；缩略语表放在关键词之后；`wf guidelines refresh` 刷新并标注指南快照日期；按页数推算的字数只作提示；AI/LLM 使用记录为作者事实；核查表编号排在内容补充文件之后；参考文献 "; discussion" 页码尾巴去掉，个别字段用 `06_refs/ref_overrides.json`（须与 PubMed 一致）；submission_qc.md 全部自动生成；作者终稿检查覆盖 PDF 和图片文件。
+- **在途论文**：修复与放宽立即生效；改变投稿包内容和更严格的检查在 `wf migrate --yes` 之后才适用；只记一条迁移事件，论文文件不改。
+
+## 1.14.1 变化（补丁：用户的三个问题 + 一次完整运行中的错误）
+
+- **工作区就是你打开的文件夹**：`wf init` 原地建论文；文件夹里已有论文就接着做；子文件夹里的旧尝试不再导致拒绝，保持原样并被隔离；重新开始须用户确认一次，旧记录原地归档到 `.wf_archive/<UTC>/`。代理不再新建子文件夹，也不再让你重新打开别的文件夹。
+- **防护钩子少弹窗**：每篇论文只有一个合并钩子（隔离 + 冻结源保护），只在写入、删除、改名和浏览/搜索文件夹时运行，读文件和运行命令不再触发。可声明报告文件夹（`wf config --user report_dirs add <目录>`，只允许 .md/.txt）。每个 wf 命令自动把旧论文的钩子更新到新版本。
+- **Word 无黑点**：默认不加任何 keepNext/keepLines/pageBreakBefore；表注是表格后的普通段落。期刊开关 `keep_table_footnotes: true` 才让表注跟随末行。
+- **修复**：意思核对报告逐行解析（不再吞下一行）；回执按文件取所有已关闭轮次中最新的一份，构建器在开放轮次中写出的文件自动记入该轮；补充材料信息页读 `affiliation` 或 `address`；导出 PDF 设 `/Lang`（默认 en-US）；Word 属性中不留本地路径；软件版本、网址、DOI、批准号不当作数字溯源；方案注册状态句允许；`polish_allowlist.tsv` 也可放在 `08_submission/manuscript/`；`review_round.py start --delta` 不再清空文本副本；`upload: false` 的文件不算上传件；表图总览按工作表逐张渲染；字数统计识别 "Statements and Declarations"；报告核查表以角色 `checklist` 通过审核；预览默认渲染全部页面。
+- **在途论文**：修复和放宽立即生效；更严格的检查（无开关时零 keep 标记、PDF /Lang、文档属性无本地路径、所有轮次的回执）在 `wf migrate --yes` 之后才适用；只记一条迁移事件，论文文件不改。
+
+## 1.14.0 变化（外部审阅 8 条 + 3 项决定）
+
+- **冻结后措辞**：改动分为 SAFE / MEANING_CHECK / SCIENCE；会改变含义的措辞由审阅代理或作者逐对判定，"含义变化"才走科学路径。
+- **写作材料完整**：写作代理拿到每个结果（临床标签、比较、CI 水平），缺口单列并阻断；引用他人数字必须出现在该文献原文/摘要中，摘要真实比对，无摘要须经核验全文。
+- **复现保护数据**：复现只复制（有大小上限），不建链接、不改数据；数据前后校验，变化为 CRITICAL；清理只删本论文的过期沙箱。
+- **分析停止规则**：主要/次要结局和既定有效性检验完成即止；附加分析须写明可能改变哪个科学决定；结果变化后旧 GO 决定需重判；不设检索条数下限。
+- **缓存与发布**：门禁缓存覆盖检查读取的每个文件；论文只接受打了发布标签 vX.Y.Z 的全局引擎（否则 rc 3）；`wf doctor` 报告未打标签或未推送；论文守卫钩子阻止对引擎的 git 写命令。
+- **审阅与版式**：审阅包附"预设与看数据后决定"的事实记录（不进稿件），审阅者检查事后分析未被写成验证性结论；写 Results 前看一次全部表图（一张图）；Word 中表注与表格同页（仅表格末行 keepNext，Word 2013 版式模式）。
+- **迁移**：只记一条事件；新门禁 `since = "1.14.0"`；论文文件不改。
+
+## 1.13.0 变化（项目隔离与引擎保护）
+
+- **工作路径与隔离**：论文目录即当前工作区（cwd 或 `MEDPAPER_PROJECT`），不再读 `wf use` 全局标记，拒绝操作其他论文；每篇论文装 PreToolUse 守卫钩子（`install_adapters.py --paper`），禁止读写其他论文/归档/系统临时目录、写引擎、手改 `.wf` 引擎状态文件。
+- **引擎保护**：共享引擎有未提交修改时所有论文命令拒绝运行（rc 3，`wf doctor` 显示）；论文级修正走覆盖配置或 `wf engine-fork`（论文内副本，差异留给维护者）。
+- **数据不复制**：`wf data add` 原地登记数据源（只读）；复现沙箱在论文 `.wf/repro/sandboxes`，硬链接/原地读取，中断自动清理；超限复制拒绝；`data_not_copied` 门禁。
+- **复现只跑一次**：文档、取数、缓存不算分析输入；按声明依赖只重跑受影响脚本；日志只在 `.wf/logs/`，有上限。
+- **修改与写作**：冻结后可溯源的展示层修改不回退；多人核对只针对人工编码；正文不写方案偏离；每个写作阶段当场润色（`section_language_clean`），S22 只做统一；Word 不再产生 keepNext/keepLines 黑点（行 `cantSplit` + 表头重复）。
+- **误报与小修**：千位分隔符、bib 花括号冒号、"No. 2026J" 等缩写后数字不算句首数字；引号内自造标签未入展示词典时提示；S24 卡片与基线重捕获规则一致（先分类、后重建）。
+- **迁移**：只记一条事件；新门禁 `since = "1.13.0"`，已完成阶段沿用锁定门禁集；论文文件不改。
+
+## 1.12.0 变化（精简与修误报）
+
+- **误报修复**：回查已完成阶段不再判 `single_section_written`；R 渲染中 QC 等待 `.rendering` 标记、报“渲染中”而非失败；Excel 锁文件 `~$*` 忽略、被占用的工作簿报 IO 问题，表注说明性常数登记在显示词典 `footnote_constants`；审阅覆盖改为增量（只要求改动文件）；清单 WARN 不再显示为 FAIL；堆叠柱合法；bib 导出与检查共用一条规则；表注改为逐表结构检查。
+- **更轻**：删去引言/讨论字数下限；默认推迟目视检查无需记录 DEFER（仍在 S23 结清）；“缺少产出”合并为一行；polish 三条合一；`docx_keep_with_next` 并入 `docx_bundle_ready`，确认句并入 `review_round_approved`，S23/S25 重复的期刊上限、参考文献计数、补充方法检查改为清单行（门禁条目 287→281）；`wf check` 默认只打印失败项+一行摘要，完整清单写 `.wf/logs/`。
+- **CLI**：`--words/--why` 中文乱码自动修复，另支持 `--words-file/--words-b64`，写入后回读校验；`wf status` 同时显示引擎版本、状态记录版本与论文锁定版本（只有 `wf migrate --yes` 改锁定）；回退/重进计入 `loops`；`.wf/logs/`（或 `temp/logs/`）为日志目录；`reference_count.py show` 在标题页生成前不报错；`review_round.py status` 输出合法 JSON，等待用户答复时可开 delta 轮；`target_journal.json` 的 `line_numbers` 控制 Word 行号；`--wait` 心跳 ≤30 s。
+- **卡片与编排**：每张阶段卡 ≤4000 字符（细节移至 `reference/stage_details/`），SKILL.md 精简并新增“执行经济”；`wf handoff` 输出 ≤60 行的交接包；审阅代理只可写自己的 `report.md`，`close` 默认读取；新增 `medpaper-clinical-writer` 代理与 `tools/manuscript/writer_bundle.py`（只含临床标签、文字化结果、表图文字，无代码/键名/日志）。
+- **提前发现**：`first_reader_displays`（单位、分母、句末标点、期刊禁用图内标题；S10/S11 警告、S12 阻断并含缩写/工程用语/流程图单位）；新增展示项须写 `non_redundancy`；S17 起审阅包附草稿 DOCX（可转换时附页面预览）。
+- **迁移**：只记事件；新门禁 `since = "1.12.0"`，已完成阶段沿用锁定门禁集。
+
+## 1.11.0 变化（临床表述层）
+
+- **展示词典与工程用语**：S07 必填 `01_protocol/display_dictionary.json`（内部名→临床标签/缩写/定义），表、图内文字、图注与正文只用临床标签，字母代号默认禁止；`reference/clinical_language.toml` 工程词表在 Methods 警告、其余正文/表/图/图注阻断，实现细节进补充方法，论文级例外写 `.wf/language_allowlist.json`（须理由）。
+- **表图自明**：表注、图注各自定义所用缩写，正文另留集中列表（仅期刊明确要求时 `central_required`）；流程图为示意图（框+计数+箭头，不要坐标轴），计数须带分析单位，拒绝“行/文件/版本”等处理日志；Word 仅对标题去折叠，保留题注→表→表注、图注↔图的同页设置。
+- **呈现规范前移**：S07 写暂定期刊参数 `01_protocol/journal_profile.json`（字号下限、图宽、面板标签大小写、线条图 dpi、数字格式），表图从首次渲染即按其执行，S20 确认或替换（属展示层重渲染）；图内文字终稿尺寸 ≥8 pt；表格不得出现 Undefined/Not fitted/NA/Inf，缺失符号统一；表注按总字数控制，诊断信息进补充表。
+- **审阅闭环**：每轮所有编号意见（含 Reader comprehension、Medical presentation）须逐条关闭，`close --report` 校验；首轮即加入“初读临床读者”“工程用语与表图自明”视角；审阅者只拿 `review_round.py start` 生成的自包含材料包与中性说明。
+- **修订与冻结**：标签内编号（Online Resource 2、Table S3、面板/条目号）不算事实；`rework.py preview` 先试分类；回退 S19 需用户原话“我确认回退”；轮次范围外的写入在写入时拒绝；冻结分科学层/展示层（图注、表注措辞可在期刊阶段改，事实不变）；最终版新增数字须能追溯到结果 JSON 且 n/N(%) 自洽；正文比例登记分子分母（`analysis.results.proportion`），同句比较须同口径。
+- **运行**：复现只受分析输入影响，期间改正文不作废；`--wait` 阻塞等待+心跳，输出只留失败项与一行摘要；进度写入论文 `.wf/progress.md`；门禁按语义角色识别标题（含期刊名称与同义词），meta 分析识别否定句并优先用 `study_design`；控制台中文按读取端代码页输出，不再乱码。
+- **迁移**：只记事件；新门禁均 `since = "1.11.0"`，已完成阶段沿用锁定引擎；已按旧规则集中缩写的论文保留其设置直至 `wf migrate`。
+
+## 1.10.0 变化（13 条流程顺序与规则）
+
+- **先表图后结果**：执行顺序 S10 表 → S11 图 → S09 Results（从最终表图写，`displays_final_for_results`）→ S12 只做交叉核对；阶段编号不变。
+- **核验前移**：S08 方法学引用写入即联网核验（`reference_provenance cited_in`）；S04 变量口径对照表逐条确认，S06 随机 10 例回原始记录抽查（`tools/analysis/spotcheck.py`）；S03/S06 方案写明统计报告计划（主要比较数、多重性、效应量与区间），S09 仅报 P 值时提示。
+- **声明自动判定**：S01/S03 必填结构化 `study_design`、`data_source`；S21 用 `tools/declarations.py` 判定伦理、知情同意、数据可得性并给出依据，只问无法判断的那一处。
+- **软额度三段制**：写作期字数/文献数只警告；S13 只看论证角色覆盖（`06_refs/coverage.json`）；S17 篇幅与 45–60 篇体检（警告），库内每条须被引用或写明未引理由；S20 后按期刊上限硬卡，并按期刊图表上限做主/补充重分配计划。图注长度默认只提示，期刊明确规定才卡；每图规划图内文字与图注（`text_plan`）。
+- **讨论引用他人数字**：须与原文引用同句且在已核验库中；`number_allowlist.tsv` 不再适用于 Discussion。
+- **审阅与确认**：涉及数字、分组、结论强度的意见不得以“保留”自行关闭，须修改或由作者裁决（`review_round.py author`）；确认只认“我确认这一版”（或 “I confirm this version”）并记录版本哈希；第三方只读包仅在用户明确要求时 `review_round.py export`。
+- **迁移**：只记事件；新门禁均 `since = "1.10.0"`，已完成阶段沿用论文锁定引擎；当前停在 S09 且表图未完成的论文自动转到 S10。
+
+## 1.9.1 变化
+
+- **复现进度与复用**：`reproduce.py run --log <论文>/temp/repro.log` 逐行刷新 `[i/N] start|ok|FAIL` 并以 `REPRODUCE DONE rc=N ...` 结尾；脚本、数据、manifest、容差、结果及引擎分析助手哈希均未变时直接 `REUSED`（`--force` 强制重跑）；有变化时默认只重跑受影响脚本（`--full` 全跑）。
+
+## 1.9.0 变化（S01–S25 全程运行反馈 25 条）
+
+- **冻结后按内容分级**：S19 冻结后的修订在 `rework.py check` 时比对事实（数字、引用、表图引用、表格单元格、图的数据来源）。事实不变即“排版修改”：只重跑确定性检查，冻结记录 presentation delta，不回 S19、不新开审阅轮、不重新确认，只向用户汇报修改摘要；事实变化仍回 S19。投稿包确认只绑定上传文件的可见内容，内部 QC/notes/凭据不使其失效。
+- **期刊字段驱动**：`main_text_headings`、`keywords.min/max/separator`、`blinded_main_manuscript`、`spelling`、`number_format` 由构建器在 DOCX/表格/R 图中套用；Markdown 源保持工作流规范名。检查对照期刊字段，缺省时才用工作流默认值。
+- **派生文件确定性**：xlsx/docx/PDF/TIFF 固定时间戳与元数据；`manifest.json`、`qc_report.json` 可自动续期；漂移一次列全；`rework.py mark --deleted-file`；kind `journal` 更名 `journal-switch`（旧名兼容、batch 时校验），新增 `journal-format`。
+- **误报修正**：事实比对忽略 ICD-10/5-minute/(1)–(4) 等词内数字，`author_info.json` 登记的伦理号等行政事实可写入；CRediT 角色名白名单；期刊上限默认 100%（接近上限只警告）。
+- **构建与排版**：双盲时补充材料首页与 docProps 去作者信息并检查；表格 `< 0.001`、`n = 162`、`95% CI` 用不换行空格且列宽不低于最长词；论文内 `csl_patch.json` 与 `csl_check.py` 比对官方示例；清单 DOCX（`checklist_docx.py`）固定列宽、无内部路径。
+- **一致性前移与其他**：S12 `display_numbering_consistent`（首次引用顺序、表题两处一致、分面板引用）；`baseline_counts()` 输出二分类两类计数；正文列表阻断 `prose_not_lists`；`wf check --quiet/--summary/--reuse`；`preview.py` 渲染 PNG 联系表；论文锁定引擎版本（`wf migrate` 显式迁移）；S25 可用 `final_copy.py` 以“作者终稿副本”合法结束；S23 卡片列出投稿门户待办。
+- **迁移**：只写一条 `requirements_changed` 事件，不改论文文件。
+
+## 1.8.1 变化（实测反馈 2 条）
+
+- **Word 三线表**：xlsx 放入正文时不再走 Pandoc 管道表（其内置 Table 样式只画表头下线，且把标题行、脚注行塞进表格）。现直接写 OOXML：表级边框全部为 none，三条线用单元格边框显式绘制（首行上粗线、末表头行下细线、末行下粗线），多行/合并表头的细线在最后一行表头下，无竖线；标题在表上方、脚注在表下方边框之外。
+- **每表新页 + 横竖自动**：开启 `word_tables` 时每张表单独分节、另起一页；列数 > 7 或估算宽度超过纵向版心即横向（页面尺寸互换、边距不变），之后回到纵向正文。可在 `artifact_plan.json` 表条目或 `target_journal.json` 的 `tables.<id>.orientation` 写 `portrait|landscape|auto` 覆盖。页码页脚跨节共用、连续编号。Word 审计新增三线、分页、方向和每节页码检查。
+- **审阅改为子代理轮次**：S19/S24 不再生成第三方审核 ZIP。每轮 `tools/review_round.py start` → 调用只读 `medpaper-reviewer` 子代理 → 主代理自主采纳能提升稿件的修改（冻结内容走 rework）→ `close` 记录发现/修改/未改原因 → 向用户一次性汇报并只问“是否再审一轮” → `decide`。用户说无需继续审阅即记录批准；科学冻结绑定最后一轮。轮次记录在 `.wf/review_rounds.json`，审阅后任何被覆盖文件变化都需新一轮（可 `--delta`）。
+- **在途论文迁移**：只写一条迁移事件，不改论文文件；已有审核 ZIP 或 S24 OK 的论文按旧记录继续有效。
+
+## 1.8.0 变化（实测反馈 27 条 + 借鉴 Codex 1.9–1.11）
+
+- **Word 构建**：所有 docx 页脚自动 PAGE 页码并审计；参考文献“1. 作者……”（编号 + 句点 + 一个空格，不用 Tab、不悬挂缩进；仅期刊明确要求时 `target_journal.json` 设 `"reference_separator": "tab"`）；数字引用合并为 [1–3]；正文图注只放主图，补充图注随补充文件输出；图注前缀/粗体/分图标签大小写/末尾标点、嵌入图、Word 表、补充材料别名（Online Resource n）均由 `target_journal.json` 控制；补充文件默认另出 PDF（`--pdf`），自动加信息页、清除流水线代码与本地路径、代码等宽小字号。
+- **期刊规则结构化**：`limits`（main_text_words、abstract_words、reference_limit、display_items…）取代从指南散文正则抽取；Word 兼容字数（含数字，正文 Introduction–Conclusions）、97% 余量，S23/S25 直接测量最终 docx；S17 起草默认上限（正文 4000、摘要 250）。声明顺序默认 Springer Nature，标题页与正文一致；Discussion 默认无子标题。
+- **refs.bib**：标题专有名词/缩写加 `{}`、ISO 期刊缩写（shortjournal）、文章号、页码完整范围、姓氏前缀保护；S13 新增 `bib_format_clean`。分组引用 `[@a; @b]` 在事实保持比较中等价。
+- **后台语言与缩写**：检测“independent review / earlier draft / reviewer request”等流水线历史表述；缩写分别在摘要、正文、每个表格内检查首次定义和“定义未用”。
+- **修订轮次**：`batch --merge` 并入已封存轮次、`--priority` 挂起当前轮次先做新反馈、`suspend`/`resume --round` 恢复并自动 rebase、`progress` + `resume` 显示中断后的逐条进度；S23 改动冻结/已认证的图表源码在写入（hook）和 `wf run-script` 时立即拦截，`rework.py layout` 开受控版式轮次；相同内容重新冻结无需 `--force`；`08_submission/notes/` 为代理记录目录。
+- **审阅与 QA**：`reader-inputs` 生成与哈希绑定的文本副本，`--delta` 增量复审；`submission_qc.py write` 由实测生成 SUBMISSION_CHECKLIST 和 QC 记录，`submission_checklist_measured` 在 S23/S24/S25 同一清单执行。
+- **设计与运行**：S03/S06 `design_precedent_recorded`（对照、分母、主要结局的先例或方法学理由）；S01/S21 收集编码者资质；输出强制 UTF-8；`wf check/advance --log`；自测解析全部阶段卡命令（修正 `wf loop --to`、删去 `--project project`）。
+- **借鉴 Codex**：最低字数/引用数改为提示不再阻断（不凑数），期刊显式上限仍严格；全文获取失败即停止；pandoc 子进程超时；最终 docx 计数。
+- **进行中的论文**：迁移只记录事件（`requirements_added`），不改论文文件。需要：在 `target_journal.json` 补 `limits`；重建 docx（页码、参考文献格式、主图注）；运行 `submission_qc.py write`；S03/S06 尚未完成的补 `Design precedent`。
+
+## 1.7.3 变化
+
+- **取消预先注册与报告清单**：非 Meta 研究不再要求注册，方案不再有 `Reporting guideline` 节；报告清单仅当 S20 在 `target_journal.json` 写入 `journal_requires_checklist`（期刊要求时）才在 S23 填写，否则 gate 按“不需要”通过。Meta 分析保留 PROSPERO 注册建议与 PRISMA。进行中的论文无需操作，迁移时记录事件。
+
+## 1.7.2 变化
+
+- **公开数据库研究的报告清单**：从原文全文补齐 RECORD（13 条扩展项）、STROBE-MR（42 条）、TRIPOD+AI（52 条）；方案可写 `Guideline: STROBE + RECORD`，清单须覆盖两者并集（分块，或合并块中条目加前缀如 `RECORD 7.1`）；S03 卡片给出常见设计→规范对照。
+
+## 1.7.1 变化（采纳外部审阅）
+
+- **全文身份只看首页**：PDF 只在首页/参考文献标题之前的正文中找身份证据，须同时具备本文 DOI 与标题相似度（≥0.8）或第一作者姓氏+年份；目标 DOI 只出现在参考文献中判为“另一篇文章”（mismatch），证据不足为 indeterminate（S15 不通过）。1.7.0 及以前按“DOI 出现在任意位置”接受的记录须重新 `fulltext.py verify --all-retrieved`。
+- **报告清单要证据**：清单表改为 `Item | Status | Location | Evidence | Reason`；每条 Reported 须给出 ≥25 字、在所写位置原文中确实存在的引文（忽略空白/大小写/强调符号），同一引文最多复用 3 条。目录中 `CONSORT` 改为 CONSORT 2025（30 项/42 子项），旧版须写 `CONSORT 2010`。
+- **复现按声明依赖**：`03_analysis/analysis_manifest.json` 声明脚本顺序与输入输出；`reproduce.py run --affected-only` 只重跑依赖闭包受影响的脚本，其余从上次通过的证明延续。无 manifest 时沿用文件名顺序并警告。
+- **作图不重拟合**：`recipe_km`/`recipe_cif` 默认绘制分析脚本用 `curve_table_km()`/`curve_table_cif()` 写入结果 JSON 的曲线表；只有 `refit = TRUE` 且 `analysis_n` 与完整病例数一致时才在图中拟合。sidecar 记录 `population`，qc 校验 N 与 source_results 一致。
+- **R 结果全精度**：`write_results()` 与 sidecar 改用 `digits = I(17)`，双精度可无损往返（1/3、π、2^53 在 1.7.0 中会被截为 15 位）。
+- **按需环境检查**：`wf doctor` 只把作图核心包与本论文 R 脚本实际用到的包列为必需，其余统计包仅作提示。
+- **当前论文提示**：每条 `wf` 命令在 stderr 打印所操作的论文及其来源；全局 `wf use` 标记与之不同、或当前目录属于另一篇论文时给出提示/警告。
+- **进行中论文须做**：R 写出的结果需用 `wf run-script` 重跑后再 `reproduce.py run`；S23 之后的论文按新表头补全 Evidence 列；已通过 S15 的 PDF 运行一次 `fulltext.py verify --all-retrieved`。
+
+## 1.7.0 变化
+
+- **局部返修不回卷**：S19/S24 的修改意见默认不再回卷后续阶段。每条反馈 `rework.py batch --plan` 收集（不构建），用户说完后 `rework.py seal --why` 封批一次、只构建一次；已完成阶段保持完成，`wf loop` 在返修期间被拒绝。整体回卷保留为显式兜底：`batch --rewind`（换刊等）。
+- **依赖闭包最小重建**：`wfcore/dependencies.py` 依据 artifact_plan、结果 JSON 的 `environment.script`/`source_files`、表格与投稿包 manifest 计算受影响文件；缺少依赖信息时保守全连。`save_medpaper`、`assemble.py`、`build_docx.py` 只允许写闭包内文件，改一张 R 图只重画这一张。`rework build --scope full` 每轮最多 2 次。
+- **范围校验与漂移检测**：`rework.py check` 只运行受影响阶段的内容 gate（审批/生命周期 gate 除外，paper 级跳过的阶段不参与）；闭包外任何文件变化即失败；文献缓存等证据刷新不算漂移。改动 `03_analysis/` 必跑 `analysis_reproduces`；gate 回执在返修前后全部作废。
+- **S19 后的科学改动**：在 S24 提出的科学改动先回到 S19 重新审批并重新冻结，S20–S23 历史保留；随后 `wf advance` 在 S24 自动续开投稿包返修轮，合并到期刊稿后用 `scientific_freeze.py rebind-variant` 重新绑定。
+- **兼容**：修订轮 schema 2；仍读取 schema 1。进行中的旧轮次（schema 1）按原回卷流程完成，迁移时只记录事件，不转换。
+
+## 1.6.0 变化
+
+- **PubMed 实时核验短时复用**：`reference_provenance`（`live = true`）通过后，把本次 gate EFetch 原始 XML 的 SHA-256 记入论文自己的 `.wf/reference_live.json`。24 小时内（`live_reference_age_hours_max`）后续阶段重新解析该 XML 并逐条比对文献库，一致时直接复用；文献库或 XML 变化、超时都会重新联网。S13 与 S25 始终强制实时核验。
+- **gate 失败即停与短时复用**：`outputs_exist` 失败后，其余检查标为 `dependent_checks_pending`，不再执行，也不能 `--force`。`wf check` 为纯本地检查（md_sections、md_wordcount、no_ai_boilerplate、supplementary_methods_clean、numbers_have_provenance、manuscript_structure、docx_bundle_ready）写 120 秒回执。紧接着的 `wf advance` 在输入文件、引擎、配置、决定、overrides 完全一致时复用。完整性、审批、冻结和实时检查一律重跑。
+- **冻结加固**：S19 完成后若缺少科学冻结，`scientific_freeze_intact` 直接失败。冻结同时覆盖 `03_analysis/results/*.json`，记录 S19 审阅包 ID，并要求 `manuscript_human_reviewed=NO_FURTHER_REVIEW` 的理由中写明该 ID。1.6.0 之前的冻结只校验该决定，原有论文不受影响。
+- **换刊归档**：`reset-journal` 与 `open-variant --force` 不再删除旧期刊内容，而是移到 `08_submission/journal_archives/<期刊>-<UTC 时间>/`；`no_orphans` 与 `wf clean` 忽略该目录。
+- **R 图来源绑定**：`save_medpaper()` 先写临时文件，全部成功后再改名替换，渲染失败时保留旧图。同时输出 `cairo_pdf` 矢量母版。sidecar 记录 `script`、`script_sha256`、`source_hashes`（来自计划的 `source_results`）和 `render_hashes`。`qc.py` 的 `r_render_provenance` 在脚本、结果或图件变化后判定失败。作图期间 ggplot 警告按错误处理（`warn = 2`）。视觉审阅改为绑定 PNG 的 SHA-256。
+- **非 R 图需说明理由**：`figure_engine = R` 时，Python 图须在计划中写 `renderer` 和不少于 20 字的 `renderer_reason`。已批准的 Python 图原样保留，不为改用 R 出图而重拟合模型。
+- **P 值与符号校验**：`P<0.001` 必须有结果 JSON 中确实小于 0.001 的 P 值支持（或分析自身写出的同一阈值、或 allowlist 声明）。负号与 `−`（U+2212）视为同一符号，正负号不同即不匹配；显示精度用 Decimal 计算。CONVENTIONS 与 `environment` 排除保持不变。
+- **S18 审阅覆盖**：新增 `reader_review_coverage`。审阅报告须内嵌 `reviewed_artifacts` 哈希块，由 `review_round.py start` 生成（1.8.1 前为 `review_package.py reader-inputs`），覆盖正文、表格和全部已渲染的图。报告还须包含 `Reader comprehension` 与 `Medical presentation` 两节，每节不少于 80 字。
+
+## 1.5.0 变化
+
+- **论文在引擎之外**：引擎目录是纯净的母版工作流，只用于维护，任何论文都不能放在其中、在其中被选中或向其中写文件。论文统一放在论文根目录（优先 `MEDPAPER_PAPERS_ROOT`，其次 `~/.medpaper/config.toml` 的 `papers_root`，默认 `<引擎上级目录>/medpaper_papers`）。`wf new <slug>` 在那里创建论文并写入该论文自己的 `.kiro/` 适配文件（以绝对路径调用引擎），之后把这个论文文件夹作为独立的 Kiro 工作区打开。解析顺序：`MEDPAPER_PROJECT` → 当前目录或其上级中已初始化的论文 → `wf use` 选中的论文（用户级标记 `~/.medpaper/active`）。在引擎目录中运行 `wf status` 只显示维护横幅，驱动论文的命令一律拒绝；`wf doctor` 把引擎中的任何论文产物报告为 BROKEN。
+- **Python/R 分工**：见 `reference/language_policy.toml`。Python 负责数据获取、清洗、三线表 xlsx、Word 和全部门禁；R 负责作图（默认，`tools/figures/R/medfig.R` 的 `save_medpaper()` 与 `recipes.R` 中的 KM、竞争风险、森林图、ROC、校准、DCA、火山图）以及生存分析、竞争风险、列线图/校准/DCA、多重插补、倾向性评分、复杂抽样、混合模型、Meta 分析和 Table 1 统计。`save_medpaper()` 按目标栏宽精确出图，自动统一外边距，并写出与 Python 相同格式的 QC 记录，`qc.py` 对两种引擎一视同仁。`wf config set figure_engine python` 可改回 matplotlib。
+- **分析复现门禁**：S06 运行 `python tools/reproduce.py run`，在沙箱中按 `analysis_manifest.json` 声明的顺序（1.7.1；无声明时按文件名）重跑 `03_analysis/code/` 下的全部顶层脚本，要求结果 JSON 完全一致（仅忽略时间戳）；重跑结果保存在 `.wf/repro/rerun/` 作为证据。`analysis_reproduces` 在 S06、S17、S23、S25 复核，任何分析代码、原始数据或结果的后续修改都会使证明失效。
+- **环境回执**：结果 JSON 只能由 `write_results()`（Python `tools/analysis/results.py`，R `tools/R/medresults.R`）写出，自动附带语言与版本、程序包版本、随机种子、脚本及其 SHA-256。回执中的数字不计入数字溯源。
+- **报告规范清单**（1.7.3 起按需）：仅当目标期刊要求（或 Meta 分析的 PRISMA）时，S23 生成 `08_submission/reporting_checklist.md`，逐条对应到期刊稿中真实存在的位置；未收录条目清单的规范（`verify = true`）不会被凭空编造。

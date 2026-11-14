@@ -18,6 +18,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
+from wfcore.state import version_tuple as _vt  # noqa: E402  (1.26.1: "at least")
 
 
 def _env(p: Path | None = None, **extra) -> dict:
@@ -909,7 +910,7 @@ def run_r(tmp: Path, record, section) -> None:
     sizes = {s.id: len((ROOT / "pipeline" / s.card).read_text(encoding="utf-8")) for s in pipe.stages}
     record("R pipeline 1.14.0; a 1.13 paper gets exactly one 1.14.0 migration event and no paper "
            "file changes; every card <= the card limit",
-           pipe.meta.get("version") in ("1.14.0", "1.14.1", "1.15.0", "1.16.0", "1.17.0", "1.18.0", "1.19.0", "1.20.0", "1.21.0", "1.22.0", "1.23.0", "1.24.0", "1.25.0", "1.25.1", "1.26.0") and len(notes) == 1
+           _vt(pipe.meta.get("version")) >= (1, 14, 0) and len(notes) == 1
            and before == after
            and max(sizes.values()) <= registry.CARD_MAX_CHARS, f"{len(notes)} {max(sizes.values())}")
 

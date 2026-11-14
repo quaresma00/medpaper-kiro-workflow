@@ -15,6 +15,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
+from wfcore.state import version_tuple as _vt  # noqa: E402  (1.26.1: "at least")
 from selftest_v1140 import _gate, _out, _paper, _run, _w  # noqa: E402
 
 DISC = "07_manuscript/discussion.md"
@@ -283,7 +284,7 @@ def run_release(tmp: Path, record, section) -> None:
     pipe = registry.load()
     record("D pipeline 1.24.0; a 1.23.0 paper gets exactly one 1.24.0 event (rules now, the spin "
            "block after wf migrate --yes) and stays pinned; no paper file touched",
-           pipe.meta.get("version") in ("1.24.0", "1.25.0", "1.25.1", "1.26.0") and len(notes) == 1
+           _vt(pipe.meta.get("version")) >= (1, 24, 0) and len(notes) == 1
            and "wf migrate --yes" in notes[0]["detail"] and "spin" in notes[0]["detail"]
            and st.engine_pin == "1.23.0" and before == after, str(notes)[:300])
     cards = {s.id: (ROOT / "pipeline" / s.card).read_text(encoding="utf-8") for s in pipe.stages}

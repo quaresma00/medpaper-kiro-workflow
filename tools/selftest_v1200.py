@@ -18,6 +18,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
+from wfcore.state import version_tuple as _vt  # noqa: E402  (1.26.1: "at least")
 
 from selftest_v1140 import _env, _envset, _gate, _paper, _run, _w  # noqa: E402
 
@@ -395,7 +396,7 @@ def run_release(tmp: Path, record, section) -> None:
     skill = (ROOT / ".kiro/skills/medpaper-pipeline/SKILL.md").read_text(encoding="utf-8")
     record("R pipeline 1.20.0; a 1.19.0 paper gets one 1.20.0 event and stays pinned; cards <= "
            "limit carry the display-writing guidance; SKILL names the display wording pass",
-           registry.load().meta.get("version") in ("1.20.0", "1.21.0", "1.22.0", "1.23.0", "1.24.0", "1.25.0", "1.25.1", "1.26.0") and len(notes) == 1 and st.engine_pin == "1.19.0"
+           _vt(registry.load().meta.get("version")) >= (1, 20, 0) and len(notes) == 1 and st.engine_pin == "1.19.0"
            and max(cards.values()) <= registry.CARD_MAX_CHARS and "wf displays text" in s10
            and "log" in s11 and "displays/MANIFEST.md" in s09 and "wf displays text" in skill,
            f"{len(notes)} {max(cards.values())}")

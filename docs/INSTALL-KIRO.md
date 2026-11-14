@@ -101,11 +101,15 @@ conversation.
 S10 tables, S11 figures, S13 reference library. The gates are the safety net.
 
 **Supervised** suits the stages where judgement matters and you will want to intervene per
-hunk: S06 go/no-go, S08 Methods, S09 Results, S14 Introduction, S16 Discussion, S19 polish.
+hunk: S06 go/no-go, S08 Methods, S09 Results, S14 Introduction, S16 Discussion, S19 review.
 
-Stages that need your input stop to ask regardless: S01 intake, the go/no-go decisions
-(S02, S06), S19 scientific review, S20 journal choice, S21 author and administrative facts
-and S24 package confirmation (approval is the exact sentence '我确认这一版').
+Stages that need your input stop to ask regardless: S01 intake (design questions; whether the
+journal is already chosen), a CONDITIONAL or NO-GO publishability checkpoint (S02, S04, S06),
+the science review before the Results (S09: '继续写作' or another round), S19 confirmation
+(which also asks once for the basic author facts, AI use and the portal question), S20 journal
+choice only when no journal was named, S21 only for facts still missing, and S24 package
+confirmation after the independent audit (approval is the exact sentence '我确认这一版').
+Answers are recorded once in `.wf/user_decisions.json` and never asked again.
 
 ## Commands
 
@@ -137,10 +141,12 @@ acts on the wrong paper, that header tells you why in one line.
 - **Fabricated statistics.** Every number in the manuscript must already exist in
   `project/03_analysis/results/*.json`, written by code that ran.
 - **Running ahead.** Later stages' outputs cannot exist yet; one manuscript section per stage.
-- **Unverified figures.** Deterministic QC plus a recorded decision that the PNG was opened
-  and looked at. Reading the plotting code does not count.
-- **Corrupted polishing.** S19 snapshots the manuscript, then requires the multiset of
-  numbers, the set of citekeys and the set of figure/table references to be unchanged.
+- **Unverified figures.** Deterministic QC every round plus a look at the rendered PNG
+  (default: one consolidated look at S23, `visual_debts_cleared`). Reading the plotting code
+  does not count.
+- **Corrupted polishing.** The medical editor's pass on each section and the S22 journal
+  adaptation must keep the numbers, citekeys and figure/table references unchanged; an edit
+  that drops a null result, an interval or a limitation is refused.
 
 ## Notes for Kiro specifically
 
@@ -150,14 +156,18 @@ acts on the wrong paper, that header tells you why in one line.
 - **Trust store.** The agent runs `python tools/wf.py ...` constantly. Trusting
   `python tools/wf.py` and `python tools/figures/qc.py` removes most prompts without granting
   anything broad.
+- **No Kiro workflows for papers.** Run every stage in the paper's main chat; delegate only
+  the subagent calls the cards name (reviewer, deep reader, clinical writer, medical editor).
+  Planning steps and hand-offs of a Kiro workflow cost time and credits and add nothing here;
+  set "Use workflows" to "Only when asked".
 - **Specs are the wrong tool here.** The pipeline is already a spec-driven workflow with its
   own state machine. Use a Vibe session and let `wf status` drive; do not wrap it in a Kiro
   spec, which would add a second, competing task list.
 - **The SessionStart hook is already installed.** `.kiro/hooks/medpaper-status.json` runs
   `wf status --brief` when a session opens, so the stage, the gate state and the last handoff
   note are in context before you type anything. It takes effect from the next session.
-- **Network access is required** for PubMed, Crossref, Unpaywall and the S18 guideline fetch.
-  Without it, stages S02, S05, S07, S13, S15 and S18 fail at the gate rather than inventing
+- **Network access is required** for PubMed, Crossref, Unpaywall and the S20 guideline fetch.
+  Without it, stages S02, S05, S07, S13, S15 and S20 fail at the gate rather than inventing
   data, which is the intended behaviour.
 
 ## Verify the install

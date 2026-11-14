@@ -17,6 +17,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
+from wfcore.state import version_tuple as _vt  # noqa: E402  (1.26.1: "at least")
 from selftest_v1140 import _env, _gate, _out, _paper, _run, _w  # noqa: E402,F401
 
 
@@ -650,7 +651,7 @@ def run_release(tmp: Path, record, section) -> None:
     skill = (ROOT / ".kiro/skills/medpaper-pipeline/SKILL.md").read_text(encoding="utf-8")
     record("R pipeline 1.23.0; a 1.22.0 paper gets exactly one 1.23.0 event naming wf migrate --yes "
            "and stays pinned (no paper file touched); every new gate carries since 1.23.0",
-           pipe.meta.get("version") in ("1.23.0", "1.24.0", "1.25.0", "1.25.1", "1.26.0") and len(notes) == 1 and "wf migrate --yes" in
+           _vt(pipe.meta.get("version")) >= (1, 23, 0) and len(notes) == 1 and "wf migrate --yes" in
            notes[0]["detail"] and st.engine_pin == "1.22.0" and before == after
            and {c for _s, c, _v in gates} == set(NEW_1230) and all(v == "1.23.0" for *_x, v in gates),
            str(gates)[:300])

@@ -24,6 +24,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
+from wfcore.state import version_tuple as _vt  # noqa: E402  (1.26.1: "at least")
 from selftest_v1140 import _gate, _out, _paper, _run, _w  # noqa: E402
 from selftest_v1250 import _pin  # noqa: E402
 
@@ -357,7 +358,7 @@ def run_release(tmp: Path, record, section) -> None:
              if g.get("since") == "1.26.0"}
     record("pipeline 1.26.0; a 1.25.1 paper gets one 1.26.0 event (questions, no workflows and "
            "the run record now; the S24/S25 order after wf migrate --yes) and stays pinned",
-           pipe.meta.get("version") == "1.26.0" and len(notes) == 1
+           _vt(pipe.meta.get("version")) >= (1, 26, 0) and len(notes) == 1
            and "wf migrate --yes" in notes[0]["detail"] and "package_audit_ready" in notes[0]["detail"]
            and st.engine_pin == "1.25.1" and before == sorted(x.name for x in q.rglob("*"))
            and gates == {(S24, "package_audit_ready", False), (S25, "package_audit_ready", True)},
@@ -366,7 +367,8 @@ def run_release(tmp: Path, record, section) -> None:
                     ["policy"]["invariants"])
     cards = {s.id: (ROOT / "pipeline" / s.card).read_text(encoding="utf-8") for s in pipe.stages}
     skill = (ROOT / ".kiro/skills/medpaper-pipeline/SKILL.md").read_text(encoding="utf-8")
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    readme = "\n".join((ROOT / f).read_text(encoding="utf-8")  # 1.26.1: history moved
+                       for f in ("README.md", "docs/CHANGELOG.md"))
     steer = dict(adapters.paper_adapters(ROOT, tmp))[".kiro/steering/medpaper-pipeline.md"]
     selftest = (ROOT / "tools/selftest.py").read_text(encoding="utf-8")
     record("docs: invariant, S24/S25 cards, SKILL (no Kiro workflows for papers), paper and "
@@ -376,7 +378,7 @@ def run_release(tmp: Path, record, section) -> None:
            and "record-audit" in cards[S25] and "never start a Kiro workflow" in skill
            and "1.26.0" in skill and len(skill) <= 9000 and "never start a Kiro workflow" in steer
            and "--only v1251,v1260" in adapters.STEERING_ENGINE and "## 1.26.0" in readme
-           and "`1.26.0`" in readme and max(len(c) for c in cards.values()) <= registry.CARD_MAX_CHARS
+           and f"`{pipe.meta.get('version')}`" in readme and max(len(c) for c in cards.values()) <= registry.CARD_MAX_CHARS
            and selftest.count("selftest_v1251.run(") == 1 and selftest.count("selftest_v1260.run(") == 1
            and '"--only"' in selftest,
            str({k: len(v) for k, v in cards.items() if len(v) > 3900}) + f" skill={len(skill)}")

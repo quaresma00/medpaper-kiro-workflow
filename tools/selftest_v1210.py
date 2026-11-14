@@ -14,6 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
+from wfcore.state import version_tuple as _vt  # noqa: E402  (1.26.1: "at least")
 from selftest_v1140 import _env, _envset, _gate, _out, _paper, _run, _w  # noqa: E402
 
 SPRINGER = "https://link.springer.com/journal/228/submission-guidelines"
@@ -461,7 +462,7 @@ def run_release(tmp: Path, record, section) -> None:
     cards = {c.stem: len(c.read_text(encoding="utf-8")) for c in (ROOT / "pipeline/stages").glob("S*.md")}
     record("R pipeline 1.21.0; a 1.20.0 paper gets one 1.21.0 event and stays pinned (no paper "
            "file touched); the three new gates carry since 1.21.0; every card <= limit",
-           registry.load().meta.get("version") in ("1.21.0", "1.22.0", "1.23.0", "1.24.0", "1.25.0", "1.25.1", "1.26.0") and len(notes) == 1
+           _vt(registry.load().meta.get("version")) >= (1, 21, 0) and len(notes) == 1
            and st.engine_pin == "1.20.0" and before == after
            and all(gates[k].get("since") == "1.21.0" for k in (
                ("S04_data", "web_captures_traced"), ("S20_journal", "indexing_evidence_cited"),
