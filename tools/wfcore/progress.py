@@ -24,7 +24,14 @@ def project_arg(argv: list[str]) -> Path | None:
     return None
 
 
-def write(project: Path, command: str, rc: int | None, detail: str = "") -> Path | None:
+def write(project: Path, command: str, rc: int | None, detail: str = "",
+          seconds: float | None = None) -> Path | None:
+    try:  # 1.26.0: the same call feeds the run record (`wf report`)
+        from . import runlog
+        runlog.log(project, "cmd", name=command, rc=rc,
+                   seconds=round(seconds, 1) if seconds is not None else None)
+    except Exception:  # noqa: BLE001 - the record never breaks a command
+        pass
     try:
         project = Path(project)
         state_file = project / ".wf/state.json"

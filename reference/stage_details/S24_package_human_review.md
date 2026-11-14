@@ -1,4 +1,28 @@
-# S24 - Review rounds on the submission package, then the user's confirmation - details
+# S24 - Independent audit of the submission package, then the user's confirmation - details
+
+> 1.26.0 supersedes the order below for papers on 1.26.0 (new, migrated with `wf migrate
+> --yes`, or after a journal switch): the independent audit that S25 used to run now runs
+> here, BEFORE the user's confirmation. (1) Portal first (decision portal_check, usually
+> answered in the S19 message): its differences change uploads, so they are applied before the
+> auditor reads. (2) `review_round.py start --scope package` opens round 1 = the FULL audit
+> (mode `audit`) with the former S25 brief: first-time reader, editor, journal compliance;
+> every compliance-matrix row agree/disagree; obligations missing from the requirement list
+> as `MISSING L00nn` (BLOCKING, also listed as a numbered finding); engine-owned formatting
+> under "Engine issues"; `Package round: P00n` and PASS/REVISE/BLOCKED under Verdict. (3) Fix
+> every BLOCKING/MINOR finding, rebuild once (`wf rebuild --wait`), close. (4) A round that
+> changed an upload (visible content differs between the bundle and the close) is re-audited
+> at once with `start --delta` (mode `recheck`: the open BLOCKING/MINOR findings of the
+> previous round RESOLVED/OPEN plus new BLOCKING issues, open matrix rows only; past the audit
+> cap the regression rule is added) - no message to the user in between. (5) One message, one
+> confirmation: `decide no_further_review` is refused (gate `package_audit_ready`) until the
+> last audit round read exactly the package being confirmed and is not BLOCKED. A REVISE
+> verdict can be confirmed (the message says so), but S25 then cannot record PASS - fix and
+> re-audit first. (6) `package_review.py freeze` records `package_round`, `confirmed_version`
+> and `audit_verdict`; S25 verifies the freeze, records that round's report as the S25 audit
+> file (`package_review.py record-audit`) and runs the final checks without a second reading.
+> Reviewer calls per journal: 1 (nothing to fix) or 2 (audit + re-audit) instead of up to 4.
+> The sections below describe the order before 1.26.0 (papers pinned earlier); where they say
+> S25 audits the freeze, a 1.26.0 package was already audited here.
 
 > 1.22.0. (J3) Portal reconciliation is a standard step before the confirmation: ask once
 > (recorded as decision `portal_check`) whether to read the submission system now; the user

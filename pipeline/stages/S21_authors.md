@@ -4,8 +4,10 @@ Goal: user-owned authorship and compliance facts, collected once, after the scie
 reviewed and the journal chosen.
 Details (statements placement, blinding, abbreviation placement, reference count): `reference/stage_details/S21_authors.md`.
 
-## Ask the user (one message)
-Exact author order and names, affiliations, ORCIDs, corresponding-author details,
+## Ask the user (one message, only what `wf decisions show` lacks)
+1.26.0: the S19 message usually collected authors, funding, conflicts and AI use; use them
+and ask only what is missing or journal-specific. The full list: exact author order and names,
+affiliations, ORCIDs, corresponding-author details,
 funding/grants, conflicts, code availability, acknowledgements, CRediT roles, preprint and
 prior presentation; coders'/adjudicators' specialty and experience only if the study basis
 declares manual abstraction (`data_source.manual_abstraction`) and `human_coders` is

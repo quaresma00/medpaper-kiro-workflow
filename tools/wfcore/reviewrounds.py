@@ -124,6 +124,9 @@ def brief(project, rnd: dict, bundle) -> str:
     """The neutral brief plus the study-specific rules (1.13.0: no multi-person checks for
     automated extraction, no protocol-deviation requests outside a registered meta-analysis)."""
     from .declarations import review_rules
+    if rnd.get("scope") == "package" and rnd.get("mode") in ("audit", "recheck"):
+        from .packageaudit import round_brief  # 1.26.0: the S24 rounds are the package audit
+        return round_brief(project, rnd, bundle)
     if rnd.get("scope") == "science":
         text = SCIENCE_BRIEF.format(rid=rnd["id"], mode=rnd["mode"], bundle=bundle)
     else:
@@ -328,25 +331,32 @@ def start(project: Path, scope: str, stage: str, delta: bool = False, llm: bool 
         linked = rounds[-1]["id"]
     current = inputs(project, scope)
     prev = rounds[-1] if rounds else None
-    if delta and prev:
-        changed = _changed_since(prev, current)
-        reviewed = set(changed)
-        if scope == "manuscript" and changed:
-            try:
-                from .dependencies import closure
-                reviewed |= set(closure(project, changed)) & set(current)
-            except Exception:  # noqa: BLE001 - a broken plan keeps the changed files alone
-                pass
-        mode = "delta"
+    from . import packageaudit
+    if scope == "package" and packageaudit.audit_flow(project):
+        # 1.26.0: round 1 of a journal epoch is the full independent audit (the former S25
+        # reading, before the user's confirmation); every later round re-audits the changes.
+        # The auditor always gets every package file; caps add the regression rule instead.
+        reviewed, mode = set(current), packageaudit.next_mode(rounds)
     else:
-        reviewed, mode = set(current), "full"
-    # 1.22.0 (U4/J5): fast mode / a repackage epoch - the package review is compliance-only
-    # (no reviewer subagent) unless the user asks for one (--llm).
-    if scope == "package" and cv.review_mode(project) == "fast" and not llm:
-        mode = "compliance"
-    # 1.22.0 (R2): after the cap only regressions are checked.
-    elif capped and prev:
-        mode = "regression"
+        if delta and prev:
+            changed = _changed_since(prev, current)
+            reviewed = set(changed)
+            if scope == "manuscript" and changed:
+                try:
+                    from .dependencies import closure
+                    reviewed |= set(closure(project, changed)) & set(current)
+                except Exception:  # noqa: BLE001 - a broken plan keeps the changed files alone
+                    pass
+            mode = "delta"
+        else:
+            reviewed, mode = set(current), "full"
+        # 1.22.0 (U4/J5): fast mode / a repackage epoch - the package review is compliance-only
+        # (no reviewer subagent) unless the user asks for one (--llm).
+        if scope == "package" and cv.review_mode(project) == "fast" and not llm:
+            mode = "compliance"
+        # 1.22.0 (R2): after the cap only regressions are checked.
+        elif capped and prev:
+            mode = "regression"
     rid = f"{SCOPES[scope]['prefix']}{len(rounds) + 1:03d}"
     rnd = {"id": rid, "scope": scope, "stage": stage, "mode": mode, "started_at": _now(),
            "inputs": current, "reviewed": sorted(reviewed), "closed_at": None,
@@ -440,6 +450,9 @@ def write_bundle(project: Path, rnd: dict) -> Path:
     import shutil
     from .readerreview import write_text_copies
     project = Path(project)
+    if rnd.get("scope") == "package" and rnd.get("mode") in ("audit", "recheck"):
+        from .packageaudit import write_round_bundle  # 1.26.0: the S24 audit bundle
+        return write_round_bundle(project, rnd)
     out = project / BUNDLE_DIR / rnd["id"]
     if out.exists():
         shutil.rmtree(out)
@@ -695,6 +708,11 @@ def close(project: Path, scope: str, findings: dict[str, int], changes: list[dic
     from . import convergence as cv  # 1.22.0 (R2): no new must-fix -> READY
     rnd["ready"] = cv.ready(rnd, text)
     rnd["must_fix"] = cv.must_fix_ids(text)
+    if scope == "package" and rnd.get("mode") in ("audit", "recheck"):
+        import hashlib  # 1.26.0: the audit verdict and the exact report S25 will record
+        from .packageaudit import verdict
+        rnd["audit_verdict"] = verdict(text)
+        rnd["audit_sha256"] = hashlib.sha256(text.replace("\r\n", "\n").encode("utf-8")).hexdigest()
     _save(project, data)
     _write_summary(project, scope, data[scope])
     return rnd
@@ -723,6 +741,12 @@ def decide(project: Path, scope: str, answer: str, words: str) -> dict:
         if pend:
             raise ValueError("author decision(s) pending: " + ", ".join(f["id"] for f in pend)
                              + " (review_round.py author ID change|keep --words ...)")
+        if scope == "package":
+            from . import packageaudit  # 1.26.0: confirm only what the auditor last read
+            if packageaudit.audit_flow(project):
+                probs = packageaudit.problems(project)
+                if probs:
+                    raise ValueError("the package cannot be confirmed yet: " + "; ".join(probs))
         current = inputs(project, scope)
         drift = _changed_since(rnd, current, project)
         if drift:

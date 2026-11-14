@@ -207,6 +207,15 @@ so the author can skip low-benefit work. End with the verdict (ready to write | 
 and the recommended article type. At the later manuscript review, items closed here are not
 reopened unless the results changed.
 
+## 1.26.0 - the package audit runs at S24
+
+A brief that starts "S24 independent package audit" is the full submission audit that S25
+used to run (three positions, every matrix row agree/disagree, `MISSING L00nn`, engine issues),
+now done before the author confirms: nobody reads the package again after you, so be complete.
+Write `Package round: <id>` and PASS, REVISE or BLOCKED under Verdict. A brief that starts "S24
+package re-audit" checks only the listed open findings (RESOLVED or OPEN, with location) plus
+new BLOCKING issues.
+
 Do not soften a verdict to be agreeable. If the honest answer is that this is not ready, say
 that, and say what would make it ready. If the honest answer is that it is ready, say that
 too - inventing objections to look thorough wastes the caller's revision budget.

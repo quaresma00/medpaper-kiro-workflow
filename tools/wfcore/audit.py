@@ -89,11 +89,37 @@ MATRIX_RECHECK = """Compliance (1.18.0): re-check ONLY the matrix rows in open_r
 (`- MISSING L00nn: "<quote>" - BLOCKING`). CANNOT_ASSESS/portal rows are user items, not REVISE."""
 
 
+def package_files(project: Path, with_freeze: bool = True) -> list[str]:
+    """What the package audit reads (S25 audit-start; 1.26.0 also the S24 audit rounds, which
+    run before any freeze exists): the uploads, the journal's guide and requirement list, the
+    compliance matrix and evidence, the QA files and hash-bound text copies of DOCX/XLSX."""
+    from .packagefreeze import FREEZE_REL
+    from .readerreview import write_text_copies
+    project = Path(project)
+    manifest = json.loads((project / "08_submission/bundle/manifest.json").read_text(encoding="utf-8"))
+    items = [str(i.get("file", "")) for i in manifest.get("items", [])]
+    copies = write_text_copies(project, items)
+    files = [*([FREEZE_REL] if with_freeze else []), *items,
+             "08_submission/target_journal.json", "08_submission/guidelines_extract.md",
+             *guideline_files(project),
+             # 1.18.0 (K6): the requirement list and the matrix, judged row by row.
+             "08_submission/guideline_requirements.json",
+             "08_submission/compliance_matrix.md", "08_submission/compliance_matrix.json",
+             "08_submission/compliance_evidence.json",
+             # 1.21.0 (B8): the evidence index (capture method, URL, date, sha256), indexing
+             # captures/screenshots and the submission-system record.
+             *evidence_files(project),
+             "08_submission/bundle/manifest.json", "08_submission/bundle/SUBMISSION_CHECKLIST.md",
+             "08_submission/submission_qc.md", *copies]
+    return list(dict.fromkeys(files))
+
+
 def required_rows(project: Path, matrix: dict) -> list[str]:
     """Matrix rows the current audit must judge: all (full audit) or the open ones (re-audit,
-    rows_required.json in the latest bundle)."""
+    rows_required.json in the latest bundle; 1.26.0: the S24 round the freeze binds)."""
     ids = [str(r.get("id")) for r in matrix.get("rows") or []]
-    bundle = latest_bundle(project)
+    from .packageaudit import rows_bundle
+    bundle = rows_bundle(project) or latest_bundle(project)
     data = None
     if bundle is not None and (bundle / "rows_required.json").is_file():
         try:

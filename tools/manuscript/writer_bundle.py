@@ -664,6 +664,15 @@ def lint(project: Path, stage: str) -> list[str]:
     return problems
 
 
+def _runlog(project: Path, agent: str, what: str) -> None:
+    """1.26.0: subagent calls for `wf report` (the record never breaks a command)."""
+    try:
+        from wfcore import runlog
+        runlog.log(project, "subagent", agent=agent, what=what)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _polish_cli(project: Path, args) -> int:
     """1.23.0 (S5): receipt (writer draft) -> edit (editor bundle) -> polished (accept)."""
     from wfcore import sectionpolish as sp
@@ -689,6 +698,7 @@ def _polish_cli(project: Path, args) -> int:
                 raise ValueError("the assembled manuscript needs no writer receipt: edit, then polished")
             if args.command == "edit":
                 out = sp.build_manuscript_edit(project)
+                _runlog(project, sp.EDITOR, "manuscript")
                 print(f"invoke subagent: name={sp.EDITOR}, prompt=\"Read {out / 'MANIFEST.md'} and "
                       f"follow it; write the polished paragraphs to {out / 'polished.md'}\" (run it "
                       "in the paper's main chat)")
@@ -701,6 +711,7 @@ def _polish_cli(project: Path, args) -> int:
             return 0
         if args.command == "edit":
             out = sp.build_edit(project, args.section)
+            _runlog(project, sp.EDITOR, args.section)
             print(f"invoke subagent: name={sp.EDITOR}, prompt=\"Read {out / 'MANIFEST.md'} and "
                   f"follow it; write the polished section to {out / 'polished.md'}\" (run it in "
                   "the paper's main chat)")
@@ -754,6 +765,7 @@ def main(argv: list[str] | None = None) -> int:
                 for g in gaps[:8]:
                     print(f"  GAP {g}")
                 return 2
+            _runlog(project, "medpaper-clinical-writer", args.stage)
             print("Delegate to the medpaper-clinical-writer agent with that ONE path; then run "
                   "`wf check` (engineering_language_clean) on the written section.")
         problems = lint(project, args.stage)

@@ -178,8 +178,28 @@ class State:
             self._note_v1240(old_version, pipeline_version)
             self._note_v1250(old_version, pipeline_version)
             self._note_v1251(old_version, pipeline_version)
+            self._note_v1260(old_version, pipeline_version)
             self.save()
         return changed
+
+    def _note_v1260(self, old_version: str, new_version: str) -> None:
+        """1.26.0: one event; no file or stage is touched."""
+        if (version_tuple(old_version) >= (1, 26, 0) or version_tuple(new_version) < (1, 26, 0)
+                or self.data.get("v1260_migration_noted")):
+            return
+        self.data["v1260_migration_noted"] = True
+        self.event("requirements_changed",
+                   "1.26.0: applies now - the S19 confirmation message also asks for the basic "
+                   "author facts, funding, conflicts, AI use and whether to read the submission "
+                   "system (recorded once with `wf decisions set`; S21 and S24 ask only what is "
+                   "missing); papers run in their main chat without Kiro workflows; `wf report` "
+                   "shows the run record (.wf/run_ledger.jsonl from now on). After `wf migrate "
+                   "--yes` (or a journal switch) the package order changes for stages not yet "
+                   "completed: S24 round 1 is the full independent audit (reader, editor, "
+                   "journal compliance), every change is re-audited before the one confirmation, "
+                   "the freeze binds that audit round and S25 verifies without a second reading "
+                   "(package_audit_ready). A freeze already taken keeps the S25 audit. Paper "
+                   "files were not modified.")
 
     def _note_v1170(self, old_version: str, new_version: str) -> None:
         """1.17.0: one event; no file or stage is touched."""

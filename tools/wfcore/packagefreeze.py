@@ -192,6 +192,10 @@ def write_freeze(project: Path, output: Path | None = None) -> Path:
     except ValueError as exc:
         raise ValueError("freeze manifest must remain inside the project directory") from exc
     payload = build_freeze(project)
+    # 1.26.0: the freeze names the S24 audit round the user confirmed (not part of freeze_id,
+    # which covers the file records only); S25 then verifies instead of auditing again.
+    from .packageaudit import freeze_binding
+    payload.update(freeze_binding(project))
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return output

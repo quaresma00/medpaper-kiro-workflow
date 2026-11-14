@@ -2154,8 +2154,8 @@ def run_codex_integration() -> None:
                f"card must name `{agent}` so the work is not done in the main context")
 
     record("pipeline and skill versions agree",
-           pipe["meta"]["version"] == "1.25.1" and 'version: "2.9.0"' in skill,
-           f'pipeline={pipe["meta"]["version"]}, skill=2.9.0 (Kiro adapter revision)')
+           pipe["meta"]["version"] == "1.26.0" and 'version: "2.10.0"' in skill,
+           f'pipeline={pipe["meta"]["version"]}, skill=2.10.0 (Kiro adapter revision)')
     record("all 25 stage cards exist",
            len(pipe["stage"]) == 25 and
            all((ROOT / "pipeline" / s["card"]).is_file() for s in pipe["stage"]),
@@ -2182,10 +2182,12 @@ def run_codex_integration() -> None:
     record("independent reviewer is singular, read-only, and before author intake",
            independent.get("needs_user", False) is False and human.get("needs_user") is True and
            authors.get("needs_user") is True and "exactly one independent subagent" in review_card and
-           "must not edit files" in review_card and "Do not ask for authors" in
+           "must not edit files" in review_card and "Author facts only" in
            _card("S19_human_review"),
-           "one frozen-package review, then user review, then authors")
-    record("final package audit waits for explicit user OK and is independent",
+           "one frozen-package review, then user review; 1.26.0: author facts only inside the "
+           "S19 confirmation message, never a separate pause")
+    record("final package audit is independent and precedes the user's one OK (1.26.0: S24 "
+           "round 1 is the audit, S25 records it; older freezes keep the S25 audit)",
            package_human.get("needs_user") is True and
            final_audit.get("needs_user", False) is False and
            "我确认这一版" in package_human_card and
@@ -2195,7 +2197,9 @@ def run_codex_integration() -> None:
            "Freeze ID: <freeze_id>" in final_audit_card and
            "allowed = [\"PASS\", \"PASS_AUTHOR_FINAL_COPY\"]" in
            (ROOT / "pipeline/pipeline.toml").read_text(encoding="utf-8") and
-           "loop --to S24_package_human_review" in final_audit_card,
+           "loop --to S24_package_human_review" in final_audit_card and
+           "record-audit" in final_audit_card and
+           "review_round.py start --scope package" in package_human_card,
            "user confirmation -> immutable freeze -> one guideline audit -> PASS or S24 loop")
     final_headings = next(g for g in final_audit["gate"]
                           if g["check"] == "md_sections")["headings"]
@@ -5194,7 +5198,7 @@ def run_v160(tmp: Path) -> None:
            any(g["check"] == "reader_review_coverage" for g in s18["gate"])
            and "review_round.py start --scope manuscript" in (ROOT / "pipeline/stages/S18_independent_review.md")
            .read_text(encoding="utf-8"))
-    record("pipeline version is 1.25.1", pipe.meta.get("version") == "1.25.1")
+    record("pipeline version is 1.26.0", pipe.meta.get("version") == "1.26.0")
 
 
 def run_v170(tmp: Path) -> None:
@@ -5780,6 +5784,11 @@ def main() -> int:
     ap.add_argument("--online", action="store_true", help="also exercise the live APIs")
     ap.add_argument("--workdir", type=Path,
                     help="use an existing empty directory instead of the system temp root")
+    # 1.26.0 (maintenance): a quick run of named version modules while fixing; the full run
+    # (no --only) stays mandatory before every release tag.
+    ap.add_argument("--only", default="",
+                    help="comma-separated version modules, e.g. v1251,v1260 (quick run of those "
+                         "modules only; not a release check)")
     args = ap.parse_args()
 
     for mod, why in (("matplotlib", "figures"), ("numpy", "QC"), ("openpyxl", "tables"),
@@ -5832,7 +5841,23 @@ def main() -> int:
     if args.keep:
         os.environ["MEDPAPER_SELFTEST_KEEP_ARTIFACTS"] = "1"
     print(f"temp project: {proj}\n")
-
+    if args.only:  # 1.26.0: only the named version modules (quick, not a release check)
+        import importlib
+        try:
+            for name in [x.strip() for x in args.only.split(",") if x.strip()]:
+                mod = importlib.import_module(name if name.startswith("selftest_")
+                                              else f"selftest_{name}")
+                mod.run(tmp / f"{name}_root", record, section)
+        finally:
+            if not (args.keep or args.workdir):
+                shutil.rmtree(tmp, ignore_errors=True)
+        failed = [r for r in results if r[1] == FAIL]
+        print("\n" + "=" * 70)
+        print(f"{len(results) - len(failed)}/{len(results)} checks passed (--only {args.only}; "
+              "the full run is required before a release)")
+        for name, _, detail in failed:
+            print(f"  FAIL  {name}  {detail}")
+        return 2 if failed else 0
     try:
         section("building fixture")
         build_fixture(proj)
@@ -5905,8 +5930,8 @@ def main() -> int:
         selftest_v1250.run(tmp / "v1250_root", record, section)
         import selftest_v1251
         selftest_v1251.run(tmp / "v1251_root", record, section)
-        import selftest_v1251
-        selftest_v1251.run(tmp / "v1251_root", record, section)
+        import selftest_v1260
+        selftest_v1260.run(tmp / "v1260_root", record, section)
         run_new_wiring()
         section("isolation")
         record("selftest did not touch the real papers root or user home",

@@ -1,4 +1,23 @@
-# S25 - Independent reader, editor and compliance audit of the confirmed package - details
+# S25 - Final verification of the confirmed package (audit only for older freezes) - details
+
+> 1.26.0: when the package freeze names an audited S24 round (`package_round`; every freeze
+> taken on 1.26.0), S25 starts NO reviewer: the independent reader/editor/compliance audit ran
+> at S24 before the user's confirmation, every change it caused was re-audited, and the user
+> confirmed exactly what the auditor last read. Here: `package_review.py verify` (freeze
+> intact), `package_review.py record-audit` (the bound round's saved report becomes
+> `08_submission/independent_submission_audit.md`, byte for byte; `submission_audit_matches_freeze`
+> checks that binding instead of a Freeze ID line), `wf check` (reproduction proof, live
+> references, bundle, DOCX preflight, compliance matrix with every row judged, checklist,
+> freezes, `package_audit_ready` final: the freeze binds the last audit round, the frozen
+> uploads are what it read, and PASS needs its verdict PASS), then `wf decide
+> submission_package_independent_audit PASS --why ...`. A last verdict REVISE offers the same
+> two routes as before: one S24 re-audit round with a new confirmation and freeze, or the
+> author final copy (PASS_AUTHOR_FINAL_COPY). `package_review.py audit-start` refuses a
+> 1.26.0 freeze, so the package is never read twice. Everything below ("Before 1.26.0")
+> applies to a freeze without an audited round (papers pinned earlier, or frozen before
+> migrating).
+
+## Before 1.26.0
 
 > 1.15.0 supersedes older wording below where they differ: `package_review.py audit-start`
 > writes the audit bundle - the FIRST audit is full, later ones re-check the previous findings

@@ -310,7 +310,7 @@ def run_release(tmp: Path, record, section) -> None:
     gates = {(s.id, g["check"]) for s in pipe.stages for g in s.gate if g.get("since") == "1.25.1"}
     record("release: pipeline 1.25.1; one 1.25.1 event for a 1.25.0 paper (pinned, files "
            "untouched); new gates carry since 1.25.1 at S09/S16/S17/S22",
-           pipe.meta.get("version") == "1.25.1" and len(notes) == 1
+           pipe.meta.get("version") in ("1.25.1", "1.26.0") and len(notes) == 1
            and "wf migrate --yes" in notes[0]["detail"] and st.engine_pin == "1.25.0"
            and before == sorted(x.name for x in q.rglob("*"))
            and {("S09_results", "prespecified_outcomes_reported"),
@@ -325,7 +325,7 @@ def run_release(tmp: Path, record, section) -> None:
            "1.25.1" in cards["S09_results"] and "limitations_present" in cards["S16_discussion"]
            and "primary_first" in cards["S17_assemble"] and "1.25.1" in cards["S22_polish"]
            and "1.25.1" in skill and len(skill) <= 9000 and "## 1.25.1" in readme
-           and "`1.25.1`" in readme
+           and ("`1.25.1`" in readme or "`1.26.0`" in readme)
            and max(len(c) for c in cards.values()) <= registry.CARD_MAX_CHARS,
            str({k: len(v) for k, v in cards.items() if len(v) > 3900}) + f" skill={len(skill)}")
 

@@ -734,11 +734,19 @@ def submission_audit_matches_freeze(ctx: Ctx) -> Result:
     if named:
         freeze_id = named
     if len(freeze_id) != 64 or freeze_id not in audit:
+        # 1.26.0: the audit ran at S24 before the confirmation; the freeze names that round and
+        # the audit file must be its saved report, byte for byte (package_review.py record-audit).
+        from ..packageaudit import audit_bound
+        bound, why = audit_bound(ctx.project, audit)
+        if bound:
+            return Result(True, "submission_audit_matches_freeze", why)
         return Result(
             False,
             "submission_audit_matches_freeze",
-            "independent audit does not identify the exact current freeze_id",
-            ["Put `Freeze ID: <freeze_id>` under the audit Verdict heading after reviewing that frozen package."],
+            "independent audit does not identify the exact current freeze_id"
+            + (f"; {why}" if why else ""),
+            ["Put `Freeze ID: <freeze_id>` under the audit Verdict heading after reviewing that frozen package "
+             "(1.26.0 freezes: `package_review.py record-audit` copies the bound S24 audit report)."],
         )
     return Result(True, "submission_audit_matches_freeze", f"audit identifies freeze {freeze_id[:12]}...")
 

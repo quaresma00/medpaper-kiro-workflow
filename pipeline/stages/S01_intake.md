@@ -26,6 +26,8 @@ where they are; an older attempt in a subfolder stays untouched (mention it once
   entry, adjudicators or agreement. Only when true: each coder's role, specialty, years of
   experience (`human_coders`).
 - British spelling only if wanted (`wf config set spelling british`; default american).
+- The target journal if already chosen (1.26.0): `wf decisions set target_journal "<journal>"
+  --words "<user's words>"`; S20 then only verifies it. Not chosen yet: S20 proposes candidates.
 
 ## Outputs
 - `01_protocol/idea.json`

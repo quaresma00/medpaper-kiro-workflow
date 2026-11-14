@@ -411,7 +411,8 @@ def run_switch(tmp: Path, record, section) -> None:
                     "https://www.accessdata.fda.gov/label.pdf", "oxaliplatin label 2025", "fdalabel")
     ev = audit.evidence_files(p)
     gl = audit.guideline_files(p)
-    pr = (ROOT / "tools/package_review.py").read_text(encoding="utf-8")
+    pr = "\n".join((ROOT / f).read_text(encoding="utf-8") for f in (  # 1.26.0: the list moved
+        "tools/package_review.py", "tools/wfcore/audit.py"))
     idx = json.loads((p / guideingest.INDEX).read_text(encoding="utf-8"))
     record("B8 the S25 audit bundle lists browser-ingested guide sources like other originals and "
            "the evidence index (capture method), indexing capture + screenshot, portal record",
@@ -460,7 +461,7 @@ def run_release(tmp: Path, record, section) -> None:
     cards = {c.stem: len(c.read_text(encoding="utf-8")) for c in (ROOT / "pipeline/stages").glob("S*.md")}
     record("R pipeline 1.21.0; a 1.20.0 paper gets one 1.21.0 event and stays pinned (no paper "
            "file touched); the three new gates carry since 1.21.0; every card <= limit",
-           registry.load().meta.get("version") in ("1.21.0", "1.22.0", "1.23.0", "1.24.0", "1.25.0", "1.25.1") and len(notes) == 1
+           registry.load().meta.get("version") in ("1.21.0", "1.22.0", "1.23.0", "1.24.0", "1.25.0", "1.25.1", "1.26.0") and len(notes) == 1
            and st.engine_pin == "1.20.0" and before == after
            and all(gates[k].get("since") == "1.21.0" for k in (
                ("S04_data", "web_captures_traced"), ("S20_journal", "indexing_evidence_cited"),

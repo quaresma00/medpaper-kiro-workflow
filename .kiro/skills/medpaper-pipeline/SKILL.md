@@ -3,7 +3,7 @@ name: medpaper-pipeline
 description: Drives a gated, resumable medical/clinical research paper pipeline from a research idea through feasibility, data acquisition, exploratory analysis, figure and table production, IMRAD writing, independent review, journal selection, de-AI polish and a Word submission package. Use whenever the task involves a medical research idea, a clinical manuscript, a research protocol, literature retrieval via PubMed, publication-grade figures or three-line tables, journal selection, a submission package, or a revision round on any of these. Do not follow the workflow from memory - run `python tools/wf.py status` and obey the stage card it prints.
 compatibility: Requires Python 3.11+ for the driver. Tables and Word output additionally need numpy, pandas, openpyxl and python-docx (matplotlib for the Python figure path). R 4.3+ with the packages in reference/language_policy.toml (figures default to R). Network access is required for PubMed, Crossref and Unpaywall. Set NCBI_API_KEY to raise the E-utilities rate limit.
 metadata:
-  version: "2.9.0"
+  version: "2.10.0"
   stages: "25"
   entrypoint: "python tools/wf.py status"
 ---
@@ -74,18 +74,18 @@ manuscript instead of the subagent. If context runs out, say so.
 | each prose section, right after its draft (1.23.0) | `medpaper-medical-editor` | `writer_bundle.py receipt` -> `edit --section S` (pass its MANIFEST) -> `polished --section S`; numbers and citations unchanged (`section_polished`). 1.24.0 voice: `reference/writing_voice.md`. 1.25.0: after S17 only `polish.py crosscheck` + `edit --section manuscript` (changed paragraphs). |
 | S09, before the Results (1.23.0) | `medpaper-reviewer` (science) | `review_round.py start --scope science`; revise analyses/displays/Methods, ONE summary, ONE question (another round or proceed). |
 | S15 | `medpaper-deepreader` | One invocation per full text; save its notes yourself. |
-| S18, S19/S24 rounds, S25 | `medpaper-reviewer` | Give it only the bundle path `review_round.py start` prints and the neutral brief. It writes only `.wf/review_bundle/<round>/report.md`; `close` reads that file - never paraphrase findings. Confirmation is the exact sentence `我确认这一版`. |
+| S18, S19/S24 rounds | `medpaper-reviewer` | Give it only the bundle path `review_round.py start` prints and the neutral brief. It writes only `.wf/review_bundle/<round>/report.md`; `close` reads that file - never paraphrase findings. Confirmation is the exact sentence `我确认这一版`. |
 
-## Review loops and Kiro workflows (1.22.0)
+## Review loops; no Kiro workflows (1.26.0)
 
-- `review_round.py start` / `package_review.py audit-start` print the exact subagent call;
-  run review rounds in the paper's main chat (a workflow step cannot start a subagent);
-  `close` reads the report.md the reviewer wrote. Nothing is relayed by hand.
-- Orchestrating with Kiro workflows: a user scope change -> `update_workflow`
-  replace_remaining (or end the skipped steps), never leave them pending; on abort write one
-  line: what was delivered, what was skipped. Before relaying a paused step's question,
-  check `wf decisions show` and the conversation; answer it when derivable and state the basis.
+- Run the paper in its main chat: never start a Kiro workflow for paper stages (planning and
+  hand-offs cost time and credits); delegate only the subagent calls the cards name.
+  `review_round.py start` prints the exact call; `close` reads the reviewer's report.md.
+- A workflow the user started anyway: a scope change -> `update_workflow` replace_remaining;
+  on abort one line (delivered / skipped); answer a paused step's question when derivable.
 - Before asking the user anything: `wf decisions show`; record answers with `wf decisions set`.
+- 1.26.0: S24 round 1 is the full package audit, every change is re-audited before the one
+  confirmation, S25 starts no reviewer; `wf report` shows the run record.
 
 ## Python and R
 
@@ -110,7 +110,7 @@ keeps its pinned gate set for completed stages until `wf migrate --yes`.
 7. Polishing changes wording only (snapshot + diff).
 8. The science freezes at S19; journals adapt the copy in `08_submission/manuscript/`.
 9. Every revision goes through `tools/rework.py` (`preview` first; an S19 return only on 我确认回退).
-10. The package is final only after the user's 我确认这一版 at S24; S25 audits the freeze.
+10. The package is final only after the S24 audit and the user's 我确认这一版; S25 verifies.
 11. A red gate means fix it, not `--force`.
 
 ## Other skills

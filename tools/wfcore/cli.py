@@ -888,6 +888,15 @@ def cmd_decisions(args) -> int:
     return 0
 
 
+def cmd_report(args) -> int:
+    """1.26.0: `wf report` - where this paper's time and credits went, per stage."""
+    _pipe, _st, proj = _load(warn_stderr=False)
+    from . import runlog
+    print("\n".join(runlog.report(proj)))
+    print(f"\n(also written to {proj / runlog.REPORT_REL})")
+    return 0
+
+
 def cmd_handoff(args) -> int:
     pipe, st, proj = _load(warn_stderr=False)
     lines = handoff_lines(pipe, st, proj)
@@ -963,6 +972,9 @@ def cmd_check(args) -> int:
     results = gates.run_stage(pipe, st, proj, stage, record=True,
                               reuse=bool(getattr(args, "reuse", False)))
     ok, blocking, warned = gates.summarize(results)
+    from . import runlog  # 1.26.0: gate failures per stage for `wf report`
+    runlog.log(proj, "check", stage=stage.id, blocking=blocking, warnings=warned,
+               failing=[r.check for r in results if r.blocking][:8])
     if getattr(args, "summary", False) or getattr(args, "quiet", False):
         # 1.9.0 (#21): short output for agent shells that time out or truncate long logs.
         if not getattr(args, "summary", False):
@@ -2569,6 +2581,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--source", action="append", default=[], help="verify: public source URL(s)")
     p.add_argument("--fact", default="", help="verify: what the source states")
     p.set_defaults(fn=cmd_decisions)
+    p = sub.add_parser("report", help="1.26.0: the run record - time, gate failures, subagent "
+                                      "calls, reproductions, rebuilds and waiting per stage "
+                                      "(also written to .wf/run_report.md)")
+    p.set_defaults(fn=cmd_report)
 
     p = sub.add_parser("migrate", help="adopt this engine's full gate set for completed stages "
                                        "(the paper is pinned to the engine it ran under)")
@@ -2793,7 +2809,9 @@ def _run_logged(args) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    import time
     from . import argtext
+    _T0[0] = time.time()
     ap = build_parser()
     # 1.12.0 (C1): --why-file/--why-b64 and mis-decoded Chinese text are fixed before parsing.
     argv = argtext.fix_argv(sys.argv[1:] if argv is None else argv)
@@ -2853,15 +2871,20 @@ def main(argv: list[str] | None = None) -> int:
         _progress(args, rc)
 
 
+_T0 = [None]  # 1.26.0: start of the current command, for the run record
+
+
 def _progress(args, rc) -> None:
     """1.11.0 (#3g): keep <paper>/.wf/progress.md current after every paper command."""
     if args.cmd in ("doctor", "checks", "papers", "invariants", "archetype", "new", "init",
-                    "handoff"):
+                    "handoff", "report"):
         return
     try:
+        import time
         from . import progress
+        secs = (time.time() - _T0[0]) if _T0[0] else None
         progress.write(paths.project_dir(), " ".join(["wf", args.cmd] + (
-            [str(args.stage)] if getattr(args, "stage", None) else [])), rc)
+            [str(args.stage)] if getattr(args, "stage", None) else [])), rc, seconds=secs)
     except (Exception, SystemExit):  # noqa: BLE001 - no paper selected
         pass
 

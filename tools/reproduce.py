@@ -38,6 +38,7 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -403,7 +404,7 @@ class _Tee:
 
 
 def _run_with_progress(args) -> int:
-    rc, fh, out = 1, None, sys.stdout
+    rc, fh, out, t0 = 1, None, sys.stdout, time.time()
     try:
         if args.log:
             log = logs.log_path(paths.paper_from_cli(args.project), "reproduce", args.log)
@@ -418,6 +419,12 @@ def _run_with_progress(args) -> int:
         verdict = "REUSED" if _STATE["reused"] and rc == 0 else (
             "REPRODUCED" if rc == 0 else "NOT REPRODUCED")
         print(f"REPRODUCE DONE rc={rc} {verdict}")
+        try:  # 1.26.0: reproductions and their duration for `wf report`
+            from wfcore import runlog
+            runlog.log(paths.paper_from_cli(args.project), "reproduce", rc=rc, verdict=verdict,
+                       seconds=round(time.time() - t0, 1))
+        except (Exception, SystemExit):  # noqa: BLE001 - the record never breaks a command
+            pass
         sys.stdout = out
         if fh:
             fh.close()

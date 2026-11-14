@@ -17,7 +17,7 @@ FREEZE_RE_REL = Path(FREEZE_REL).as_posix()
 def main() -> int:
     parser = argparse.ArgumentParser(description="freeze and verify final submission-review inputs")
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("freeze", "verify", "reader-copies", "audit-start", "audit-save"):
+    for name in ("freeze", "verify", "reader-copies", "audit-start", "audit-save", "record-audit"):
         command = sub.add_parser(name)
         command.add_argument("--project", type=Path, default=None)
         command.add_argument("--freeze", type=Path)
@@ -25,9 +25,27 @@ def main() -> int:
                              help="audit-save: the reviewer's saved reply / workflow-state JSON")
     args = parser.parse_args()
     project = wfpaths.paper_from_cli(args.project)
+    if args.command == "record-audit":
+        # 1.26.0: the audit ran at S24 before the confirmation; S25 records it, no new reading.
+        from wfcore import packageaudit
+        try:
+            dest = packageaudit.record_audit(project)
+        except (OSError, ValueError) as exc:
+            print(f"package review error: {exc}", file=sys.stderr)
+            return 2
+        print(f"recorded the S24 audit report of round {packageaudit.freeze_round(project)} "
+              f"verbatim -> {dest}")
+        return 0
     if args.command in ("audit-start", "audit-save"):
         # 1.15.0 (E4): full first audit, then re-audits of the previous findings + new BLOCKING.
-        from wfcore import audit
+        from wfcore import audit, packageaudit
+        if args.command == "audit-start" and packageaudit.freeze_round(project):
+            print("package review error: 1.26.0 - the independent audit already ran at S24 "
+                  f"(round {packageaudit.freeze_round(project)}, bound by the freeze) before the "
+                  "user's confirmation; S25 starts no reviewer. Run: package_review.py verify -> "
+                  "package_review.py record-audit -> wf check -> wf decide "
+                  "submission_package_independent_audit ...", file=sys.stderr)
+            return 2
         try:
             if args.command == "audit-save":
                 dest = audit.save(project, args.from_file)
@@ -37,27 +55,15 @@ def main() -> int:
             if not ok:
                 raise ValueError("the package changed after the user's confirmation; return to "
                                  "S24: " + "; ".join(problems[:4]))
-            import json
-            manifest = json.loads((project / "08_submission/bundle/manifest.json")
-                                  .read_text(encoding="utf-8"))
-            from wfcore.readerreview import write_text_copies
-            copies = write_text_copies(project, [str(i.get("file", "")) for i in manifest.get("items", [])])
-            files = [FREEZE_RE_REL, *[str(i.get("file", "")) for i in manifest.get("items", [])],
-                     "08_submission/target_journal.json", "08_submission/guidelines_extract.md",
-                     *audit.guideline_files(project),
-                     # 1.18.0 (K6): the requirement list and the matrix, judged row by row.
-                     "08_submission/guideline_requirements.json",
-                     "08_submission/compliance_matrix.md", "08_submission/compliance_matrix.json",
-                     "08_submission/compliance_evidence.json",
-                     # 1.21.0 (B8): the evidence index (capture method, URL, date, sha256),
-                     # indexing captures/screenshots and the submission-system record.
-                     *audit.evidence_files(project),
-                     "08_submission/bundle/manifest.json", "08_submission/bundle/SUBMISSION_CHECKLIST.md",
-                     "08_submission/submission_qc.md", *copies]
-            out, mode = audit.start(project, list(dict.fromkeys(files)))
+            out, mode = audit.start(project, audit.package_files(project))
         except (OSError, ValueError) as exc:
             print(f"package review error: {exc}", file=sys.stderr)
             return 2
+        try:  # 1.26.0 (item 4): the run record counts subagent calls
+            from wfcore import runlog
+            runlog.log(project, "subagent", agent="medpaper-reviewer", scope="audit", mode=mode)
+        except Exception:  # noqa: BLE001 - the record never breaks a command
+            pass
         from wfcore import convergence as cv  # 1.22.0 (O1): the exact subagent call
         print(cv.subagent_call(out, out / "report.md"))
         print(f"S25 audit bundle ({mode}): pass the medpaper-reviewer agent this ONE path and "

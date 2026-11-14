@@ -14,7 +14,7 @@
 
 [meta]
 name = "medpaper"
-version = "1.25.1"
+version = "1.26.0"
 schema = 1
 description = "Medical/clinical research pipeline: idea -> feasibility -> data -> analysis -> artifacts -> manuscript -> submission package."
 
@@ -53,11 +53,11 @@ invariants = [
   "No explanatory prose inside figure panels. Explanation belongs in the figure legend.",
   "Do not draft or insert an AI-use disclosure unless the user explicitly requests that exact content; record journal requirements only as a user-controlled compliance item.",
   "Never upload patient-level, private or credential data to an external skill, plugin or service without explicit authorization.",
-  "The S23 package is not final until S24 records the user's explicit request for final review and freezes the exact files, then S25 obtains one independent PASS from reader, editor and journal-compliance perspectives. Any post-confirmation change returns to S24.",
+  "The S23 package is not final until S24 has run the independent audit from reader, editor and journal-compliance perspectives, re-audited every change it caused, recorded the user's explicit confirmation of exactly the package the auditor last read, and frozen those files (1.26.0; S25 then verifies the freeze and the final checks without a second reading - a freeze taken in the earlier order keeps the S25 audit). Any post-confirmation change returns to S24.",
   "A user-requested revision never leaves the workflow and never rewinds by default. At S19/S24: `rework.py batch --plan` per feedback message (collects, builds nothing), `rework.py seal --why` once the user is done, edit only the files `rework.py status` lists, then `rework.py check` (only the affected stages' content gates; any file changed outside the scope fails), `mark`, `close`. Completed stages stay completed; wf advance/loop are refused while a scoped round is open. Full rewind is the explicit fallback only (`batch --rewind`, e.g. a journal switch). Science changed after S19 returns to S19 for re-review and re-freeze before the journal copy is merged. Word-only layout edits are allowed at S24 only when the S23 visible-text baseline is unchanged.",
   "The scientific record is frozen when the user releases S19 review, and 07_manuscript/ is read-only from then on. Journal requirements - word caps, abstract shape, reference style, title page, required statements - are presentation, and are applied to the copy in 08_submission/manuscript/ that S20 opens for the chosen journal. Switching journals after a rejection is ONE command, `wf journal switch --to <new> --confirm-old <old> --why ...`: it loops to S20, archives the whole old journal layer (submission tree, audits, package review rounds, helper scripts, stray CSL; never deleted, never read by a gate, never reused), starts a new journal epoch and takes a fresh copy from the same frozen text; no prior cache, title page, cover letter, trim, bundle, audit or approval may survive in the live tree, and the new journal's rules come only from its own freshly ingested guide. Once S19 is done a missing freeze fails the gate, and the freeze also covers 03_analysis/results/*.json. scientific_freeze_intact, journal_variant_ready and variant_preserves_science are non-overridable. Prose may be tightened to fit a cap, but a number, citation or artifact reference that disappears is dropped content, which is a scientific decision needing the user's recorded authorisation.",
   "Repeated feedback is handled as a persisted revision round at S19 (scientific manuscript) or S24 (journal package). Interpret each message once into atomic items, collect them into one round, seal once and build once; read and rebuild only the sealed dependency closure, preserve unaffected approved evidence, and still run every applicable quality gate (`rework build --scope full` at most twice per round). Token or context pressure is never permission to omit an item, shorten the scientific work or skip validation; resume from tools/rework.py status after compaction.",
-  "Review points (S18/S19 manuscript, S24/S25 package) run as rounds: tools/review_round.py start, the read-only medpaper-reviewer subagent reads the printed current files, you apply on your own judgement the fixes that improve the paper (scoped rework where frozen science requires it), close the round, give the user ONE summary (findings by severity, changes file + one line, what was kept and why, pending author decisions) and ask one question: another round, or confirm. Findings on numbers, grouping/subgroups or strength of conclusions are changed or decided by the author, never kept on your preference. Approval is only the exact sentence '我确认这一版' (or 'I confirm this version'), recorded with the version hash; 'OK', '可以', '无需审阅', thanks or silence are not approval - ask for the sentence. No export package unless the user explicitly asks (review_round.py export), no per-change permission.",
+  "Review points (S18/S19 manuscript, S24 package; S25 only for freezes before 1.26.0) run as rounds: tools/review_round.py start, the read-only medpaper-reviewer subagent reads the printed current files, you apply on your own judgement the fixes that improve the paper (scoped rework where frozen science requires it), close the round, give the user ONE summary (findings by severity, changes file + one line, what was kept and why, pending author decisions) and ask one question: another round, or confirm. Findings on numbers, grouping/subgroups or strength of conclusions are changed or decided by the author, never kept on your preference. Approval is only the exact sentence '我确认这一版' (or 'I confirm this version'), recorded with the version hash; 'OK', '可以', '无需审阅', thanks or silence are not approval - ask for the sentence. No export package unless the user explicitly asks (review_round.py export), no per-change permission.",
   "Figures render in R by default (figure_engine); analysis may stay in Python. A figure drawn with the other engine needs `renderer` and a `renderer_reason` (>= 20 characters) in the artifact plan. Approved Python figures are kept as they are: never refit confirmed models just to render them in R. R figures carry a render receipt (script, result and output hashes); a changed script or result makes qc.py fail until the figure is re-rendered.",
   "Write for a clinician (1.11.0): internal names become the clinical labels of 01_protocol/display_dictionary.json in tables, in-figure text, legends and prose; no engineering language (strings, fields, parsed, snapshot, lines read, re-executed ...) outside Supplementary Methods; every table and figure defines its own abbreviations. An S19 return is never automatic: it needs the user's words '我确认回退'. Keep working state in the paper (temp/, .wf/progress.md), never in external temp folders.",
   "If you are unsure where you are, run `.\\.venv\\Scripts\\python.exe tools\\wf.py status`. Never guess the current stage.",
@@ -1414,6 +1414,11 @@ scope = "package"
 check = "decision_recorded"
 name = "submission_package_user_confirmed"
 allowed = ["OK"]
+# 1.26.0: the user confirms only a package the independent auditor read in full this journal
+# epoch and whose last audit round read exactly what is confirmed (re-audit every change).
+[[stage.gate]]
+check = "package_audit_ready"
+since = "1.26.0"
 
 [[stage]]
 id = "S25_submission_audit"
@@ -1473,6 +1478,12 @@ allowed = ["PASS", "PASS_AUTHOR_FINAL_COPY"]
 [[stage.gate]]
 check = "final_copy_verified"
 since = "1.9.0"
+# 1.26.0: the freeze binds the last S24 audit round; PASS needs its verdict PASS (no second
+# reading here; a freeze from the earlier order keeps the S25 audit and passes this line).
+[[stage.gate]]
+check = "package_audit_ready"
+final = true
+since = "1.26.0"
 [[stage.gate]]
 check = "engine_fork_recorded"
 severity = "warn"

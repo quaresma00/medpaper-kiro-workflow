@@ -16,8 +16,14 @@ once, and stop when the user confirms with the exact sentence 我确认这一版
 
 ## This stage needs the user
 Only for one answer per round. Do not ask permission per finding or per small change, and do
-not prepare any export package. Do not ask for authors, affiliations, funding or other
-title-page administration here.
+not prepare any export package. Author facts only inside that one message, never a separate
+pause (1.26.0, the user's choice): the confirmation block `review_round.py close` prints also
+lists what `wf decisions show` still lacks - author names and order, affiliations, the
+corresponding author with e-mail, funding, conflicts, AI use (tool and purpose) and whether to
+read the submission system at S24. The user may answer then or later; record each answer once
+(`wf decisions set <key> <value> --words-file <utf-8 file>`). S21 then asks only what is still
+missing or journal-specific (ORCID, CRediT roles, acknowledgements), and S24 does not ask the
+portal question again. The answers never influence the review or the freeze.
 
 ## One round
 1. **Review.** Round 1 was opened at S18 and its review is

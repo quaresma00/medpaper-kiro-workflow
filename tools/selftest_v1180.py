@@ -570,7 +570,8 @@ def run_audit(tmp: Path, record, section) -> None:
              "08_submission/compliance_matrix.json", *audit.guideline_files(p)]
     out, mode = audit.start(p, files)
     man = (out / "MANIFEST.md").read_text(encoding="utf-8")
-    pr = (ROOT / "tools/package_review.py").read_text(encoding="utf-8")
+    pr = "\n".join((ROOT / f).read_text(encoding="utf-8") for f in (  # 1.26.0: the list moved
+        "tools/package_review.py", "tools/wfcore/audit.py"))
     record("K6 the audit bundle lists the original guide, the cache original, the requirement "
            "list and the matrix, and the brief asks for a verdict per row and a scan for missing "
            "obligations", mode == "full" and "guideline_requirements.json" in man
@@ -700,7 +701,7 @@ def run_release(tmp: Path, record, section) -> None:
     gates = {(s.id, g.get("check")): g.get("since") for s in pipe.stages for g in s.gate}
     record("R pipeline 1.18.0; a 1.17.0 paper gets exactly one 1.18.0 event, stays pinned, no paper "
            "file changes; cards <= limit",
-           pipe.meta.get("version") in ("1.18.0", "1.19.0", "1.20.0", "1.21.0", "1.22.0", "1.23.0", "1.24.0", "1.25.0", "1.25.1") and len(notes) == 1 and st.engine_pin == "1.17.0"
+           pipe.meta.get("version") in ("1.18.0", "1.19.0", "1.20.0", "1.21.0", "1.22.0", "1.23.0", "1.24.0", "1.25.0", "1.25.1", "1.26.0") and len(notes) == 1 and st.engine_pin == "1.17.0"
            and before == after and max(sizes.values()) <= registry.CARD_MAX_CHARS,
            f"{len(notes)} {max(sizes.values())}")
     record("R the new gates carry since = 1.18.0 at S20/S23/S25",

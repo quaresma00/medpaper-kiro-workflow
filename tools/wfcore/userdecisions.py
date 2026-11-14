@@ -30,6 +30,9 @@ KEYS = {  # key -> (Chinese label, journal-dependent)
     "layout_preferences": ("版面偏好", False),
     "review_mode": ("审阅模式（standard/fast）", False),
     "portal_check": ("是否由代理读取投稿系统", True),
+    # 1.26.0: asked in the S19 confirmation message instead of a separate S21 pause.
+    "funding": ("基金资助", False),
+    "conflicts": ("利益冲突", False),
 }
 
 
@@ -124,6 +127,10 @@ def seed(project: Path, state=None) -> list[str]:
     if isinstance(ai, dict) and ai.get("authors"):
         add("authors", f"{len(ai['authors'])} author(s) in 00_input/author_info.json",
             "00_input/author_info.json", "seed:file")
+    for key in ("funding", "conflicts"):  # 1.26.0: recorded once, with the author facts
+        if isinstance(ai, dict) and ai.get(key) not in (None, "", [], {}):
+            add(key, json.dumps(ai[key], ensure_ascii=False)[:300], "00_input/author_info.json",
+                "seed:file")
     cfg = state.config().get("targets", {}) if state is not None else {}
     if cfg.get("spelling"):
         add("spelling", cfg["spelling"], ".wf/config.toml", "seed:config")
@@ -183,6 +190,27 @@ def verify(project: Path, key: str, text: str, sources: list[str], fact: str) ->
     data["verified"][key] = rec
     _save(project, data)
     return rec
+
+
+# 1.26.0: the basic author facts, the AI-use fact and the portal question are asked in the S19
+# confirmation message (the user may answer then or later), so S21 and S24 need no own pause.
+EARLY_ASK = (
+    ("authors", "作者姓名与顺序、单位、通讯作者及邮箱"),
+    ("funding", "基金资助（没有请写“无”）"),
+    ("conflicts", "利益冲突（没有请写“无”）"),
+    ("ai_use", "写作或分析中是否使用了 AI 工具（工具名称与用途；没有请写“未使用”）"),
+    ("portal_check", "S24 是否由我只读查看期刊投稿系统（您在浏览器里登录，我不填写、不提交）：是 / 否"),
+)
+
+
+def early_ask_zh(project: Path) -> list[str]:
+    """The questions still open, for the S19 confirmation message (none when all recorded)."""
+    dec = load(project)["decisions"]
+    missing = [label for key, label in EARLY_ASK if key not in dec]
+    if not missing:
+        return []
+    return ["同一条回复里请一并告诉我下列信息（现在答或之后再答都可以；已记录的不会再问）："] + [
+        f"  - {m}" for m in missing]
 
 
 def show_lines(project: Path) -> list[str]:

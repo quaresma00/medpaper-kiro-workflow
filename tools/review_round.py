@@ -90,6 +90,26 @@ def _main() -> int:
                       f"{bundle / 'report.md'}。下一步：review_round.py close --findings \"\"，"
                       "然后把合规摘要和确认请求一次发给用户。用户要求时才用 start --llm 启动审稿代理。")
                 return 0
+            try:  # 1.26.0: subagent calls for `wf report`
+                from wfcore import runlog
+                runlog.log(project, "subagent", agent="medpaper-reviewer", scope=scope,
+                           round=rnd["id"], mode=rnd["mode"])
+            except Exception:  # noqa: BLE001 - the record never breaks a command
+                pass
+            if scope == "package" and rnd["mode"] in ("audit", "recheck"):
+                # 1.26.0: the S24 rounds are the independent package audit (no second S25 read).
+                kind = ("完整审计：首次读者、编辑、期刊合规三个角度" if rnd["mode"] == "audit"
+                        else "复核：上轮问题是否解决 + 新的阻断问题")
+                print(f"S24 投稿包审计 {rnd['id']}（{kind}），{len(rnd['reviewed'])} 个上传文件。")
+                print(cv.subagent_call(bundle, bundle / "report.md"))
+                print("Pass the medpaper-reviewer subagent this ONE path and nothing else (the "
+                      "brief is inside; add no expectation and no earlier conclusion):\n"
+                      f"  {bundle / 'MANIFEST.md'}")
+                print(f"It writes {bundle / 'report.md'}. Then fix on your own judgement, "
+                      "`wf rebuild --wait`, and `review_round.py close --scope package` (the "
+                      "report defaults to that file). Host refused the write: review_round.py "
+                      "ingest --from <saved reply>.")
+                return 0
             print(f"review round {rnd['id']} ({rnd['mode']}) opened, {len(rnd['reviewed'])} file(s)."
                   + (f" Linked to {rnd['linked_to']} (awaiting the user)." if rnd.get("linked_to") else ""))
             if rnd["mode"] == "regression":
@@ -138,6 +158,15 @@ def _main() -> int:
             print(f"closed {rnd['id']}: findings {rnd['findings']}; {len(rnd['changes'])} change(s)."
                   + (f" Preference group kept: {', '.join(rnd['preference_group']['ids'])}."
                      if rnd.get("preference_group") else ""))
+            if scope == "package" and rnd.get("mode") in ("audit", "recheck"):
+                from wfcore import packageaudit  # 1.26.0: re-audit every change before asking
+                moved = packageaudit.changed_uploads(rnd)
+                print(f"审计结论（{rnd['id']}）：{rnd.get('audit_verdict') or '未写明'}。")
+                if moved:
+                    print(f"本轮改动了 {len(moved)} 个上传文件，审计者还没有读到这些改动。下一步（先不要给"
+                          "用户发消息）：review_round.py start --scope package --delta（复核：上轮问题"
+                          "是否解决 + 新的阻断问题）；复核轮没有改动后，再把一条消息发给用户。")
+                    return 0
             from wfcore import convergence as cv
             # 1.22.0 (R2): convergence verdict and cap, in Chinese for the user.
             if rnd.get("ready"):

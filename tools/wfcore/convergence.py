@@ -51,8 +51,9 @@ COST = {  # U4: expected duration and credit class per stage (rough, for the use
     "S13": ("medium", "15-40 分钟"), "S14": ("medium", "15-30 分钟"), "S15": ("long", "30-60 分钟"),
     "S16": ("medium", "20-40 分钟"), "S17": ("short", "5-15 分钟"), "S18": ("long", "30-60 分钟"),
     "S19": ("medium", "按用户反馈而定"), "S20": ("medium", "15-40 分钟"), "S21": ("short", "5-15 分钟"),
-    "S22": ("medium", "15-30 分钟"), "S23": ("long", "30-60 分钟"), "S24": ("medium", "按用户反馈而定"),
-    "S25": ("medium", "20-40 分钟"),
+    "S22": ("medium", "15-30 分钟"), "S23": ("long", "30-60 分钟"),
+    # 1.26.0: the independent package audit moved from S25 to S24 (S25 starts no reviewer).
+    "S24": ("long", "30-60 分钟（含独立审计），另加等待您确认"), "S25": ("short", "5-15 分钟"),
 }
 COST_ZH = {"short": "短", "medium": "中", "long": "长"}
 
@@ -326,15 +327,23 @@ def confirmation_zh(project: Path, scope: str) -> list[str]:
                     f"{'修改' if (f.get('recommendation') or 'keep') == 'change' else '保留'}"
                     for f in pend]
         return out
-    out = ["请您确认这一版：回复“我确认这一版”（或含“确认”与“这一版/此版/本版/这个版本”的同义句，"
-           "或 “I confirm this version”）。“OK / 可以 / 好的 / 没问题 / 无需审阅”不算确认。",
-           "确认前提：本轮已关闭；确认后文件不再改动；下列待您决定的条目已有答复。"]
+    out = []
+    if scope == "package":
+        from . import packageaudit  # 1.26.0: the audit verdict and whether it read this version
+        if packageaudit.audit_flow(project):
+            out += packageaudit.status_zh(project)
+    out += ["请您确认这一版：回复“我确认这一版”（或含“确认”与“这一版/此版/本版/这个版本”的同义句，"
+            "或 “I confirm this version”）。“OK / 可以 / 好的 / 没问题 / 无需审阅”不算确认。",
+            "确认前提：本轮已关闭；确认后文件不再改动；下列待您决定的条目已有答复。"]
     if pend:
         out.append(f"待您决定的条目 {len(pend)} 项（每项附我的建议；回复“按你的建议”即全部采纳）：")
         out += [f"  - {f['id']}［{f.get('category')}］{str(f.get('summary', ''))[:90]} -> 建议："
                 f"{'修改' if (f.get('recommendation') or 'keep') == 'change' else '保留'}" for f in pend]
     else:
         out.append("没有待您决定的条目。")
+    if scope == "manuscript":  # 1.26.0: the basic author facts travel with this one message
+        from .userdecisions import early_ask_zh
+        out += early_ask_zh(project)
     return out
 
 
