@@ -3,7 +3,7 @@ name: medpaper-pipeline
 description: Drives a gated, resumable medical/clinical research paper pipeline from a research idea through feasibility, data acquisition, exploratory analysis, figure and table production, IMRAD writing, independent review, journal selection, de-AI polish and a Word submission package. Use whenever the task involves a medical research idea, a clinical manuscript, a research protocol, literature retrieval via PubMed, publication-grade figures or three-line tables, journal selection, a submission package, or a revision round on any of these. Do not follow the workflow from memory - run `python tools/wf.py status` and obey the stage card it prints.
 compatibility: Requires Python 3.11+ for the driver. Tables and Word output additionally need numpy, pandas, openpyxl and python-docx (matplotlib for the Python figure path). R 4.3+ with the packages in reference/language_policy.toml (figures default to R). Network access is required for PubMed, Crossref and Unpaywall. Set NCBI_API_KEY to raise the E-utilities rate limit.
 metadata:
-  version: "2.8.0"
+  version: "2.9.0"
   stages: "25"
   entrypoint: "python tools/wf.py status"
 ---
@@ -30,14 +30,14 @@ to reopen another folder, never use the data folder; `wf init` names the rare re
 Commands act only on that paper; never read or list another paper. Datasets are declared in
 place, read-only, never copied: `wf data add <absolute path>`.
 1.23.0: report each publishability verdict at once (`wf publishability`); CONDITIONAL or
-NO-GO = one question.
+NO-GO = one question. 1.25.0: S07 benchmark = the 5-10 newest comparable papers
+(`benchmark.py search`).
 Reports the user wants outside the paper: `wf config --user report_dirs add <dir>` (.md/.txt).
 
 ## Execution economy (1.12.0)
 
-- **Context for a new session or delegated step: `wf handoff`** (<= 60 lines: versions,
-  stage + card, gate fail/warn names, open rework/review rounds, pending user questions,
-  last events, next command). Pass its output instead of a hand-written brief.
+- **Context for a new session or delegated step: `wf handoff`** (<= 60 lines: stage, card,
+  gates, open rounds, questions, next command). Pass its output instead of a hand-written brief.
 - Long commands: `--wait` (one blocking call, heartbeat <= 30 s, failures + one summary line)
   for `wf check`, `rework.py check`, `reproduce.py run`, `build_docx.py`; `wf check --summary`
   for one line. Logs live in `.wf/logs/` (or `temp/logs/`), never in external temp folders.
@@ -45,10 +45,9 @@ Reports the user wants outside the paper: `wf config --user report_dirs add <dir
   analysis edits into one plan and reproduce once per round (affected scripts only; `REUSED`
   when nothing changed; notes, docs and manuscript edits never invalidate it). Never run it
   "to be safe" - `wf check` names the cheapest next command. Never copy the user's data.
-- Stage cards are short; their `reference/stage_details/` files are read only when needed.
-  `wf archetype <name>` prints one figure archetype.
-- Prefer a cheaper model for mechanical steps (building tables/figures, checks, DOCX builds)
-  when the host lets you choose.
+- Cards are short; read `reference/stage_details/` only when needed; `wf archetype <name>`
+  prints one archetype.
+- Prefer a cheaper model for mechanical steps (tables, figures, checks, DOCX builds).
 - Browser (1.21.0; only if a browser tool `playwright` is in your tool list): APIs first
   (PubMed/E-utilities, open-access APIs; DOAJ/OpenAlex/NLM via `wf journal lookup`). Full
   text, lawful routes only (1.23.0): `fulltext.py fetch` cascade -> publisher page in the
@@ -70,9 +69,9 @@ manuscript instead of the subagent. If context runs out, say so.
 
 | Stage | Agent | Notes |
 |---|---|---|
-| S08, S09, S14, S16, S19 rewrites | `medpaper-clinical-writer` | Pass the MANIFEST of `tools/manuscript/writer_bundle.py build --stage <S>`; it sees clinical labels, results in words, tables, legends, notes - never code, JSON keys or logs. Then `wf check`. |
+| S08, S09, S14, S16, S19 rewrites | `medpaper-clinical-writer` | Pass the MANIFEST of `tools/manuscript/writer_bundle.py build --stage <S>`; it sees clinical text only - never code, JSON keys or logs. Then `wf check`. |
 | after S11 (with the D2 look) | `medpaper-clinical-writer` | 1.20.0: table/figure wording - `wf displays text` writes `.wf/writer_bundle/displays/MANIFEST.md` (only strings that read like an analysis report); then `wf displays apply` and re-render. |
-| each prose section, right after its draft (1.23.0) | `medpaper-medical-editor` | `writer_bundle.py receipt` -> `edit --section S` (pass its MANIFEST) -> `polished --section S`; numbers and citations unchanged (`section_polished`). 1.24.0 voice: `reference/writing_voice.md`. |
+| each prose section, right after its draft (1.23.0) | `medpaper-medical-editor` | `writer_bundle.py receipt` -> `edit --section S` (pass its MANIFEST) -> `polished --section S`; numbers and citations unchanged (`section_polished`). 1.24.0 voice: `reference/writing_voice.md`. 1.25.0: after S17 only `polish.py crosscheck` + `edit --section manuscript` (changed paragraphs). |
 | S09, before the Results (1.23.0) | `medpaper-reviewer` (science) | `review_round.py start --scope science`; revise analyses/displays/Methods, ONE summary, ONE question (another round or proceed). |
 | S15 | `medpaper-deepreader` | One invocation per full text; save its notes yourself. |
 | S18, S19/S24 rounds, S25 | `medpaper-reviewer` | Give it only the bundle path `review_round.py start` prints and the neutral brief. It writes only `.wf/review_bundle/<round>/report.md`; `close` reads that file - never paraphrase findings. Confirmation is the exact sentence `我确认这一版`. |
