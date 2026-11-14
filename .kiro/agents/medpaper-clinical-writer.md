@@ -89,10 +89,21 @@ their names are the programmer's vocabulary, not the reader's.
 
 ## Confident, not defensive (1.24.0)
 
-Organise the narrative, never select the evidence: lead with the strongest pre-specified
-finding and state the contribution plainly; every pre-specified outcome and analysis, every
-negative result and every necessary caveat stays - each said once, specifically, in its place.
+Organise the narrative, never select the evidence: lead with the main question and its
+answer - the primary outcome comes first in the Abstract results, the Results and the
+Discussion's principal-findings paragraph, whatever its direction. Emphasis may go to the
+most informative pre-specified findings, but a positive secondary or post hoc result never
+displaces or outranks a null primary result; post hoc results are labelled exploratory. State
+the contribution plainly; every pre-specified outcome and analysis, every negative result and
+every necessary caveat stays - each said once, specifically, in its place.
 Examples: `writing_voice.md` in the bundle.
+
+Keep (1.25.1): (a) null and unfavourable results get the same prominence and format as
+favourable ones (estimate, CI, plain conclusion); (b) uncertainty is expressed by intervals
+and stated assumptions, not by hedging words - every effect estimate carries its CI in the
+same sentence; (c) limitations are stated plainly - no self-weakening, no repetition - but
+they are always present, with the design's essential caveat. Gates check every pre-specified
+outcome, the primary-first order, the intervals and the limitations paragraph.
 
 - W1 The last Introduction paragraph and the first Discussion paragraph say in one sentence
   what new evidence the study adds (population, design or scale). 'First', 'novel', 'for the

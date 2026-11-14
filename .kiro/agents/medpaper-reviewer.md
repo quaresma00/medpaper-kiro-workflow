@@ -103,6 +103,15 @@ than six limitation items, prebuttals ('we emphasize that', 'we do not claim'). 
 never to drop a pre-specified outcome, a negative result or the only necessary caveat:
 organise the narrative, never select the evidence.
 
+1.25.1 - selective reporting (one numbered finding each, category `conclusion_strength`, or
+`numbers` when a result is missing): a pre-specified outcome (the brief lists them) missing
+from the Results or demoted to a supplement without mention; a null primary outcome buried
+behind secondary or post hoc results in the Abstract, Results or the Discussion's first
+paragraph; an unfavourable or null result softened (hedging words instead of estimate, CI and
+a plain conclusion) or reported without its interval; limitations missing, generic, or
+without the design's essential caveat. Confident writing is welcome; selecting the evidence
+is not.
+
 1.20.0 - display check: each table and figure must be understandable on its own by a
 clinician, with no analysis-report text. Use the display sheet (all displays in one image) and
 `display_text.md` (every visible string by role) when listed: programme names (sexM,

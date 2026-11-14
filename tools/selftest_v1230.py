@@ -650,7 +650,7 @@ def run_release(tmp: Path, record, section) -> None:
     skill = (ROOT / ".kiro/skills/medpaper-pipeline/SKILL.md").read_text(encoding="utf-8")
     record("R pipeline 1.23.0; a 1.22.0 paper gets exactly one 1.23.0 event naming wf migrate --yes "
            "and stays pinned (no paper file touched); every new gate carries since 1.23.0",
-           pipe.meta.get("version") in ("1.23.0", "1.24.0", "1.25.0") and len(notes) == 1 and "wf migrate --yes" in
+           pipe.meta.get("version") in ("1.23.0", "1.24.0", "1.25.0", "1.25.1") and len(notes) == 1 and "wf migrate --yes" in
            notes[0]["detail"] and st.engine_pin == "1.22.0" and before == after
            and {c for _s, c, _v in gates} == set(NEW_1230) and all(v == "1.23.0" for *_x, v in gates),
            str(gates)[:300])

@@ -330,6 +330,10 @@ def run_b(tmp: Path, record, section) -> None:
     # polished S22/S23).
     new_1140 += sum(1 for v in names.values() for c in v if c in {
         "cross_section_consistent", "changed_paragraphs_polished"})
+    # 1.25.1 adds gate lines for new checks (pre-specified outcomes S09/S17, limitations S16,
+    # primary outcome first S16/S17/S22) and one Abstract interval line at S17.
+    new_1140 += sum(1 for v in names.values() for c in v if c in {
+        "prespecified_outcomes_reported", "limitations_present", "primary_first"}) + 1
     record("B4 duplicate gate lines merged (confirmation inside review_round_approved; SI clean "
            "inside docx_bundle_ready; limits/reference count as checklist rows); fewer gate "
            f"entries than 1.11.0 (287 -> {total - new_1140} + {new_1140} new in 1.14.0)",

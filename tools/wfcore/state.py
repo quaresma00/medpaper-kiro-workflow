@@ -177,6 +177,7 @@ class State:
             self._note_v1230(old_version, pipeline_version)
             self._note_v1240(old_version, pipeline_version)
             self._note_v1250(old_version, pipeline_version)
+            self._note_v1251(old_version, pipeline_version)
             self.save()
         return changed
 
@@ -364,6 +365,25 @@ class State:
                    "errors (abbreviation redefined or used before its definition, an abstract "
                    "number not in the Results or tables) and the new polish_log headings. Paper "
                    "files were not modified.")
+
+    def _note_v1251(self, old_version: str, new_version: str) -> None:
+        """1.25.1: one event; no file or stage is touched."""
+        if (version_tuple(old_version) >= (1, 25, 1) or version_tuple(new_version) < (1, 25, 1)
+                or self.data.get("v1251_migration_noted")):
+            return
+        self.data["v1251_migration_noted"] = True
+        self.event("requirements_changed",
+                   "1.25.1: applies now whenever a section is written, polished or reviewed - "
+                   "the primary outcome leads (Abstract results, Results, the Discussion's "
+                   "first paragraph) whatever its direction; null and unfavourable results, "
+                   "intervals and limitations are kept (writer, medical editor; the editor's "
+                   "edit is refused when it breaks outcome reporting, intervals or the "
+                   "limitations paragraph) and the reviewer's selective-reporting check. After "
+                   "`wf migrate --yes` (stages not yet completed) these block instead of "
+                   "warning: every pre-specified outcome reported (S09/S17), every effect "
+                   "estimate with its CI (Results, Abstract), the limitations paragraph with "
+                   "the design caveat (S16), a null primary displaced by a secondary result "
+                   "(S22). Paper files were not modified.")
 
     def _note_v1160(self, old_version: str, new_version: str) -> None:
         """1.16.0: one event; no file or stage is touched."""

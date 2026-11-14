@@ -31,7 +31,7 @@ Commands act only on that paper; never read or list another paper. Datasets are 
 place, read-only, never copied: `wf data add <absolute path>`.
 1.23.0: report each publishability verdict at once (`wf publishability`); CONDITIONAL or
 NO-GO = one question. 1.25.0: S07 benchmark = the 5-10 newest comparable papers
-(`benchmark.py search`).
+(`benchmark.py search`). 1.25.1: primary outcome first; null results, CIs, limitations kept.
 Reports the user wants outside the paper: `wf config --user report_dirs add <dir>` (.md/.txt).
 
 ## Execution economy (1.12.0)
@@ -47,7 +47,7 @@ Reports the user wants outside the paper: `wf config --user report_dirs add <dir
   "to be safe" - `wf check` names the cheapest next command. Never copy the user's data.
 - Cards are short; read `reference/stage_details/` only when needed; `wf archetype <name>`
   prints one archetype.
-- Prefer a cheaper model for mechanical steps (tables, figures, checks, DOCX builds).
+- Prefer a cheaper model for mechanical steps.
 - Browser (1.21.0; only if a browser tool `playwright` is in your tool list): APIs first
   (PubMed/E-utilities, open-access APIs; DOAJ/OpenAlex/NLM via `wf journal lookup`). Full
   text, lawful routes only (1.23.0): `fulltext.py fetch` cascade -> publisher page in the
@@ -119,6 +119,6 @@ Never use a skill in place of a stage (`write-paper`, `orchestrate`, `make-figur
 complementary ones (`check-reporting`, `deidentify` ...) may help inside a stage.
 Classification: `reference/skill_policy.toml` (`python tools/hooks/skill_guard.py --audit`).
 
-## Handoff discipline
+## Handoff
 
-Before advancing, record what a stranger needs: produced, decided and why, still open.
+Before advancing, record what a stranger needs: produced, decided, still open.

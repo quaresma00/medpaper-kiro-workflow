@@ -15,6 +15,7 @@ Details (what the reviewer must check, verdict meanings): `reference/stage_detai
    before writing (S09), the brief focuses on writing quality, consistency and readability and
    does not reopen closed science items unless results or displays changed since. 1.25.0: the
    brief carries the cross-section report's reviewer items (abstract vs Discussion conclusion).
+   1.25.1: it also lists the pre-specified outcomes for the selective-reporting check.
 2. Delegate to the `medpaper-reviewer` agent with that ONE bundle path and the brief,
    unchanged. Add nothing about known deviations, earlier conclusions or what you expect. It
    reads as a first-time clinical reader, an editor checking engineering language and

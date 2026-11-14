@@ -415,7 +415,7 @@ def run_release(tmp: Path, record, section) -> None:
     record("C pipeline 1.25.0; a 1.24.0 paper gets exactly one 1.25.0 event (search, crosscheck and "
            "the S22 card now; recency, receipts and blocking items after wf migrate --yes) and "
            "stays pinned; no paper file touched",
-           pipe.meta.get("version") == "1.25.0" and len(notes) == 1
+           pipe.meta.get("version") in ("1.25.0", "1.25.1") and len(notes) == 1
            and "wf migrate --yes" in notes[0]["detail"] and "benchmark.py search" in notes[0]["detail"]
            and "crosscheck" in notes[0]["detail"] and st.engine_pin == "1.24.0" and before == after,
            str(notes)[:300])
@@ -428,7 +428,8 @@ def run_release(tmp: Path, record, section) -> None:
            and "benchmark.py skip" in cards["S07_artifacts"] and "crosscheck" in cards["S17_assemble"]
            and "--section manuscript" in cards["S19_human_review"]
            and "benchmark.py search" in skill and "--section manuscript" in skill
-           and len(skill) <= 9000 and "## 1.25.0" in readme and "`1.25.0`" in readme
+           and len(skill) <= 9000 and "## 1.25.0" in readme
+           and ("`1.25.0`" in readme or "`1.25.1`" in readme)
            and max(len(c) for c in cards.values()) <= registry.CARD_MAX_CHARS,
            str({k: len(v) for k, v in cards.items() if len(v) > 3900}) + f" skill={len(skill)}")
 

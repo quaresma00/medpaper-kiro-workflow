@@ -92,11 +92,27 @@ _INTERVAL = re.compile(r"\b(?:CI|confidence interval|credible interval|IQR|SD|SE
 
 @check("effects_with_intervals")
 def effects_with_intervals(ctx: Ctx) -> Result:
-    """Advisory: a sentence reporting a P value with no effect interval (P-value-only reporting)."""
+    """Advisory: a sentence reporting a P value with no effect interval (P-value-only reporting).
+    1.25.1 (estimates_have_intervals): an effect estimate (HR, OR, RR, IRR, ROR, PRR, IC, MD,
+    SMD, beta, AUC) without a CI in the same sentence blocks in the Results and the Abstract
+    results on 1.25.1+ papers (a paper pinned earlier: warning)."""
+    from .. import outcomereport as orep
     rel = ctx.spec["path"]
     if not ctx.p(rel).is_file():
         return Result(False, "effects_with_intervals", f"{rel} missing")
     text = re.sub(r"```.*?```", " ", ctx.read(rel), flags=re.S)
+    part = orep.abstract_results(text) if "abstract" in rel.rsplit("/", 1)[-1] else text
+    no_ci = [s[:90] for s in orep.estimates_without_interval(part)]
+    if no_ci:
+        hint = ["Every effect estimate carries its 95% CI (or credible interval) in the same "
+                "sentence or parentheses, favourable or not: 'HR 0.88, 95% CI 0.76-1.01'. "
+                "Uncertainty is shown by the interval, not by hedging words."]
+        detail = (f"estimates_have_intervals: {len(no_ci)} sentence(s) report an effect estimate "
+                  "without a confidence interval: " + " | ".join(no_ci[:3]))
+        if orep.since_1251(ctx):
+            return Result(False, "effects_with_intervals", detail, hint)
+        return Result(False, "effects_with_intervals", detail + f" (blocks from engine "
+                      f"{orep.SINCE} after `wf migrate --yes`)", hint, severity="warn")
     bare = [s.strip()[:80] for s in re.split(r"(?<=[.;])\s+", text)
             if _P_ONLY.search(s) and not _INTERVAL.search(s)]
     if bare:
@@ -105,7 +121,8 @@ def effects_with_intervals(ctx: Ctx) -> Result:
                       + " | ".join(bare[:3]),
                       ["Report the effect measure and interval named in the protocol's "
                        "Statistical reporting plan, then the P value."], severity="warn")
-    return Result(True, "effects_with_intervals", f"{rel}: P values travel with an interval")
+    return Result(True, "effects_with_intervals", f"{rel}: effect estimates and P values travel "
+                                                  "with an interval")
 
 
 # ------------------------------------------------------- item 4: variable crosswalk (S04)

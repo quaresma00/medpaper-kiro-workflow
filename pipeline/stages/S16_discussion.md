@@ -28,6 +28,7 @@ Details (move-by-move structure, inputs): `reference/stage_details/S16_discussio
    - continuous prose without subheadings (unless the journal requires them); adjacent
      citations in one group `[@a; @b]`. Never cite supplementary items (Table S2).
    - 1.24.0: confident, not defensive - limitations in one paragraph (3-5 items, bias direction), each caveat once, no prebuttals (`reference/writing_voice.md`).
+   - 1.25.1: the first paragraph leads with the primary outcome, whatever its direction; the limitations paragraph is always present with the design caveat (`limitations_present`).
 3. 1.23.0: right after the draft the `medpaper-medical-editor` polishes it: `writer_bundle.py
    receipt --stage S16_discussion`, `edit --section discussion`, delegate, `polished --section
    discussion` (`section_polished`; medical register, de-AI, no engineering narration,

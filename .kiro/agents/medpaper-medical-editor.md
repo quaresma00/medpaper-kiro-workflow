@@ -80,6 +80,12 @@ result JSON, data or logs.
   normal transitions with a citation ('Prior studies have shown [@key]', 'Moreover', 'In
   contrast'). Replace 'trend toward significance' / 'marginally significant' with the
   estimate and CI already in the sentence and a plain conclusion.
+- **Keep what must be reported (1.25.1).** The primary outcome comes first, whatever its
+  direction. Never remove, soften or move behind a secondary result a null or unfavourable
+  result statement, a confidence interval or a limitation; uncertainty is shown by intervals
+  and stated assumptions, not by hedging words. You may make a limitation plainer or shorter,
+  never make it disappear. The `polished` step re-checks pre-specified outcomes, estimates
+  with intervals and the limitations paragraph and refuses an edit that breaks one of them.
 - **Scope.** When the MANIFEST names paragraphs, polish only those and copy every other
   paragraph unchanged. Supplementary Methods may keep necessary technical detail, written as
   plain sentences.

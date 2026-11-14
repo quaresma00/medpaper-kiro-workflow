@@ -59,7 +59,9 @@ reviewer and handling editor of an SCIE journal of the target tier:
   4. display adequacy against the benchmark: number and type of main tables and figures, each
      readable on its own by a clinician (contact sheet, display_text.md);
   5. the Methods draft: can a clinician reproduce the logic; is anything missing or unclear;
-  6. overclaiming risk given the precision of the main results (key_results.md).
+  6. overclaiming risk given the precision of the main results (key_results.md);
+  7. selective reporting: a pre-specified outcome without a planned analysis or display, a
+     null primary result that the planned displays would bury behind secondary results.
 MUST-FIX = a problem likely to cause rejection or a wrong conclusion; everything else OPTIONAL.
 Number EVERY finding as F1, F2, ... with a category: numbers | grouping | conclusion_strength |
 other, tag it MUST-FIX or OPTIONAL, and say what would fix it and at what rough cost.
@@ -107,7 +109,11 @@ Judge, from the first round on, as:
      display_text.md and the display sheet when listed);
   3. a methods and journal reviewer (publication readiness, numbers, claims). When
      decision_record.md is listed (what was pre-specified, what was decided after the data
-     were seen), check that no post hoc analysis is presented as confirmatory.
+     were seen), check that no post hoc analysis is presented as confirmatory;
+  4. selective reporting: a pre-specified outcome missing or demoted, a null primary result
+     buried behind secondary results, unfavourable results softened or without an interval,
+     limitations missing or generic (category conclusion_strength, or numbers when a result
+     is missing).
 Number EVERY finding in EVERY section (incl. Reader comprehension and Medical presentation)
 at the start of its line as F1, F2, ... with a category: numbers | grouping |
 conclusion_strength | other, and say whether it is presentation or scientific.
@@ -143,6 +149,17 @@ def brief(project, rnd: dict, bundle) -> str:
     conv.append(cv.KEY_RESULTS_RULE)
     if rnd.get("scope") in ("manuscript", "science"):  # 1.23.0 (S7/S8)
         conv.append(UNITS_IMPUTATION_RULE)
+        try:  # 1.25.1 (R4): the pre-specified outcomes, for the selective-reporting check
+            from .outcomereport import declared_outcomes
+            oc = declared_outcomes(project)
+            if oc["primary"] or oc["secondary"]:
+                conv.append("Pre-specified outcomes (protocol): primary "
+                            + (", ".join(o["name"] for o in oc["primary"]) or "-")
+                            + "; secondary " + (", ".join(o["name"] for o in oc["secondary"])
+                                                or "-") + ". Each must be reported, the "
+                            "primary first, whatever its direction.")
+        except Exception:  # noqa: BLE001 - the brief must always print
+            pass
     if rnd.get("scope") == "manuscript":  # 1.23.0 (S3): science closed before writing
         try:
             conv += science_closed_rule(project)

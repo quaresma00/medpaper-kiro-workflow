@@ -34,7 +34,12 @@ closed science items unless results changed.
 
 ## Hard rules
 - Effects as the protocol's Statistical reporting plan says (estimate + interval, then P);
-  `effects_with_intervals` warns on P-value-only sentences.
+  `effects_with_intervals` warns on P-value-only sentences; 1.25.1: an effect estimate (HR,
+  OR, RR, IRR, ROR, PRR, IC, MD, SMD, beta, AUC) without its CI in the same sentence blocks.
+- 1.25.1: the primary outcome first, whatever its direction; every primary and secondary
+  outcome of `01_protocol/idea.json` is named in a Results sentence with its estimate and CI
+  or a cited table/figure (a supplementary one counts) - `prespecified_outcomes_reported`.
+  Null and unfavourable results get the same prominence and format as favourable ones.
 - Body text is continuous paragraphs (1.9.0). Lists only where a sentence truly cannot carry
   the content (rarely more than one short list per section); every result, count, criterion,
   covariate and sensitivity finding is written as a sentence. `prose_not_lists` fails above

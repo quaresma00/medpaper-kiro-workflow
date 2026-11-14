@@ -14,7 +14,7 @@
 
 [meta]
 name = "medpaper"
-version = "1.25.0"
+version = "1.25.1"
 schema = 1
 description = "Medical/clinical research pipeline: idea -> feasibility -> data -> analysis -> artifacts -> manuscript -> submission package."
 
@@ -669,6 +669,11 @@ path = "07_manuscript/results.md"
 check = "effects_with_intervals"
 path = "07_manuscript/results.md"
 since = "1.10.0"
+# 1.25.1 (R2 a): every pre-specified outcome (idea.json) reported, favourable or not, with its
+# interval or a cited table/figure; blocks on 1.25.1+ papers (pinned: warning).
+[[stage.gate]]
+check = "prespecified_outcomes_reported"
+since = "1.25.1"
 [[stage.gate]]
 check = "section_language_clean"
 path = "07_manuscript/results.md"
@@ -879,6 +884,15 @@ since = "1.23.0"
 check = "clinical_labels_used"
 paths = ["07_manuscript/discussion.md"]
 since = "1.11.0"
+# 1.25.1 (R2 d): a limitations paragraph (>= 2 specific items + the design's essential caveat,
+# reference/design_caveats.toml) blocks on 1.25.1+; (R2 b) the primary outcome leads (warning).
+[[stage.gate]]
+check = "limitations_present"
+path = "07_manuscript/discussion.md"
+since = "1.25.1"
+[[stage.gate]]
+check = "primary_first"
+since = "1.25.1"
 
 [[stage]]
 id = "S17_assemble"
@@ -906,6 +920,19 @@ since = "1.9.0"
 [[stage.gate]]
 check = "cross_section_consistent"
 severity = "warn"
+# 1.25.1 (R2 a-c): the primary result in the Abstract results whatever its direction, every
+# Abstract estimate with its CI (block on 1.25.1+), the primary outcome leads (warning).
+[[stage.gate]]
+check = "prespecified_outcomes_reported"
+abstract = true
+since = "1.25.1"
+[[stage.gate]]
+check = "effects_with_intervals"
+path = "07_manuscript/abstract.md"
+since = "1.25.1"
+[[stage.gate]]
+check = "primary_first"
+since = "1.25.1"
 [[stage.gate]]
 check = "data_acquisition_complete"
 [[stage.gate]]
@@ -1167,6 +1194,13 @@ check = "cross_section_consistent"
 block = true
 [[stage.gate]]
 check = "changed_paragraphs_polished"
+# 1.25.1 (R2 b): a null primary outcome never displaced by a secondary result in the Abstract
+# results or the Discussion's first paragraph (blocks on 1.25.1+ papers).
+[[stage.gate]]
+check = "primary_first"
+block = true
+manuscript = true
+since = "1.25.1"
 [[stage.gate]]
 check = "prose_not_lists"
 path = "07_manuscript/full_manuscript.md"

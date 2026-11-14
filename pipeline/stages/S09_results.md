@@ -57,6 +57,7 @@ Details (science review, hard rules): `reference/stage_details/S09_results.md`.
 ONE section file; continuous paragraphs; every number traceable to results JSON in its own
 context; citations match `artifact_plan.json`; no claim about a result you did not compute.
 1.24.0: a non-significant result is estimate + CI + plain words, never 'trend toward significance' (`reference/writing_voice.md`).
+1.25.1: the primary outcome first, whatever its direction; every pre-specified outcome reported (`prespecified_outcomes_reported`); every estimate with its CI.
 
 ## Close
 ```

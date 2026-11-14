@@ -1,0 +1,49 @@
+# 1.25.1 (R2 d): the essential caveat of each design, required once in the Discussion
+# (normally in the limitations paragraph) by the `limitations_present` gate at S16.
+# A design is chosen from 01_protocol/idea.json: `study_design` (the S01 enum) or a
+# `design_patterns` match on design / title_working / data_source.name. The first matching
+# entry in file order wins. Every group in `groups` must be matched by at least one of its
+# patterns (case-insensitive regular expressions); `caveat` is the plain-English rule shown
+# to the writer. Designs without an entry need only the two specific limitations.
+
+[disproportionality]
+design_patterns = ['disproportionality', 'pharmacovigilance', '\bFAERS\b', 'VigiBase', 'EudraVigilance', 'spontaneous report', 'adverse event reporting', '\bJADER\b']
+caveat = "disproportionality signals do not measure incidence or risk, and spontaneous reporting is affected by under-reporting, stimulated (notoriety) reporting and other reporting biases"
+groups = [
+  ['(?:not|cannot|neither|no)\b[^.]{0,80}\b(?:incidence|risk|frequency|rate)', '(?:incidence|risk)[^.]{0,60}\bcannot\b', 'not\s+(?:a\s+)?measures?\s+of\s+(?:incidence|risk)'],
+  ['reporting\s+bias', 'under-?\s?reporting', 'stimulated\s+reporting', 'notoriety', 'selective\s+reporting', 'Weber\s+effect', 'reporting\s+(?:is|was|may\s+be)\s+(?:influenced|affected)'],
+]
+
+[mendelian_randomization]
+study_design = ["mendelian_randomization"]
+design_patterns = ['mendelian\s+randomi[sz]ation', '\bMR\s+(?:study|analysis)']
+caveat = "Mendelian randomization depends on the instrumental-variable assumptions (relevance, independence, exclusion restriction), and horizontal pleiotropy can bias the estimates"
+groups = [
+  ['instrument(?:al)?[- ]variable\s+assumptions?', '\bIV\s+assumptions?', 'exclusion\s+restriction', 'instrument\s+(?:validity|assumptions?)', '(?:relevance|independence)\s+assumption'],
+  ['pleiotrop'],
+]
+
+[prediction_model]
+study_design = ["prognostic_model", "diagnostic_accuracy"]
+design_patterns = ['prediction\s+model', 'prognostic\s+model', 'risk\s+score', 'nomogram', 'machine\s+learning\s+model']
+caveat = "the model needs external validation in an independent population before clinical use"
+groups = [
+  ['external(?:ly)?\s+validat', 'independent\s+(?:validation\s+)?(?:cohort|population|dataset)', 'validat\w*\s+in\s+(?:an?\s+)?(?:independent|external|other)'],
+]
+
+[meta_analysis]
+study_design = ["meta_analysis", "systematic_review"]
+design_patterns = ['meta-?analys', 'systematic\s+review']
+caveat = "pooled estimates depend on the included studies: between-study heterogeneity and publication (small-study) bias"
+groups = [
+  ['heterogene', 'publication\s+bias', 'small-?study\s+effects?'],
+]
+
+[observational]
+study_design = ["cross_sectional", "cohort_retrospective", "cohort_prospective", "case_control", "secondary_analysis"]
+design_patterns = ['cohort', 'cross-?sectional', 'case-?control', 'observational', 'registry', 'NHANES', 'retrospective']
+caveat = "residual (unmeasured) confounding remains possible, so the associations do not establish causation"
+groups = [
+  ['residual\s+confound', 'unmeasured\s+confound', 'unknown\s+confound', 'confounding\s+(?:by|from)\s+(?:unmeasured|unknown)', 'confounding\s+cannot\s+be\s+(?:ruled\s+out|excluded)'],
+  ['\bcaus(?:al|ality|ation|e|es|ed|ing)\b', 'temporal(?:ity)?\b'],
+]

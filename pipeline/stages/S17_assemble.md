@@ -27,6 +27,8 @@ Details (title scoring, assembly order, statements file): `reference/stage_detai
 4. Read it end to end; fix the source section (never the assembled file) and re-assemble.
    1.25.0: `tools/text/polish.py crosscheck` (cross-section report: terminology, abbreviations,
    near-duplicate sentences, abstract numbers vs Results/tables) - fix what it lists before S18.
+   1.25.1: the Abstract results report the primary outcome first, whatever its direction,
+   and every estimate with its CI (`prespecified_outcomes_reported`, `primary_first`).
 5. Only if `wf check` says the proof is stale (analysis code, data or results changed since
    S06) reproduce; never "to be safe" - an unchanged proof is accepted by hash:
 ```

@@ -64,6 +64,12 @@ RUBRIC = """Rubric: a clinician who never saw the code understands every sentenc
   signal or design caveat, a pre-specified outcome or a negative result; keep normal
   transitions with a citation ('Prior studies have shown [@key]', 'Moreover', 'In contrast');
   'trend toward significance' / 'marginally significant' -> estimate + CI + plain conclusion.
+- Keep what a medical paper must report (1.25.1): the primary outcome comes first, whatever
+  its direction. Never remove, soften or move behind a secondary result a null or
+  unfavourable result statement, a confidence interval or a limitation; uncertainty is shown
+  by intervals and stated assumptions, not by hedging words. The 'polished' step re-checks
+  outcomes reported, estimates with intervals and the limitations paragraph and refuses an
+  edit that breaks one of them.
 - NEVER change a number, a citation [@key] or a table/figure reference; never add a claim."""
 
 
@@ -234,6 +240,13 @@ def warning_hits(project: Path, section: str, text: str) -> list[str]:
         return []
 
 
+def reporting_regressions(project: Path, section: str, before: str, after: str) -> list[str]:
+    """1.25.1 (R3): pre-specified outcomes reported, estimates with intervals and the
+    limitations paragraph (checks a, c, d) that passed before the edit must still pass."""
+    from . import outcomereport
+    return outcomereport.edit_regressions(project, section, before, after)
+
+
 def fact_problems(before: str, after: str, rel: str = "") -> list[str]:
     try:
         pol = _polish_module()
@@ -262,6 +275,7 @@ def accept_polished(project: Path, section: str, polished: Path | None = None) -
     f = _file(project, section)
     old = f.read_text(encoding="utf-8")
     probs = fact_problems(old, new, SECTIONS[section][1]) + language_problems(project, section, new)
+    probs += reporting_regressions(project, section, old, new)
     if probs:
         raise ValueError("polished text refused: " + "; ".join(probs[:8]))
     f.write_text(new, encoding="utf-8")
@@ -420,6 +434,9 @@ def accept_manuscript(project: Path, polished: Path | None = None) -> dict:
             lead = ch[:len(ch) - len(ch.lstrip())]
             chunks[k] = lead + "\n".join(heads + [new[n]])
     merged = "".join(chunks)
+    regress = reporting_regressions(project, MANUSCRIPT, text, merged)  # 1.25.1 (R3)
+    if regress:
+        raise ValueError("polished paragraphs refused: " + "; ".join(regress[:8]))
     f.write_text(merged, encoding="utf-8")
     rec = _ms_receipt(project)
     rec.setdefault("schema", 1)

@@ -46,7 +46,8 @@ Details (variant comparison, trim authorisation, log headings): `reference/stage
 ## Gate
 polish_complete (snapshot, lint report, facts preserved, log headings), cross-section
 consistency (abbreviation redefined / used before definition, abstract number not in the
-Results or tables block on 1.25.0+), changed paragraphs polished, AI tells, style, journal
+Results or tables block on 1.25.0+), changed paragraphs polished, primary outcome first
+(1.25.1: a null primary displaced by a secondary result blocks), AI tells, style, journal
 limits, structure, references live, abbreviations, numbers, display references, variant
 preserves science. Never re-take the snapshot to hide a failed diff.
 
