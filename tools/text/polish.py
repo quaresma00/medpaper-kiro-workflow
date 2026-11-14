@@ -1069,6 +1069,23 @@ def cmd_diff(args) -> int:
     return 0
 
 
+def cmd_crosscheck(args) -> int:
+    """1.25.0 (B3): what a single section cannot show - terminology, abbreviations, near-duplicate
+    sentences, abstract numbers vs Results/tables, conclusion strength (for the reviewer)."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from wfcore import crosscheck
+    proj = project_root()
+    data = crosscheck.report(proj)
+    _record_derived(proj, [proj / data["report"]])
+    if args.json:
+        print(json.dumps(data, indent=2, ensure_ascii=False))
+    else:
+        print("\n".join(crosscheck.lines(data)))
+        print("Fix these in the paragraphs concerned only; changed paragraphs go to the medical "
+              "editor (writer_bundle.py edit --section manuscript). No full second polish.")
+    return 2 if data["blocking"] else 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="de-AI and academic-English linting")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -1084,6 +1101,10 @@ def main() -> int:
 
     p = sub.add_parser("diff", help="verify polishing preserved every fact")
     p.set_defaults(fn=cmd_diff)
+
+    p = sub.add_parser("crosscheck", help="1.25.0: cross-section consistency report")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(fn=cmd_crosscheck)
 
     args = ap.parse_args()
     return args.fn(args)

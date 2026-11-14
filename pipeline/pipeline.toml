@@ -14,7 +14,7 @@
 
 [meta]
 name = "medpaper"
-version = "1.24.0"
+version = "1.25.0"
 schema = 1
 description = "Medical/clinical research pipeline: idea -> feasibility -> data -> analysis -> artifacts -> manuscript -> submission package."
 
@@ -902,6 +902,10 @@ since = "1.23.0"
 check = "prose_not_lists"
 path = "07_manuscript/full_manuscript.md"
 since = "1.9.0"
+# 1.25.0 (B3): cross-section report right after assembly (warning), fixed before the S18 review.
+[[stage.gate]]
+check = "cross_section_consistent"
+severity = "warn"
 [[stage.gate]]
 check = "data_acquisition_complete"
 [[stage.gate]]
@@ -1156,6 +1160,13 @@ outputs = ["07_manuscript/polish_report.json", "07_manuscript/polish_log.md"]
 [[stage.gate]]
 check = "polish_complete"
 since = "1.12.0"
+# 1.25.0 (B2/B3): no second full polish - the cross-section report (its clear errors block on
+# 1.25.0+ papers) and an editor receipt for every paragraph changed after assembly.
+[[stage.gate]]
+check = "cross_section_consistent"
+block = true
+[[stage.gate]]
+check = "changed_paragraphs_polished"
 [[stage.gate]]
 check = "prose_not_lists"
 path = "07_manuscript/full_manuscript.md"
@@ -1226,6 +1237,9 @@ check = "outputs_exist"
 check = "section_polished"
 sections = ["cover_letter"]
 since = "1.23.0"
+# 1.25.0 (B2): paragraphs of the journal copy changed after assembly went through the editor.
+[[stage.gate]]
+check = "changed_paragraphs_polished"
 [[stage.gate]]
 check = "data_acquisition_complete"
 [[stage.gate]]
@@ -1476,6 +1490,8 @@ globs = [
   "06_refs/deepread/*.md",
   "07_manuscript/prepolish/*",
   "07_manuscript/polish_allowlist.tsv",
+  # 1.25.0 (B3): the cross-section report (`polish.py crosscheck`, S17 before the freeze).
+  "07_manuscript/crosscheck_report.json",
   # The journal-adaptation copy. Its contents are derived from the frozen scientific source, so
   # they are not stage outputs in their own right.
   "08_submission/manuscript/*",

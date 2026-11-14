@@ -221,3 +221,7 @@ round). Verdicts are kept by pair hash in `.wf/meaning_verdicts.json`. The round
 while a pair has no verdict; 'meaning changed' routes to SCIENCE (S19 only with '我确认回退').
 A journal-trim authorisation never covers a meaning change.
 
+
+## 1.25.0 - wording changed in a rework round
+
+A paragraph a rework round changes after assembly (in `07_manuscript/full_manuscript.md` or the journal copy `08_submission/manuscript/`) goes to the `medpaper-medical-editor`, that paragraph only: `writer_bundle.py edit --section manuscript`, then `polished --section manuscript` (a change in a source section: `--section <name>`). Unchanged paragraphs are never sent again; `changed_paragraphs_polished` checks it at S22 and S23 (since 1.25.0).

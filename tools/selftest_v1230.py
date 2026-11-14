@@ -286,6 +286,7 @@ def run_bench(tmp: Path, record, section) -> None:
            and got["supplementary"] == 2, str({k: got[k] for k in ("main_figures", "main_tables",
                                                                     "supplementary")}))
     p = _paper(tmp / "p", "S07_artifacts")
+    _pin(p, "1.24.0")  # the 1.23 rule; the 1.25.0 recency rule is tested in selftest_v1250
     http = _Http({"https://www.ebi.ac.uk/europepmc/webservices/rest/search": lambda prm: _epmc(
         prm["query"].split(":")[1].split()[0], "Comparable paper", "PMC1" if "111" in prm["query"]
         else "", "111" in prm["query"]),
@@ -649,7 +650,7 @@ def run_release(tmp: Path, record, section) -> None:
     skill = (ROOT / ".kiro/skills/medpaper-pipeline/SKILL.md").read_text(encoding="utf-8")
     record("R pipeline 1.23.0; a 1.22.0 paper gets exactly one 1.23.0 event naming wf migrate --yes "
            "and stays pinned (no paper file touched); every new gate carries since 1.23.0",
-           pipe.meta.get("version") in ("1.23.0", "1.24.0") and len(notes) == 1 and "wf migrate --yes" in
+           pipe.meta.get("version") in ("1.23.0", "1.24.0", "1.25.0") and len(notes) == 1 and "wf migrate --yes" in
            notes[0]["detail"] and st.engine_pin == "1.22.0" and before == after
            and {c for _s, c, _v in gates} == set(NEW_1230) and all(v == "1.23.0" for *_x, v in gates),
            str(gates)[:300])

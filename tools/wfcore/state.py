@@ -176,6 +176,7 @@ class State:
             self._note_v1220(old_version, pipeline_version)
             self._note_v1230(old_version, pipeline_version)
             self._note_v1240(old_version, pipeline_version)
+            self._note_v1250(old_version, pipeline_version)
             self.save()
         return changed
 
@@ -343,6 +344,26 @@ class State:
                    "--yes`; until then it warns. Sections written earlier can be re-polished "
                    "with the medical editor (writer_bundle.py edit --section S). Paper files "
                    "were not modified.")
+
+    def _note_v1250(self, old_version: str, new_version: str) -> None:
+        """1.25.0: one event; no file or stage is touched."""
+        if (version_tuple(old_version) >= (1, 25, 0) or version_tuple(new_version) < (1, 25, 0)
+                or self.data.get("v1250_migration_noted")):
+            return
+        self.data["v1250_migration_noted"] = True
+        self.event("requirements_changed",
+                   "1.25.0: applies now - `benchmark.py search` (S07: the most recent comparable "
+                   "papers, PubMed sorted by publication date, original articles, last 3 years), "
+                   "the cross-section report (`polish.py crosscheck`; a warning at S17 and S22) "
+                   "and the simpler S22 card (no second full polish: cross-section consistency, "
+                   "journal adaptation and re-polishing only the paragraphs changed after "
+                   "assembly). After `wf migrate --yes` (stages not yet completed): the S07 "
+                   "recency rule (5-10 most recent papers, window, reasons for skipped ones), "
+                   "editor receipts for paragraphs changed after assembly (S22/S23, "
+                   "writer_bundle.py edit --section manuscript), the blocking cross-section "
+                   "errors (abbreviation redefined or used before its definition, an abstract "
+                   "number not in the Results or tables) and the new polish_log headings. Paper "
+                   "files were not modified.")
 
     def _note_v1160(self, old_version: str, new_version: str) -> None:
         """1.16.0: one event; no file or stage is touched."""

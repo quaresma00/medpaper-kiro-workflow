@@ -684,6 +684,21 @@ def _polish_cli(project: Path, args) -> int:
             return 0
         if not args.section:
             raise ValueError(f"{args.command} needs --section")
+        if args.section == sp.MANUSCRIPT:  # 1.25.0 (B2): paragraphs changed after assembly
+            if args.command == "receipt":
+                raise ValueError("the assembled manuscript needs no writer receipt: edit, then polished")
+            if args.command == "edit":
+                out = sp.build_manuscript_edit(project)
+                print(f"invoke subagent: name={sp.EDITOR}, prompt=\"Read {out / 'MANIFEST.md'} and "
+                      f"follow it; write the polished paragraphs to {out / 'polished.md'}\" (run it "
+                      "in the paper's main chat)")
+                print("then: writer_bundle.py polished --section manuscript")
+                return 0
+            got = sp.accept_manuscript(project, args.from_file)
+            print(f"polished {len(got['paragraphs'])} changed paragraph(s) of {got['file']} "
+                  f"({', '.join(map(str, got['paragraphs']))}); numbers, citations and display "
+                  "references unchanged; the other paragraphs were not sent")
+            return 0
         if args.command == "edit":
             out = sp.build_edit(project, args.section)
             print(f"invoke subagent: name={sp.EDITOR}, prompt=\"Read {out / 'MANIFEST.md'} and "
@@ -714,7 +729,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--section", default="", help="receipt/edit/polished (1.23.0): methods, "
                                                    "results, introduction, discussion, abstract, "
                                                    "title, legends, table_captions, "
-                                                   "supplementary_methods, cover_letter")
+                                                   "supplementary_methods, cover_letter; "
+                                                   "1.25.0: manuscript = paragraphs of the "
+                                                   "assembled/journal copy changed after assembly")
     ap.add_argument("--from", dest="from_file", type=Path, default=None,
                     help="polished: the editor's text (default .wf/editor_bundle/<section>/polished.md)")
     ap.add_argument("--project", type=Path, default=None)

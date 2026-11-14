@@ -148,6 +148,13 @@ def brief(project, rnd: dict, bundle) -> str:
             conv += science_closed_rule(project)
         except Exception:  # noqa: BLE001 - the brief must always print
             pass
+        try:  # 1.25.0 (B3): the deterministic cross-section report's items for the reviewer
+            from . import crosscheck
+            for x in crosscheck.report(project, write=False)["for_reviewer"]:
+                conv.append("Cross-section report (engine): " + x["detail"] + " - judge whether "
+                            "the abstract claims more than the Discussion (conclusion_strength).")
+        except Exception:  # noqa: BLE001 - the brief must always print
+            pass
     rules = [*rules, *conv]
     return text + ("\n" + "\n".join(rules) if rules else "")
 

@@ -113,7 +113,7 @@ def load_all() -> None:
     from . import (artifacts, data, display, frozen, fsx, manuscript, numbers,  # noqa: F401
                    polish, refs, reporting, repro, revisions, statecheck, text, v1100, v1110,
                    v1120, v1130, v1140, v1160, v1170, v1180, v1190, v1200, v1210, v1220,
-                   v1230)
+                   v1230, v1250)
 
 
 def known() -> list[str]:

@@ -11,8 +11,9 @@
 > names come from `target_journal.json` (defaults otherwise).
 
 ## Purpose
-Give the journal's copy of the manuscript one language pass without changing a number, citekey,
-figure/table reference or scientific claim.
+Adapt the journal's copy of the manuscript to the journal without changing a number, citekey,
+figure/table reference or scientific claim. 1.25.0: no second full polish - only cross-section
+consistency, journal adaptation and the paragraphs changed after assembly.
 
 **You are editing `08_submission/manuscript/`, not `07_manuscript/`.** The science was frozen
 when the user released S19; this stage is journal-specific work, so it happens on the variant
@@ -43,15 +44,42 @@ restore it and tighten prose instead, or get the user's explicit authorisation a
    explicit References heading and concise Figure legends at the end.
 4. Run `tools/text/polish.py diff` and `tools/text/polish.py lint` again. Restore and redo
    any wording edit that loses or adds a number, citation or artifact reference.
-5. Write `polish_log.md` with `AI patterns removed`, `Language changes by section`, `House
-   style decisions`, `Cut to meet journal limits`, `Read by eye`, `Tier-B phrases kept`.
+5. Write `polish_log.md` with the headings `Cross-section consistency fixes`,
+   `Journal adaptation`, `Re-polished paragraphs (editor receipts)`,
+   `Cut to meet journal limits`, `Tier-B phrases kept` (1.25.0; `polish_complete` checks them on 1.25.0+ papers - a paper pinned earlier may
+   keep the old headings). There is no second full polish: every section was polished by the
+   medical editor at its own stage, so the log records only what this stage changed.
 6. Check what the journal adaptation actually cost, and put the numbers in `polish_log.md`
    under `Cut to meet journal limits`:
 ```
 .\.venv\Scripts\python.exe tools/manuscript/scientific_freeze.py delta
 ```
-7. Reread the complete manuscript and optional supplementary Methods, then record
-   `polish_reviewed YES` with a concrete reason.
+7. Read the cross-section report (`polish.py crosscheck`), the lint and diff output and the
+   paragraphs you changed - not the whole manuscript, unless the user asks for it - then
+   record `polish_reviewed YES` with a concrete reason.
+
+## 1.25.0 - after assembly: cross-section consistency and changed paragraphs only
+- `polish.py crosscheck` (also the gate `cross_section_consistent`: a warning at S17 right after
+  assembly, so issues are fixed before the S18 review; at S22 the clear errors block on 1.25.0+
+  papers) reports what one section cannot show: one population name across the manuscript
+  (reports, cases and patients never interchanged; display-dictionary labels); abbreviations
+  defined once at first use, separately in the abstract and the body (redefinition and use
+  before the definition block; defined but used once warns); near-duplicate sentences
+  Introduction vs Discussion and Methods vs Results (content-word Jaccard >= 0.7, warning;
+  the 1.19 Discussion-vs-Results rule is unchanged); every number of the abstract's results and
+  conclusion is a value in the Results text or the tables (blocks on a mismatch); the abstract
+  and Discussion conclusions are listed for the reviewer (strength); spelling variant and P/p.
+- Paragraphs changed after assembly - S22 trims and journal edits in
+  `08_submission/manuscript/`, edits in review rounds (S18/S19/S24) and rework rounds - pass
+  through `medpaper-medical-editor`, those paragraphs only: `writer_bundle.py edit --section
+  manuscript` writes `.wf/editor_bundle/manuscript/changed.md` with the changed paragraphs
+  (per-paragraph hashes against every section's polished text and earlier manuscript receipts);
+  the editor writes `polished.md` with the same `<!-- paragraph N -->` markers; `polished
+  --section manuscript` checks numbers, citations, display references and language and merges
+  them. Gate `changed_paragraphs_polished` at S22 and S23 (since 1.25.0). Unchanged paragraphs
+  are never sent again. The S25 final copy is the author's own Word edit, checked by
+  `final_copy.py check`; wording the AI changes goes into the journal copy first (and through
+  the editor) before the package is rebuilt.
 
 ## Outputs
 - `08_submission/manuscript/polish_report.json`

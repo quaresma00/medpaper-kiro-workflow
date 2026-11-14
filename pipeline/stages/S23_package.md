@@ -7,7 +7,7 @@ Details (builder, manifest roles, checklist format, portal to-do): `reference/st
 ## Do
 1. `08_submission/cover_letter.md` (every `cover_letter.must_state` item; 1.23.0 writer +
    medical editor: `writer_bundle.py receipt|edit|polished --section cover_letter`);
-   highlights if required. Sync a reference count:
+   highlights if required. Reference count:
    `.\.venv\Scripts\python.exe tools/manuscript/reference_count.py sync`
 2. Build every prose upload once from `08_submission/manuscript/` (never `07_manuscript/`):
 ```
@@ -20,8 +20,8 @@ Details (builder, manifest roles, checklist format, portal to-do): `reference/st
    `tools/supplementary.py figures|xlsx --number <n> [--input ...] --output
    project/08_submission/bundle/` (Supplemental_File_n_Title, header "Online Resource n:
    Title"). No keep markers. Helpers in `.wf/scripts/`, never `temp/`.
-3. Write `08_submission/bundle/manifest.json` (every upload, role, rule). Main figure TIFFs
-   and table workbooks are added automatically when the journal wants separate files.
+3. Write `08_submission/bundle/manifest.json` (every upload, role, rule). Main TIFFs and
+   table workbooks are added by themselves when the journal wants separate files.
    From now on ONE command rebuilds what an edit affects and re-measures (audit, QC,
    `compliance_matrix.md`, polish lint):
 ```
@@ -40,8 +40,8 @@ Details (builder, manifest roles, checklist format, portal to-do): `reference/st
 .\.venv\Scripts\python.exe tools/wf.py decide figures_visually_confirmed YES --why "<per figure: what you saw>"
 .\.venv\Scripts\python.exe tools/wf.py decide tables_visually_confirmed YES --why "<sheets and upload tables inspected>"
 ```
-   Render each DOCX (`tools/manuscript/preview.py 08_submission/bundle/manuscript.docx`) and
-   inspect pages; then record `submission_files_visually_confirmed YES`.
+   Render each DOCX (`tools/manuscript/preview.py <docx>`) and inspect pages; then record
+   `submission_files_visually_confirmed YES`.
 5. `08_submission/reporting_checklist.md` only if `journal_requires_checklist` is set (or
    PRISMA); numbered after the content supplementary files.
 
@@ -55,7 +55,8 @@ Details (builder, manifest roles, checklist format, portal to-do): `reference/st
 ## Gate
 bundle, DOCX ready (no tracked changes, comments, placeholders), measured checklist, journal
 fields, compliance matrix (no FAIL), layout, display text, baseline, visual debts, reporting
-checklist, reproduces, no orphans, CSL, cover letter polished. Never recapture the baseline.
+checklist, reproduces, no orphans, CSL, cover letter polished, changed
+paragraphs re-polished (1.25.0, see S22). Never recapture the baseline.
 
 ## Close
 ```

@@ -120,6 +120,12 @@ def polish_complete(ctx: Ctx) -> Result:
         if not facts.ok:
             parts.append(f"facts: {facts.detail}")
             hints += facts.hints
+    from .v1250 import polish_log_problems  # 1.25.0 (B1): no second full polish
+    for prob in polish_log_problems(ctx):
+        parts.append(f"log: {prob}")
+        hints.append("polish_log.md headings (1.25.0): Cross-section consistency fixes, Journal "
+                     "adaptation, Re-polished paragraphs (editor receipts), Cut to meet journal "
+                     "limits, Tier-B phrases kept.")
     if parts:
         return Result(False, "polish_complete", "; ".join(parts), hints)
     return Result(True, "polish_complete",

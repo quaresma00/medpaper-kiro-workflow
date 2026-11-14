@@ -11,7 +11,8 @@ imputation_pooled           S8 (S05, S06): analyses of multiply imputed data are
                             with a reason and a Methods sentence.
 display_plan_benchmarked    S2 (S07): the artifact plan reaches the benchmark median of main
                             display items (within the journal limits) and covers every display type
-                            of at least half of the 3-5 comparable papers (or a reason per type).
+                            of at least half of the 3-5 comparable papers (or a reason per type);
+                            since 1.25.0 the 5-10 most recent ones (search log, see v1250).
 science_review_before_writing  S3 (S09): the latest science round is closed and the user's
                             proceed decision recorded, bound to the results/display hashes.
 section_polished            S5 (S07, S08, S09, S14, S16, S17, S23): each prose section drafted by
@@ -195,15 +196,23 @@ def display_plan_benchmarked(ctx: Ctx) -> Result:
     if not since_1230(ctx):
         return _pinned(name)
     from .. import displaybench as db
-    probs = db.plan_problems(ctx.project)
+    from .v1250 import since_1250
+    new = since_1250(ctx)  # 1.25.0 (A4): the 5-10 most recent comparable papers
+    probs = db.plan_problems(ctx.project, v1250=new)
     if probs:
-        return Result(False, name, "; ".join(probs[:6]),
-                      ["tools/pubmed/benchmark.py add --pmid <comparable paper> --design <key> "
-                       "(3-5 papers: same design and data-source family, recent SCIE journals, one "
-                       "from the target journal or tier); then benchmark.py show and send its "
-                       "Chinese lines with the plan to the user."])
+        hint = ("tools/pubmed/benchmark.py search, then add --pmid P --design KEY for the most "
+                "recent comparable candidates in order (target 8, 5-10; skip --pmid P --reason ... "
+                "--note ... for one that is not comparable / not an original article / without "
+                "obtainable displays); then benchmark.py show and send its Chinese lines with the "
+                "plan to the user." if new else
+                "tools/pubmed/benchmark.py add --pmid <comparable paper> --design <key> "
+                "(3-5 papers: same design and data-source family, recent SCIE journals, one "
+                "from the target journal or tier); then benchmark.py show and send its "
+                "Chinese lines with the plan to the user.")
+        return Result(False, name, "; ".join(probs[:6]), [hint])
     s = db.summary(db.load(ctx.project))
-    return Result(True, name, f"plan meets the benchmark of {s['n']} paper(s) (median "
+    return Result(True, name, ("1.25.0 recency rule met; " if new else "")
+                  + f"plan meets the benchmark of {s['n']} paper(s) (median "
                               f"{s['median_main_items']} main items; {len(s['majority_types'])} "
                               "majority display type(s) covered or explained)")
 

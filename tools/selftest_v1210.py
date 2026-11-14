@@ -460,7 +460,7 @@ def run_release(tmp: Path, record, section) -> None:
     cards = {c.stem: len(c.read_text(encoding="utf-8")) for c in (ROOT / "pipeline/stages").glob("S*.md")}
     record("R pipeline 1.21.0; a 1.20.0 paper gets one 1.21.0 event and stays pinned (no paper "
            "file touched); the three new gates carry since 1.21.0; every card <= limit",
-           registry.load().meta.get("version") in ("1.21.0", "1.22.0", "1.23.0", "1.24.0") and len(notes) == 1
+           registry.load().meta.get("version") in ("1.21.0", "1.22.0", "1.23.0", "1.24.0", "1.25.0") and len(notes) == 1
            and st.engine_pin == "1.20.0" and before == after
            and all(gates[k].get("since") == "1.21.0" for k in (
                ("S04_data", "web_captures_traced"), ("S20_journal", "indexing_evidence_cited"),

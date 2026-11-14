@@ -17,13 +17,9 @@ first keep panels from filling up with explanatory text later.
 
 ## Procedure
 1. **Benchmark.** Retrieve comparable papers - same design, same field, the kind of
-   journal you are targeting - and count what they display. A scholarly search helper may
-   find candidates, but every comparator used in the benchmark must be retrieved through
-   the bundled client:
-```
-.\.venv\Scripts\python.exe tools/pubmed/client.py search --query "<design> <topic>" --retmax 100
-.\.venv\Scripts\python.exe tools/pubmed/client.py fetch --ids <...> --with-abstract
-```
+   journal you are targeting - and count what they display. Since 1.25.0 the candidates come
+   from `tools/pubmed/benchmark.py search` (the most recent first; see below), not from a
+   relevance-sorted search.
    Write `project/01_protocol/artifact_benchmark.md` with headings
    `Comparable papers surveyed`, `Figure/table counts observed`, `Chosen inventory and why`.
    Record the observed range (e.g. "4-6 main figures, 2-3 main tables, n=8 papers"), and
@@ -41,6 +37,39 @@ first keep panels from filling up with explanatory text later.
    wording also count), or `"benchmark_omissions": {"<key>": "<one-line reason>"}` in the plan.
    The 1.12 non_redundancy rule still applies. `benchmark.py show` prints the Chinese lines
    (benchmark counts and types, the plan against them) for the S07 message to the user.
+
+   **1.25.0 - the most recent comparable papers (supersedes "3-5, preferably last 5 years").**
+   - `benchmark.py search [--design KEY] [--query "..."]` builds the PubMed query from
+     `01_protocol/idea.json` (design; data-source family, e.g. FAERS/JADER/VigiBase
+     disproportionality, NHANES-type survey, Mendelian randomization, a named registry) and the
+     exposure/outcome labels of the display dictionary (entries with `"role": "exposure"` /
+     `"outcome"` first); `--query` replaces that topical part. Filters are always added: no
+     reviews, systematic reviews/meta-analyses (unless the paper is a meta-analysis), letters,
+     comments, editorials, case reports or errata; English; the window. Sorted by publication
+     date, most recent first (E-utilities via `tools/pubmed/eutils.py`, `NCBI_API_KEY` from the
+     environment); metadata only (PMID, date - electronic first -, journal, title). The log is
+     `01_protocol/benchmark_search.json` (query, search date, window, counts, candidates).
+   - Comparability: required = same design AND same data-source family; preferred = same
+     outcome family or exposure class; preferred = the target journal or its tier when known.
+   - Selection: among candidates meeting the required level take the most recent 5-10 (target
+     8), in the log's order. A more recent candidate is passed over only with `benchmark.py skip
+     --pmid P --reason not_comparable|not_original_article|displays_not_obtainable --note "..."`.
+   - Window: the last 3 years before the search date; the search extends to 5 years by itself
+     when fewer than 5 candidates exist (recorded), or `search --extend --reason "..."` when
+     fewer than 5 of them are comparable. An older paper only as `add --exception "<reason>"`
+     (e.g. the only comparable paper in the target journal); it is listed but outside the median.
+   - Display extraction as in 1.23 (open-access JATS captions; else the lawful full-text
+     cascade or the browser with the user's institutional access; else `add --unknown-counts`
+     = abstract only). Unknown counts stay outside the median; at least 5 papers with known
+     counts unless the window has fewer (then all of them, each skipped one with its reason).
+   - Gate (`display_plan_benchmarked`, since 1.25.0): the dated log; 5-10 included (fewer only
+     when every candidate is included or skipped); all from the window except exceptions; no
+     more recent candidate passed over without a reason; the plan's main items >= the median
+     (journal limits; extras to the supplement) and every type of >= half of the papers
+     present or explained (1.23 rule). Papers pinned earlier keep the 1.23 rule until
+     `wf migrate --yes`.
+   - The S07 message to the user: `benchmark.py show` - the included papers (year, journal,
+     main figures/tables) and the planned displays, in a few Chinese lines.
 2. **Plan.** Write `project/01_protocol/artifact_plan.json`. Every entry needs a
    `source_results` list pointing at the result JSONs it is built from - an artifact with
    no numeric source cannot be built:

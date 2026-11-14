@@ -273,6 +273,167 @@ def accept_polished(project: Path, section: str, polished: Path | None = None) -
     return rec
 
 
+# ------------------------------------------------------------------ 1.25.0 (B2): after assembly
+MANUSCRIPT = "manuscript"
+MANUSCRIPT_REL = "07_manuscript/full_manuscript.md"
+PROSE_SCOPES = ("abstract", "introduction", "methods", "results", "discussion", "conclusion")
+_MARK = re.compile(r"(?m)^<!--\s*paragraph\s+(\d+)\s*-->\s*$")
+
+
+def manuscript_rel(project: Path) -> str:
+    """The assembled manuscript: 07_manuscript/, or the journal copy once a variant is open."""
+    try:
+        from . import scifreeze
+        return scifreeze.resolve(Path(project), MANUSCRIPT_REL)
+    except Exception:  # noqa: BLE001
+        return MANUSCRIPT_REL
+
+
+def _strip_heads(p: str) -> str:
+    return "\n".join(ln for ln in p.splitlines() if not re.match(r"\s{0,3}#{1,6}\s", ln)).strip()
+
+
+def _nhash(p: str) -> str:
+    return _sha(re.sub(r"\s+", " ", _strip_heads(p)).strip())
+
+
+def prose_paragraphs(text: str) -> list[tuple[int, str]]:
+    """(paragraph number counted by blank lines over the whole file, text without heading lines)
+    for the prose of Abstract to Conclusion; Keywords, references, legends and statements are
+    not prose sections."""
+    out, scope = [], ""
+    for i, p in enumerate(paragraphs(text), 1):
+        for ln in p.splitlines():
+            m = re.match(r"\s{0,3}#\s+(.+)$", ln)
+            if m:
+                name = m.group(1).strip().casefold()
+                scope = next((s for s in PROSE_SCOPES if name.startswith(s)), "")
+        rest = _strip_heads(p)
+        if scope and rest and not re.match(r"(?i)\**keywords?\**\s*:", rest):
+            out.append((i, rest))
+    return out
+
+
+def _ms_receipt(project: Path) -> dict:
+    try:
+        d = json.loads((_dir(project, MANUSCRIPT) / "receipt.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        d = {}
+    return d if isinstance(d, dict) else {}
+
+
+def polished_hashes(project: Path) -> tuple[set[str], str]:
+    """Paragraph hashes that already passed the medical editor: every section's polished text
+    and every manuscript receipt; a paper without section receipts (written before 1.23) uses
+    the S22 pre-polish snapshot as its baseline."""
+    hs: set[str] = set()
+    basis = "section receipts"
+    for sec in SECTIONS:
+        f = _dir(project, sec) / "polished.md"
+        if f.is_file():
+            hs |= {_nhash(p) for p in paragraphs(f.read_text(encoding="utf-8"))}
+    if not hs:
+        basis = "pre-polish snapshot (no section receipts)"
+        try:
+            from . import scifreeze
+            snap = Path(project) / scifreeze.resolve(Path(project), "07_manuscript/prepolish")
+            f = snap / "full_manuscript.md"
+            if f.is_file():
+                hs |= {_nhash(p) for p in paragraphs(f.read_text(encoding="utf-8"))}
+        except Exception:  # noqa: BLE001
+            pass
+    for rec in (_ms_receipt(project).get("files") or {}).values():
+        hs |= set(rec.get("paragraphs") or [])
+    return hs, basis
+
+
+def manuscript_changed(project: Path) -> list[int]:
+    """Prose paragraphs of the assembled manuscript changed since their last polished receipt."""
+    f = Path(project) / manuscript_rel(project)
+    if not f.is_file():
+        return []
+    known, _basis = polished_hashes(project)
+    return [i for i, p in prose_paragraphs(f.read_text(encoding="utf-8")) if _nhash(p) not in known]
+
+
+def build_manuscript_edit(project: Path) -> Path:
+    """Editor bundle with ONLY the changed paragraphs (changed.md); unchanged ones are never sent."""
+    rel = manuscript_rel(project)
+    f = Path(project) / rel
+    if not f.is_file():
+        raise ValueError(f"{rel} does not exist (assembled at S17)")
+    todo = set(manuscript_changed(project))
+    if not todo:
+        raise ValueError("no paragraph changed since its last polished receipt - nothing to send")
+    out = Path(project) / EDITOR_DIR / MANUSCRIPT
+    if out.exists():
+        shutil.rmtree(out)
+    out.mkdir(parents=True)
+    paras = dict(prose_paragraphs(f.read_text(encoding="utf-8")))
+    (out / "changed.md").write_text("\n\n".join(f"<!-- paragraph {i} -->\n{paras[i]}"
+                                                for i in sorted(todo)) + "\n", encoding="utf-8")
+    manifest = [f"# Medical editor bundle (changed paragraphs of {rel})", "",
+                f"Read changed.md: {len(todo)} paragraph(s) edited after assembly. Write "
+                f"{(out / 'polished.md').as_posix()} - the only file you may write - with the same "
+                "'<!-- paragraph N -->' markers, each followed by that paragraph polished (one "
+                "paragraph each, no headings). Every other paragraph stays as it is.", "", RUBRIC]
+    voice_ref = writing_voice_file()
+    if voice_ref is not None:
+        shutil.copyfile(voice_ref, out / "writing_voice.md")
+        manifest += ["", "Also read writing_voice.md (confident, not defensive: examples)."]
+    (out / "MANIFEST.md").write_text("\n".join(manifest) + "\n", encoding="utf-8")
+    return out
+
+
+def accept_manuscript(project: Path, polished: Path | None = None) -> dict:
+    """Merge the editor's paragraphs into the manuscript (facts unchanged, language clean) and
+    record the hashes of its prose paragraphs as polished."""
+    rel = manuscript_rel(project)
+    f = Path(project) / rel
+    src = Path(polished) if polished else Path(project) / EDITOR_DIR / MANUSCRIPT / "polished.md"
+    if not src.is_file():
+        raise ValueError(f"{src} missing: the medical editor writes it")
+    marks = list(_MARK.finditer(src.read_text(encoding="utf-8")))
+    raw = src.read_text(encoding="utf-8")
+    new = {int(m.group(1)): raw[m.end():(marks[k + 1].start() if k + 1 < len(marks) else len(raw))]
+           .strip() for k, m in enumerate(marks)}
+    todo = set(manuscript_changed(project))
+    if set(new) != todo:
+        raise ValueError(f"polished.md must hold exactly paragraphs {sorted(todo)} (got {sorted(new)})")
+    if any(not t or re.search(r"\n\s*\n", t) or _strip_heads(t) != t for t in new.values()):
+        raise ValueError("each polished paragraph must be one paragraph without headings")
+    text = f.read_text(encoding="utf-8")
+    paras = dict(prose_paragraphs(text))
+    old_t = "\n\n".join(paras[i] for i in sorted(todo))
+    new_t = "\n\n".join(new[i] for i in sorted(todo))
+    probs = fact_problems(old_t, new_t, rel) + language_problems(project, MANUSCRIPT, new_t)
+    if probs:
+        raise ValueError("polished paragraphs refused: " + "; ".join(probs[:8]))
+    chunks = re.split(r"(\n\s*\n)", text.replace("\r\n", "\n"))
+    n = 0
+    for k, ch in enumerate(chunks):
+        if k % 2 or not ch.strip():
+            continue
+        n += 1
+        if n in new:
+            heads = [ln for ln in ch.strip().splitlines() if re.match(r"\s{0,3}#{1,6}\s", ln)]
+            lead = ch[:len(ch) - len(ch.lstrip())]
+            chunks[k] = lead + "\n".join(heads + [new[n]])
+    merged = "".join(chunks)
+    f.write_text(merged, encoding="utf-8")
+    rec = _ms_receipt(project)
+    rec.setdefault("schema", 1)
+    entry = rec.setdefault("files", {}).setdefault(rel, {"paragraphs": [], "history": []})
+    entry["paragraphs"] = sorted(set(entry["paragraphs"]) | {_nhash(p) for _i, p in
+                                                             prose_paragraphs(merged)})
+    entry["history"].append({"paragraphs": sorted(todo), "polished_at": _now(), "editor": EDITOR})
+    d = _dir(project, MANUSCRIPT)
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "receipt.json").write_text(json.dumps(rec, indent=2, ensure_ascii=False) + "\n",
+                                    encoding="utf-8")
+    return {"file": rel, "paragraphs": sorted(todo)}
+
+
 def problems(project: Path, section: str, optional: bool = False) -> list[str]:
     f = _file(project, section)
     if not f.is_file():
