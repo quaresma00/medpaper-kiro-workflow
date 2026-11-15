@@ -366,12 +366,25 @@ def _text_roles(fig, phantom: set[int]) -> tuple[list[dict], dict]:
             out.append({"text": s, "role": role, **({"axis": axis} if axis else {})})
     if getattr(fig, "_suptitle", None) is not None:
         add(fig._suptitle, "title")
+    # 1.27.0: a subfigure's suptitle and an axes title in a multi-panel figure are panel
+    # headings; an axes title in a single-panel figure is the figure's title.
+    def subfigs(f):
+        for sf in getattr(f, "subfigs", None) or []:
+            yield sf
+            yield from subfigs(sf)
+    for sf in subfigs(fig):
+        if getattr(sf, "_suptitle", None) is not None:
+            add(sf._suptitle, "panel title")
+        for t in sf.texts:
+            add(t, "annotation")
+    data_axes = [ax for ax in fig.get_axes() if getattr(ax, "_colorbar", None) is None]
+    ax_title = "panel title" if len(data_axes) > 1 else "title"
     scales = {}
     for ax in fig.get_axes():
         add(ax.xaxis.label, "axis title", "x")
         add(ax.yaxis.label, "axis title", "y")
         for t in (ax.title, getattr(ax, "_left_title", None), getattr(ax, "_right_title", None)):
-            add(t, "title")
+            add(t, ax_title)
         for t in ax.get_xticklabels():
             add(t, "tick label", "x")
         for t in ax.get_yticklabels():
@@ -520,6 +533,11 @@ def audit_figure(fig, stem: str | Path, archetype: str | None = None,
                                if (t.get_text() or "").strip()}),
     }
     report["text_roles"], report["axis_scales"] = _text_roles(fig, phantom)
+    report["text_roles_version"] = 2  # 1.27.0: title / panel title / subtitle / caption
+    heads = [t for t in report["text_roles"] if t["role"] == "title"]
+    if heads:
+        print(f"  ! in-figure title '{heads[0]['text'][:60]}' - delete it from the plot; the "
+              "legend carries the title and the explanation")
     report.update(provenance or {})
     try:  # 1.17.0 (J7): the presentation parameters this render used (journal switch check)
         from wfcore import renderparams

@@ -15,8 +15,11 @@ text_roles, older sidecars give 'figure text').
 Rules (reference/display_text.toml; letters as in the release notes): a code-like strings,
 b generic placeholder labels, c software-output columns in main tables, d number display,
 e units and measures, f undefined letter-code labels, g technical terms to spell out and
-explain (warn), h main tables wider than 8 data columns (warn). Exceptions: the paper-local
-.wf/language_allowlist.json (term = the exact string, reason >= 15 chars).
+explain (warn), h main tables wider than 8 data columns (warn). 1.27.0 (wfcore/figuretext.py):
+i titles inside the image (figure title, subtitle, caption line, long panel heading), j
+explanatory or excessive text in a figure, k AI phrasing, spin and data-processing wording in
+any table or figure string. Exceptions: the paper-local .wf/language_allowlist.json (term = the
+exact string, reason >= 15 chars).
 
 Relabelling (V4): the table builder, save_medpaper() and style.save() map internal names through
 the display dictionary (label, plus unit for titles/headers/row labels). On for papers pinned to
@@ -43,7 +46,10 @@ NOTES_REL = ".wf/display_text/wording_to_apply.md"
 BUNDLE_REL = ".wf/writer_bundle/displays"
 REPLY_REL = ".wf/writer/display_wording.md"
 SCHEMA = 2
-PROSE = ("title", "caption", "legend", "footnote")
+# 1.27.0: "subtitle" and "panel title" (sidecars that tell them from the figure title) are
+# title-like text: judged by rules i/j/k, not by the number-display rules.
+TITLE_ROLES = ("title", "subtitle", "panel title")
+PROSE = ("title", "subtitle", "panel title", "caption", "legend", "footnote")
 WARN_RULES = ("g", "h")
 
 
@@ -646,6 +652,8 @@ def findings(project: Path, inv: dict | None = None, review: list | None = None)
     inv = inv or inventory(project, write=False)
     c = _Ctx(project)
     out: list[dict] = []
+    from . import figuretext
+    strict = figuretext.since_1270_project(project)
     for d in inv["displays"].values():
         notes = d.get("notes", "")
         title = d.get("title", "")
@@ -699,7 +707,7 @@ def findings(project: Path, inv: dict | None = None, review: list | None = None)
                     out.append(_f(d, role, text, "e", "a time axis names its unit and origin: "
                                   "'Time since diagnosis, months'"))
                     continue
-            if role not in PROSE or role == "title" or text == title:
+            if role not in PROSE or role in TITLE_ROLES or text == title:
                 for m in c.letter.finditer(text):
                     lab = m.group(0)
                     if not re.search(rf"{re.escape(lab)}\s*(?::|=|\(|,|-|\u2013|was\b|were\b|is\b|"
@@ -721,6 +729,7 @@ def findings(project: Path, inv: dict | None = None, review: list | None = None)
             out.append(_f(d, "column header", f"{d['ncols'] - 1} data columns", "h",
                           "split the table or move detail columns to a supplementary table"))
         out += _cell_findings(d, c)
+        out += figuretext.findings(project, d, strict)  # 1.27.0: rules i, j, k
     seen, uniq = set(), []
     for f in out:
         key = (f["display"], f["role"], f["text"])
@@ -800,7 +809,10 @@ def _rule_words(rule: str) -> str:
             "e": "unit or measure missing",
             "f": "a label not defined in this display",
             "g": "a technical term that needs a plain explanation",
-            "h": "too many columns for a main table"}.get(rule, rule)
+            "h": "too many columns for a main table",
+            "i": "a title, subtitle or note inside the image (the legend carries it)",
+            "j": "explanatory or too much text inside the figure",
+            "k": "AI phrasing, spin or data-handling wording"}.get(rule, rule)
 
 
 def apply_reply(project: Path) -> list[str]:

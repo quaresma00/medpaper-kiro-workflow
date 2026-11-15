@@ -14,7 +14,7 @@
 
 [meta]
 name = "medpaper"
-version = "1.26.1"
+version = "1.27.0"
 schema = 1
 description = "Medical/clinical research pipeline: idea -> feasibility -> data -> analysis -> artifacts -> manuscript -> submission package."
 
@@ -50,7 +50,7 @@ invariants = [
   "`project/...` in a stage card is a logical alias for the paper folder printed by `wf status`. Run paper-authored Python/R with `wf run-script <paper-relative script>`; inside it derive the root from MEDPAPER_PROJECT or wfcore.paths.project_dir(), never from Path('project') or a literal project/ output. Standalone engine tools resolve the working-directory paper automatically.",
   "The paper is the folder the user opened as the Kiro workspace (`wf init` there, in place; an existing paper there is resumed); never create a subfolder for it, never ask the user to reopen another folder, never invent another location and never work in the data folder or its parent. Commands act only on that paper: never read, list, search or copy another paper, the central papers root or an archive (the paper-guard hook blocks it). The user's datasets are used in place, read-only (`wf data add <path>`), and are never copied. The engine is never a paper: nothing resolves a paper inside it, no writer accepts an output inside it, `wf run-script` fails if a paper script touches it, and `wf doctor` reports any paper artifact found there as BROKEN.",
   "Figures are verified by looking at the rendered PNG, not by reading the plotting code. Deterministic QC (tools/figures/qc.py) runs every round in both modes and blocks at S11. The visual pass obeys visual_review_mode: inline = look at S10/S11; deferred = record DEFER there and discharge the entire backlog in ONE consolidated pass at S23 via the contact sheet, on final renders with the journal known. Deferring batches the look, it never cancels it - visual_debts_cleared is non-overridable, so no package ships unlooked-at. Never claim a visual check you did not perform.",
-  "No explanatory prose inside figure panels. Explanation belongs in the figure legend.",
+  "No explanatory prose inside figure panels. Explanation belongs in the figure legend. 1.27.0: no figure title, subtitle or caption line inside the image (the legend carries the title), panel headings of at most 6 words, free text only as data labels or short labels; every string inside a table or figure follows the prose rules (clinical register, no AI or defensive phrasing, no data-processing words).",
   "Do not draft or insert an AI-use disclosure unless the user explicitly requests that exact content; record journal requirements only as a user-controlled compliance item.",
   "Never upload patient-level, private or credential data to an external skill, plugin or service without explicit authorization.",
   "The S23 package is not final until S24 has run the independent audit from reader, editor and journal-compliance perspectives, re-audited every change it caused, recorded the user's explicit confirmation of exactly the package the auditor last read, and frozen those files (1.26.0; S25 then verifies the freeze and the final checks without a second reading - a freeze taken in the earlier order keeps the S25 audit). Any post-confirmation change returns to S24.",
@@ -568,6 +568,13 @@ kinds = ["table"]
 include = ["display_text"]
 severity = "warn"
 since = "1.12.0"
+
+# 1.27.0: the words inside the tables - no AI phrasing or spin (blocks on 1.27.0+ papers; pinned papers: warning).
+[[stage.gate]]
+check = "display_wording_clean"
+kinds = ["table"]
+since = "1.27.0"
+
 [[stage]]
 id = "S11_figures"
 title = "Render figures + deterministic QC + visual verification loop"
@@ -624,6 +631,13 @@ kinds = ["figure"]
 include = ["display_text"]
 severity = "warn"
 since = "1.12.0"
+
+# 1.27.0: the words inside the figures - no title/subtitle/caption in the image, short panel headings, no explanatory text; no AI phrasing or spin (blocks on 1.27.0+ papers; pinned papers: warning).
+[[stage.gate]]
+check = "display_wording_clean"
+kinds = ["figure"]
+since = "1.27.0"
+
 [[stage]]
 id = "S09_results"
 title = "Write Results from the final tables and figures"

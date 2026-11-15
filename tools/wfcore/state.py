@@ -179,8 +179,25 @@ class State:
             self._note_v1250(old_version, pipeline_version)
             self._note_v1251(old_version, pipeline_version)
             self._note_v1260(old_version, pipeline_version)
+            self._note_v1270(old_version, pipeline_version)
             self.save()
         return changed
+
+    def _note_v1270(self, old_version: str, new_version: str) -> None:
+        """1.27.0: one event; no file or stage is touched."""
+        if (version_tuple(old_version) >= (1, 27, 0) or version_tuple(new_version) < (1, 27, 0)
+                or self.data.get("v1270_migration_noted")):
+            return
+        self.data["v1270_migration_noted"] = True
+        self.event("requirements_changed",
+                   "1.27.0: applies now as warnings - figures carry no title, subtitle or caption "
+                   "line inside the image (the legend carries the title), panel headings of at "
+                   "most 6 words, no explanatory sentence and only short labels or data labels as "
+                   "free text; every table and figure string is checked for AI phrasing, spin and "
+                   "data-processing wording (`wf displays text`, display_wording_clean at S10/S11, "
+                   "display_text_resolved at S09/S12/S23). After `wf migrate --yes` (stages not "
+                   "yet completed) these block. Figures rendered before 1.27.0 are classified "
+                   "exactly after their next render. Paper files were not modified.")
 
     def _note_v1260(self, old_version: str, new_version: str) -> None:
         """1.26.0: one event; no file or stage is touched."""

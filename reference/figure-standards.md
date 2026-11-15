@@ -221,6 +221,25 @@ is >= the journal minimum (default 8 pt) at final print size. Flow diagrams are 
 boxes, counts in analysis units, arrows - no axis titles. Never use the literal down-arrow
 character as shorthand.
 
+**1.27.0 - little text, no titles inside the image** (gate `display_wording_clean` at S11;
+`display_text_resolved` at S09/S12/S23; rules i, j, k of `tools/wfcore/figuretext.py`):
+
+- No figure title, no subtitle and no caption/note line inside the image: no `labs(title=,
+  subtitle=, caption=)` on a single plot or `plot_annotation(title/subtitle/caption)`, no
+  `fig.suptitle()`, no axes title in a single-panel figure. The legend carries the title.
+  Only a journal that asks for titles in the image (`in_figure_title = true`) changes this.
+- A multi-panel figure may give each panel a heading of at most 6 words (`labs(title = ...)` on
+  a patchwork component, `sf.suptitle()` in Python): a label such as 'Overall survival' or
+  'FAERS', never a sentence. Panel letters stay separate (`tag_levels`).
+- Free text inside a panel is a data label ('HR 0.82 (95% CI 0.70-0.96)', 'n = 120',
+  'P < 0.001', '*') or a label of at most 4 words ('Favours treatment'); forest-plot table text
+  at most 8 words per cell. Never a sentence: 'Dashed line indicates the null value', 'Adjusted
+  for age and sex', 'Each dot is one patient' belong in the legend.
+- Advisory: axis titles over 10 words, legend keys over 8, strips and legend titles over 6,
+  flow boxes over 20, and more than 30 words of free text in one figure.
+- The prose rules apply to every string in the image: clinical labels, no AI or defensive
+  phrasing, no data-processing words (same lists as the medical editor).
+
 Test: delete the text. If it is still needed to decode an axis, group or symbol, retain it
 locally. Otherwise route methods detail to Methods, findings to Results and interpretation
 to Discussion; do not move every removed panel sentence into the legend.

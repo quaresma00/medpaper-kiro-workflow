@@ -96,6 +96,8 @@ def first_reader_displays(ctx: Ctx) -> Result:
                 if f["kind"] not in kinds or (f["rule"] == "e" and f["role"] == "row label"
                                               and f["display"] in done):
                     continue
+                if f["rule"] in ("i", "j", "k"):  # 1.27.0: display_wording_clean reports them
+                    continue
                 problems.append(displaytext.line(f))
     if "non_redundancy" in include:  # F2 re-checked whenever the plan changed, same line
         just = display_items_justified(ctx)

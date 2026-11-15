@@ -161,6 +161,10 @@ without the main text? Are the numbers in the abstract, the Results prose, the t
 the figures the same numbers? Any obvious error - a wrong unit, a broken cross-reference, a
 sentence that contradicts an earlier one, a leftover placeholder - list it, however small.
 Low-level errors are the ones that embarrass an author most, and they are cheap to catch.
+1.27.0: a title, subtitle or note line inside a figure image, an explanatory sentence in a
+panel, or text that crowds a plot is a finding (the legend carries the title and the
+explanation); so is AI or defensive phrasing, or a description of data handling, in a table
+title, header, footnote, legend or figure label.
 
 ## Reporting
 

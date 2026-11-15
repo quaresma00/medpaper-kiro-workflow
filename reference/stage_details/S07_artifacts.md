@@ -124,6 +124,11 @@ first keep panels from filling up with explanatory text later.
    a short abbreviations clause when needed. Target 40-140 words and never exceed the
    configured 180-word ceiling. Describe what is drawn and how to decode it; do not state
    which group was higher or lower, repeat effect estimates, or retell the Results.
+   1.27.0: plan the legend and the image together - the legend's title line is the figure's
+   only title (the image has no title, subtitle or note line), and every explanation a plot
+   would otherwise carry as text (what a line, colour, symbol or band means, the adjustment
+   set, the population of each panel) is one legend sentence; the image keeps labels and data
+   labels only.
    Do not repeat cohort acquisition, complete model specification, software versions,
    interpretation, numerical Results or generic caveats already stated elsewhere. The file
    contains exactly one `# Figure legends` section heading and exactly one heading for each

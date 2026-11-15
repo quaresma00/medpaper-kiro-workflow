@@ -486,7 +486,7 @@ scale_fill_medpaper <- function(name = "okabe_ito", ...) scale_fill_manual(value
        glyph_warnings = I(glyphs), tick_label_collisions = collisions, interior_voids = voids,
        elements = elements,
        figure_text = I(sort(unique(trimws(vapply(labels, function(l) l$text, ""))))),
-       text_roles = .mf_text_roles(labels, legend))
+       text_roles = .mf_text_roles(labels, legend), text_roles_version = 2L)
 }
 
 # 1.20.0 (V2): every visible string with its role, read from the grob path of the drawn tree.
@@ -499,7 +499,12 @@ scale_fill_medpaper <- function(name = "okabe_ito", ...) scale_fill_manual(value
   if (grepl("(^|::)axis-[tb]", g)) return(c("tick label", "x"))
   if (grepl("(^|::)axis-[lr]", g)) return(c("tick label", "y"))
   if (grepl("(^|::)strip-", g)) return(c("strip", ""))
-  if (grepl("(^|::)(title|subtitle)[.-]", g)) return(c("title", ""))
+  # 1.27.0: a whole-figure title (gtable cell "title"), a panel heading of a patchwork
+  # component ("title-<k>"), a subtitle and a caption line are told apart (text_roles_version 2).
+  if (grepl("(^|::)subtitle(-[0-9]+)?[.]", g)) return(c("subtitle", ""))
+  if (grepl("(^|::)caption(-[0-9]+)?[.]", g)) return(c("caption", ""))
+  if (grepl("(^|::)title-[0-9]+[.]", g)) return(c("panel title", ""))
+  if (grepl("(^|::)title[.]", g)) return(c("title", ""))
   if (grepl("(^|::)tag[.-]", g)) return(c("panel label", ""))
   c("annotation", "")
 }
@@ -1174,7 +1179,7 @@ save_medpaper <- function(plot, stem, width = "single", height_mm = NULL, dpi = 
   keys <- c("figure", "archetype", "engine", "n_axes", "min_font_pt", "max_font_pt", "min_line_pt",
             "text_clipped_at_edge", "axes_tightbbox_overlaps", "glyph_warnings",
             "tick_label_collisions", "interior_voids", "elements", "figure_text", "text_roles",
-            "axis_scales",
+            "text_roles_version", "axis_scales",
             "script", "script_sha256", "source_hashes", "render_hashes", "population",
             "presentation")
   .mf_write_json(audit[keys], sidecar)
@@ -1188,6 +1193,10 @@ save_medpaper <- function(plot, stem, width = "single", height_mm = NULL, dpi = 
   if (length(audit$text_clipped_at_edge)) cat("  ! ", length(audit$text_clipped_at_edge), " text element(s) clipped at the figure edge\n", sep = "")
   if (length(audit$glyph_warnings)) cat("  ! ", length(audit$glyph_warnings), " missing-glyph warning(s)\n", sep = "")
   if (length(audit$tick_label_collisions)) cat("  ! ", length(audit$tick_label_collisions), " tick-label collision(s)\n", sep = "")
+  # 1.27.0: the legend carries the title and every explanation; say so at render time.
+  heads <- Filter(function(t) t$role %in% c("title", "subtitle", "caption"), audit$text_roles)
+  if (length(heads)) cat("  ! in-figure ", paste(unique(vapply(heads, function(t) t$role, "")), collapse = "/"),
+                         " '", substr(heads[[1]]$text, 1, 60), "' - delete it from the plot; the legend carries the title and the explanation\n", sep = "")
   invisible(list(png = png, tiff = tif, width_class = width, size_mm = c(w_mm, h_mm), dpi = dpi,
                  pixels = px, artist_audit = sidecar, engine = "R", margins_px = measured))
 }

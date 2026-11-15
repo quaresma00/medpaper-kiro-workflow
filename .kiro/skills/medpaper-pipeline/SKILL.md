@@ -3,7 +3,7 @@ name: medpaper-pipeline
 description: Drives a gated, resumable medical/clinical research paper pipeline from a research idea through feasibility, data acquisition, exploratory analysis, figure and table production, IMRAD writing, independent review, journal selection, de-AI polish and a Word submission package. Use whenever the task involves a medical research idea, a clinical manuscript, a research protocol, literature retrieval via PubMed, publication-grade figures or three-line tables, journal selection, a submission package, or a revision round on any of these. Do not follow the workflow from memory - run `python tools/wf.py status` and obey the stage card it prints.
 compatibility: Requires Python 3.11+ for the driver. Tables and Word output additionally need numpy, pandas, openpyxl and python-docx (matplotlib for the Python figure path). R 4.3+ with the packages in reference/language_policy.toml (figures default to R). Network access is required for PubMed, Crossref and Unpaywall. Set NCBI_API_KEY to raise the E-utilities rate limit.
 metadata:
-  version: "2.10.0"
+  version: "2.11.0"
   stages: "25"
   entrypoint: "python tools/wf.py status"
 ---
@@ -36,8 +36,8 @@ Reports the user wants outside the paper: `wf config --user report_dirs add <dir
 
 ## Execution economy (1.12.0)
 
-- **Context for a new session or delegated step: `wf handoff`** (<= 60 lines: stage, card,
-  gates, open rounds, questions, next command). Pass its output instead of a hand-written brief.
+- **Context for a new session or delegated step: `wf handoff`** (stage, card, gates, open
+  rounds, questions, next command), not a hand-written brief.
 - Long commands: `--wait` (one blocking call, heartbeat <= 30 s, failures + one summary line)
   for `wf check`, `rework.py check`, `reproduce.py run`, `build_docx.py`; `wf check --summary`
   for one line. Logs live in `.wf/logs/` (or `temp/logs/`), never in external temp folders.
@@ -45,14 +45,13 @@ Reports the user wants outside the paper: `wf config --user report_dirs add <dir
   analysis edits into one plan and reproduce once per round (affected scripts only; `REUSED`
   when nothing changed; notes, docs and manuscript edits never invalidate it). Never run it
   "to be safe" - `wf check` names the cheapest next command. Never copy the user's data.
-- Cards are short; read `reference/stage_details/` only when needed; `wf archetype <name>`
-  prints one archetype.
+- Cards are short; read `reference/stage_details/` only when needed (`wf archetype <name>`).
 - Prefer a cheaper model for mechanical steps.
 - Browser (1.21.0; only if a browser tool `playwright` is in your tool list): APIs first
   (PubMed/E-utilities, open-access APIs; DOAJ/OpenAlex/NLM via `wf journal lookup`). Full
   text, lawful routes only (1.23.0): `fulltext.py fetch` cascade -> publisher page in the
   visible browser with the user's own login (only the listed papers) -> for what is still
-  missing, ask the user for the PDF once (`fulltext.py remaining`: drop folder, e-mail drafts). Never
+  missing, ask the user for the PDF once (`fulltext.py remaining`). Never
   `browser_snapshot` without `filename` on long pages; prefer `browser_evaluate` on `main`;
   never read capture files into the chat - ingest them (`wf guidelines ingest`, `wf portal
   ingest`, `wf data capture`), then read only the needed line ranges of
@@ -84,7 +83,7 @@ manuscript instead of the subagent. If context runs out, say so.
 - A workflow the user started anyway: a scope change -> `update_workflow` replace_remaining;
   on abort one line (delivered / skipped); answer a paused step's question when derivable.
 - Before asking the user anything: `wf decisions show`; record answers with `wf decisions set`.
-- 1.26.0: S24 round 1 is the full package audit, every change is re-audited before the one
+- 1.26.0: S24 round 1 is the full package audit, changes are re-audited before the one
   confirmation, S25 starts no reviewer; `wf report` shows the run record.
 
 ## Python and R
@@ -106,7 +105,8 @@ keeps its pinned gate set for completed stages until `wf migrate --yes`.
 4. Draft sections only at their stages; S17 assembles.
 5. Figures are verified by looking at the rendered PNG; `DEFER`/deferred means "not looked
    at yet"; `visual_debts_cleared` (S23) is non-overridable.
-6. No explanatory prose in panels; legends never restate Results; clinical labels only.
+6. No title, subtitle or explanatory text inside figures (1.27.0); legends never restate
+   Results; display text follows the prose rules (clinical labels, no AI phrasing).
 7. Polishing changes wording only (snapshot + diff).
 8. The science freezes at S19; journals adapt the copy in `08_submission/manuscript/`.
 9. Every revision goes through `tools/rework.py` (`preview` first; an S19 return only on 我确认回退).
@@ -117,7 +117,7 @@ keeps its pinned gate set for completed stages until `wf migrate --yes`.
 
 Never use a skill in place of a stage (`write-paper`, `orchestrate`, `make-figures` ...);
 complementary ones (`check-reporting`, `deidentify` ...) may help inside a stage.
-Classification: `reference/skill_policy.toml` (`python tools/hooks/skill_guard.py --audit`).
+Classification: `reference/skill_policy.toml` (`tools/hooks/skill_guard.py --audit`).
 
 ## Handoff
 

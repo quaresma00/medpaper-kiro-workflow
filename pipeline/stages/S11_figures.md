@@ -23,6 +23,12 @@ Details (R/Python templates, skill arbitration, QC list, manifest JSON): `refere
    scale', 'Time since diagnosis, months'); never value/variable/estimate/group as a title,
    'grp: A' strips, code names or scientific notation; legends define abbreviations and
    explain technical terms in plain words.
+   1.27.0 - little text: no figure title, subtitle or caption line in the image (no
+   labs(title/subtitle/caption) on a single plot or plot_annotation, no fig.suptitle; the legend
+   carries the title); a multi-panel figure may head each panel with <= 6 words; free text is a
+   data label or <= 4 words, never a sentence ('Dashed line indicates ...', 'Adjusted for ...'
+   go into the legend). The prose rules hold for every string: no AI or defensive phrasing, no
+   data-processing words (gate `display_wording_clean`; `wf displays text` lists the strings).
 ```
 .\.venv\Scripts\python.exe tools/wf.py run-script 05_figures/code/fig1_km.R
 .\.venv\Scripts\python.exe tools/figures/qc.py --all

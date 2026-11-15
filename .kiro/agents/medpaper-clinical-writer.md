@@ -80,6 +80,11 @@ their names are the programmer's vocabulary, not the reader's.
   term such as IPTW or ROR explained, what 'Model 2' adjusts for). Use the clinical labels
   already listed; standard formats n (%), median (IQR), OR/HR (95% CI), P value. Never change
   a number. Write only the table the manifest names to `.wf/writer/display_wording.md`.
+  1.27.0: inside a figure there is no title, subtitle or note line and no sentence. A label
+  is a few words (a panel heading at most 6, free text at most 4); when an item explains
+  something (a line, a colour, the adjustment set), give the short label in "Clinical wording"
+  and the explanation as one legend sentence. Every display string follows the voice of the
+  prose: no stock AI phrases, no defensive wording, no description of data handling.
 - Continuous paragraphs, no bullet lists, no review/round/re-run history in the text.
 - An analysis the material calls post hoc or additional is written as exploratory ("In an
   exploratory analysis, ..."), never as confirmatory; do not narrate plan changes.

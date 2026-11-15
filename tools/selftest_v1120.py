@@ -336,6 +336,8 @@ def run_b(tmp: Path, record, section) -> None:
         "prespecified_outcomes_reported", "limitations_present", "primary_first"}) + 1
     # 1.26.0 adds the package audit readiness line at S24 and S25.
     new_1140 += sum(1 for v in names.values() for c in v if c == "package_audit_ready")
+    # 1.27.0 adds the display wording line at S10 and S11.
+    new_1140 += sum(1 for v in names.values() for c in v if c == "display_wording_clean")
     record("B4 duplicate gate lines merged (confirmation inside review_round_approved; SI clean "
            "inside docx_bundle_ready; limits/reference count as checklist rows); fewer gate "
            f"entries than 1.11.0 (287 -> {total - new_1140} + {new_1140} new in 1.14.0)",

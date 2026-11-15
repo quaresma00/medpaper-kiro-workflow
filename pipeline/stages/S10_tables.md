@@ -23,6 +23,10 @@ and `reference/table-standards.md`.
    (estimate, Std. Error, z value, AIC) in main tables; no code names (sexM, p.value),
    TRUE/FALSE or scientific notation; footnotes spell out abbreviations and explain technical
    terms (IPTW, SMD) in plain words. `wf displays text` lists what still reads like a report.
+   1.27.0 - titles, headers, row labels and footnotes follow the prose rules (no AI or
+   defensive phrasing, no data-processing words; gate `display_wording_clean`). Footnote
+   sentences come from `04_tables/table_captions.md`, which the medical editor polished; a new
+   sentence goes there first (`writer_bundle.py edit --section table_captions`).
 3. Write `04_tables/manifest.json`, then run and check:
 ```
 .\.venv\Scripts\python.exe tools/wf.py run-script 04_tables/code/build_tables.py

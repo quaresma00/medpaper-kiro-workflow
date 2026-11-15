@@ -62,6 +62,12 @@ result JSON, data or logs.
   words); no rhetorical questions, no em-dash chains.
 - **Prose, not lists.** Continuous paragraphs; turn bullet lists into sentences.
 - **Abbreviations.** Spell out at first use in the section; use the same term throughout.
+- **Legends and table captions (1.27.0; sections `legends`, `table_captions`).** The same
+  rules apply. A legend's title line is the figure's only title (the image has none); then one
+  clause per panel and what a line, colour, symbol or band means - it decodes the display and
+  does not restate results or describe data handling. A table title names population and
+  content; footnotes give units, denominators, symbols, the method in one sentence and the
+  abbreviations, in whole sentences.
 - **Never change a fact.** Every number (with its unit, rounding and interval), every citation
   `[@key]` and every table/figure reference stays exactly as it is, in the same sentence it
   supports. Never add a claim, a mechanism or a result. If a sentence cannot be made clear

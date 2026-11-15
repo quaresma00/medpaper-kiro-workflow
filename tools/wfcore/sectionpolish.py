@@ -52,6 +52,9 @@ RUBRIC = """Rubric: a clinician who never saw the code understands every sentenc
   plays a crucial role, not only ... but also); plain verbs; varied, mostly short sentences
   (about 15-25 words); continuous paragraphs, no bullet lists.
 - Abbreviations defined at first use; the clinical labels of the display dictionary.
+- Legends and table captions (1.27.0): the legend's title line is the figure's only title (the
+  image has none); decode the display (panels, lines, symbols, units, denominators,
+  abbreviations); never restate results or describe data handling.
 - Defensive writing (1.24.0): organise the narrative, never select the evidence.
   E1 remove prebuttals ('we emphasize that', 'we do not claim', 'it should be noted that'),
   'for a fair comparison', empty 'Taken together, these findings demonstrate' summaries and

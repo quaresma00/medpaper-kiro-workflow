@@ -106,7 +106,9 @@ Judge, from the first round on, as:
      legends and in-figure text; every abbreviation defined in each footnote/legend; each
      table and figure understandable on its own by a clinician, with no analysis-report text
      (programme names, software-output columns, scientific notation, placeholder axis titles;
-     display_text.md and the display sheet when listed);
+     display_text.md and the display sheet when listed); no title, subtitle, note line or
+     explanatory sentence inside a figure image, and no AI or defensive phrasing in any table or
+     figure text (1.27.0);
   3. a methods and journal reviewer (publication readiness, numbers, claims). When
      decision_record.md is listed (what was pre-specified, what was decided after the data
      were seen), check that no post hoc analysis is presented as confirmatory;
